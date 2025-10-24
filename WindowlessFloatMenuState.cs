@@ -147,11 +147,12 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Close the menu BEFORE executing the action
+            // This allows the action to open a new menu if needed
+            Close();
+
             // Call the Chosen method to execute the option's action
             selectedOption.Chosen(givesColonistOrders, null);
-
-            // Close the menu after execution
-            Close();
         }
     }
 }
