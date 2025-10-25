@@ -73,7 +73,23 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Don't process arrow keys if storage settings menu is active
+            if (StorageSettingsMenuState.IsActive)
+            {
+                return;
+            }
 
+            // Don't process arrow keys if plant selection menu is active
+            if (PlantSelectionMenuState.IsActive)
+            {
+                return;
+            }
+
+            // Don't process arrow keys if range edit submenu is active
+            if (RangeEditMenuState.IsActive)
+            {
+                return;
+            }
 
             // Don't process arrow keys if the work menu is active
             if (WorkMenuState.IsActive)

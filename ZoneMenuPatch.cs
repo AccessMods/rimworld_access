@@ -91,22 +91,47 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Opens the settings/inspect tab for a zone.
+        /// Opens the settings menu for a zone (windowless version).
         /// </summary>
         private static void OpenZoneSettings(Zone zone)
         {
-            // Select the zone - this opens the inspect panel with zone settings
-            Find.Selector.ClearSelection();
-            Find.Selector.Select(zone);
-
-            // Ensure the inspect tab is open
-            if (Find.MainTabsRoot != null)
+            // Check zone type and open appropriate menu
+            if (zone is Zone_Stockpile stockpile)
             {
-                Find.MainTabsRoot.SetCurrentTab(MainButtonDefOf.Inspect, playSound: false);
+                // Open storage settings menu
+                StorageSettings settings = stockpile.GetStoreSettings();
+                if (settings != null)
+                {
+                    StorageSettingsMenuState.Open(settings);
+                    ClipboardHelper.CopyToClipboard($"Storage settings for {zone.label}");
+                    MelonLoader.MelonLogger.Msg($"Opened storage settings for: {zone.label}");
+                }
+                else
+                {
+                    ClipboardHelper.CopyToClipboard($"Cannot access settings for {zone.label}");
+                }
             }
+            else if (zone is Zone_Growing growingZone)
+            {
+                // Open plant selection menu
+                PlantSelectionMenuState.Open(growingZone);
+                ClipboardHelper.CopyToClipboard($"Plant selection for {zone.label}");
+                MelonLoader.MelonLogger.Msg($"Opened plant selection for: {zone.label}");
+            }
+            else
+            {
+                // For other zone types, fall back to inspect panel
+                Find.Selector.ClearSelection();
+                Find.Selector.Select(zone);
 
-            ClipboardHelper.CopyToClipboard($"Opening settings for {zone.label}");
-            MelonLoader.MelonLogger.Msg($"Opened settings for zone: {zone.label}");
+                if (Find.MainTabsRoot != null)
+                {
+                    Find.MainTabsRoot.SetCurrentTab(MainButtonDefOf.Inspect, playSound: false);
+                }
+
+                ClipboardHelper.CopyToClipboard($"Opening settings for {zone.label}");
+                MelonLoader.MelonLogger.Msg($"Opened settings for zone: {zone.label}");
+            }
         }
 
         /// <summary>
