@@ -1,0 +1,237 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Verse;
+using Verse.Profile;
+using RimWorld;
+
+namespace RimWorldAccess
+{
+    /// <summary>
+    /// Manages a windowless pause menu accessible via Escape key.
+    /// Provides keyboard navigation through pause menu options without rendering UI.
+    /// </summary>
+    public static class WindowlessPauseMenuState
+    {
+        private static List<PauseMenuOption> currentOptions = null;
+        private static int selectedIndex = 0;
+        private static bool isActive = false;
+
+        public static bool IsActive => isActive;
+
+        /// <summary>
+        /// Opens the windowless pause menu with appropriate options based on game state.
+        /// </summary>
+        public static void Open()
+        {
+            currentOptions = BuildMenuOptions();
+            selectedIndex = 0;
+            isActive = true;
+
+            // Announce first option
+            AnnounceCurrentOption();
+        }
+
+        /// <summary>
+        /// Closes the pause menu.
+        /// </summary>
+        public static void Close()
+        {
+            currentOptions = null;
+            selectedIndex = 0;
+            isActive = false;
+        }
+
+        /// <summary>
+        /// Moves selection to next option.
+        /// </summary>
+        public static void SelectNext()
+        {
+            if (currentOptions == null || currentOptions.Count == 0)
+                return;
+
+            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+            AnnounceCurrentOption();
+        }
+
+        /// <summary>
+        /// Moves selection to previous option.
+        /// </summary>
+        public static void SelectPrevious()
+        {
+            if (currentOptions == null || currentOptions.Count == 0)
+                return;
+
+            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+            AnnounceCurrentOption();
+        }
+
+        /// <summary>
+        /// Executes the currently selected option.
+        /// </summary>
+        public static void ExecuteSelected()
+        {
+            if (currentOptions == null || currentOptions.Count == 0)
+                return;
+
+            if (selectedIndex < 0 || selectedIndex >= currentOptions.Count)
+                return;
+
+            PauseMenuOption selected = currentOptions[selectedIndex];
+
+            // Close menu before executing (allows action to open new menu)
+            Close();
+
+            // Execute the action
+            selected.Action?.Invoke();
+        }
+
+        private static void AnnounceCurrentOption()
+        {
+            if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
+            {
+                ClipboardHelper.CopyToClipboard(currentOptions[selectedIndex].Label);
+            }
+        }
+
+        /// <summary>
+        /// Builds the list of menu options based on current game state.
+        /// </summary>
+        private static List<PauseMenuOption> BuildMenuOptions()
+        {
+            List<PauseMenuOption> options = new List<PauseMenuOption>();
+
+            // Only show these options if actually in-game
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                bool anyGameFiles = GenFilePaths.AllSavedGameFiles.Any();
+                bool isPermadeath = Current.Game.Info.permadeathMode;
+                bool canSave = !GameDataSaveLoader.SavingIsTemporarilyDisabled;
+
+                // Save option (not in permadeath)
+                if (!isPermadeath && canSave)
+                {
+                    options.Add(new PauseMenuOption(
+                        "Save".Translate(),
+                        () => WindowlessSaveMenuState.Open(SaveLoadMode.Save)
+                    ));
+                }
+
+                // Load option (not in permadeath)
+                if (!isPermadeath && anyGameFiles)
+                {
+                    options.Add(new PauseMenuOption(
+                        "LoadGame".Translate(),
+                        () => WindowlessSaveMenuState.Open(SaveLoadMode.Load)
+                    ));
+                }
+
+                // Review Scenario
+                options.Add(new PauseMenuOption(
+                    "ReviewScenario".Translate(),
+                    () => {
+                        string scenarioText = Find.Scenario.name + ": " + Find.Scenario.GetFullInformationText();
+                        ClipboardHelper.CopyToClipboard(scenarioText);
+                    }
+                ));
+
+                // Options
+                options.Add(new PauseMenuOption(
+                    "Options".Translate(),
+                    () => WindowlessOptionsMenuState.Open()
+                ));
+
+                // Quit options for permadeath mode
+                if (isPermadeath && canSave)
+                {
+                    options.Add(new PauseMenuOption(
+                        "SaveAndQuitToMainMenu".Translate(),
+                        () => {
+                            LongEventHandler.QueueLongEvent(delegate {
+                                GameDataSaveLoader.SaveGame(Current.Game.Info.permadeathModeUniqueName);
+                                MemoryUtility.ClearAllMapsAndWorld();
+                            }, "Entry", "SavingLongEvent", doAsynchronously: false, null, showExtraUIInfo: false);
+                        }
+                    ));
+
+                    options.Add(new PauseMenuOption(
+                        "SaveAndQuitToOS".Translate(),
+                        () => {
+                            LongEventHandler.QueueLongEvent(delegate {
+                                GameDataSaveLoader.SaveGame(Current.Game.Info.permadeathModeUniqueName);
+                                LongEventHandler.ExecuteWhenFinished(Root.Shutdown);
+                            }, "SavingLongEvent", doAsynchronously: false, null, showExtraUIInfo: false);
+                        }
+                    ));
+                }
+                else
+                {
+                    // Regular quit options
+                    options.Add(new PauseMenuOption(
+                        "QuitToMainMenu".Translate(),
+                        () => {
+                            if (GameDataSaveLoader.CurrentGameStateIsValuable)
+                            {
+                                // Show confirmation
+                                ClipboardHelper.CopyToClipboard("Confirm quit to main menu? Press Enter to confirm, Escape to cancel");
+                                WindowlessConfirmationState.Open(
+                                    "ConfirmQuit".Translate(),
+                                    GenScene.GoToMainMenu
+                                );
+                            }
+                            else
+                            {
+                                GenScene.GoToMainMenu();
+                            }
+                        }
+                    ));
+
+                    options.Add(new PauseMenuOption(
+                        "QuitToOS".Translate(),
+                        () => {
+                            if (GameDataSaveLoader.CurrentGameStateIsValuable)
+                            {
+                                // Show confirmation
+                                ClipboardHelper.CopyToClipboard("Confirm quit to desktop? Press Enter to confirm, Escape to cancel");
+                                WindowlessConfirmationState.Open(
+                                    "ConfirmQuit".Translate(),
+                                    Root.Shutdown
+                                );
+                            }
+                            else
+                            {
+                                Root.Shutdown();
+                            }
+                        }
+                    ));
+                }
+
+                // Resume game (close menu)
+                options.Add(new PauseMenuOption(
+                    "ResumeGame".Translate(),
+                    () => {
+                        // Just close the menu
+                        ClipboardHelper.CopyToClipboard("Resumed game");
+                    }
+                ));
+            }
+
+            return options;
+        }
+
+        /// <summary>
+        /// Simple data structure for pause menu options.
+        /// </summary>
+        private class PauseMenuOption
+        {
+            public string Label { get; }
+            public Action Action { get; }
+
+            public PauseMenuOption(string label, Action action)
+            {
+                Label = label;
+                Action = action;
+            }
+        }
+    }
+}
