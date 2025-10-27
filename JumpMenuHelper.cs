@@ -66,7 +66,8 @@ namespace RimWorldAccess
                 new JumpMenuCategory("Buildings"),
                 new JumpMenuCategory("Trees"),
                 new JumpMenuCategory("Plants"),
-                new JumpMenuCategory("Items")
+                new JumpMenuCategory("Items"),
+                new JumpMenuCategory("Forbidden Items")
             };
 
             // Get all things on the map
@@ -215,12 +216,21 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Categorizes a general item into the Items category.
+        /// Categorizes a general item into the Items or Forbidden Items category.
         /// Items like weapons, resources, food, etc.
         /// </summary>
         private static void CategorizeItem(Thing thing, JumpMenuItem item, List<JumpMenuCategory> categories)
         {
-            categories.First(c => c.Name == "Items").Items.Add(item);
+            // Check if the item is forbidden
+            CompForbiddable forbiddable = thing.TryGetComp<CompForbiddable>();
+            if (forbiddable != null && forbiddable.Forbidden)
+            {
+                categories.First(c => c.Name == "Forbidden Items").Items.Add(item);
+            }
+            else
+            {
+                categories.First(c => c.Name == "Items").Items.Add(item);
+            }
         }
     }
 }
