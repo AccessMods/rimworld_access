@@ -35,12 +35,48 @@
   <Target Name="CopyModAfterBuild" AfterTargets="Build">
     <!-- Display a message in the build output -->
     <Message Text="--- Copying $(ProjectName).dll to game folder ---" Importance="high" />
-    
+
     <!-- Perform the copy operation -->
     <Copy
       SourceFiles="$(TargetPath)"
       DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\"
     />
+  </Target>
+
+  <Target Name="Release" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <!-- Display release build message -->
+    <Message Text="--- Creating Release Package ---" Importance="high" />
+
+    <!-- Define release folder path -->
+    <PropertyGroup>
+      <ReleaseFolderPath>$(ProjectDir)release\</ReleaseFolderPath>
+    </PropertyGroup>
+
+    <!-- Create release folder if it doesn't exist -->
+    <MakeDir Directories="$(ReleaseFolderPath)" />
+
+    <!-- Copy DLL to game folder -->
+    <Message Text="--- Copying DLL to game folder ---" Importance="high" />
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\"
+    />
+
+    <!-- Copy DLL to release folder -->
+    <Message Text="--- Copying DLL to release folder ---" Importance="high" />
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="$(ReleaseFolderPath)"
+    />
+
+    <!-- Copy readme.txt to release folder -->
+    <Message Text="--- Copying readme.txt to release folder ---" Importance="high" />
+    <Copy
+      SourceFiles="$(ProjectDir)readme.txt"
+      DestinationFolder="$(ReleaseFolderPath)"
+    />
+
+    <Message Text="--- Release package created at $(ReleaseFolderPath) ---" Importance="high" />
   </Target>
 
 </Project>
