@@ -35,44 +35,101 @@ namespace RimWorldAccess
                 {
                     KeyCode keyCode = Event.current.keyCode;
 
-                    if (keyCode == KeyCode.UpArrow)
+                    // Check if we're in seed text input mode
+                    if (WorldParamsNavigationState.IsEditingSeed)
                     {
-                        WorldParamsNavigationState.NavigateUp();
-                        CopyCurrentFieldValue(__instance);
-                        Event.current.Use();
-                        patchActive = true;
-                    }
-                    else if (keyCode == KeyCode.DownArrow)
-                    {
-                        WorldParamsNavigationState.NavigateDown();
-                        CopyCurrentFieldValue(__instance);
-                        Event.current.Use();
-                        patchActive = true;
-                    }
-                    else if (keyCode == KeyCode.LeftArrow)
-                    {
-                        ModifyCurrentField(__instance, -1);
-                        CopyCurrentFieldValue(__instance);
-                        Event.current.Use();
-                        patchActive = true;
-                    }
-                    else if (keyCode == KeyCode.RightArrow)
-                    {
-                        ModifyCurrentField(__instance, 1);
-                        CopyCurrentFieldValue(__instance);
-                        Event.current.Use();
-                        patchActive = true;
-                    }
-                    else if (keyCode == KeyCode.R)
-                    {
-                        // Randomize seed
-                        if (WorldParamsNavigationState.GetCurrentFieldName() == "Seed")
+                        // Handle text input for seed
+                        if (keyCode == KeyCode.Return || keyCode == KeyCode.KeypadEnter)
                         {
-                            string newSeed = GenText.RandomSeedString();
-                            AccessTools.Field(typeof(Page_CreateWorldParams), "seedString").SetValue(__instance, newSeed);
-                            ClipboardHelper.CopyToClipboard($"World Seed: {newSeed} (Randomized)");
+                            // Confirm seed input
+                            string newSeed = WorldParamsNavigationState.ConfirmSeedEdit();
+                            if (!string.IsNullOrEmpty(newSeed))
+                            {
+                                AccessTools.Field(typeof(Page_CreateWorldParams), "seedString").SetValue(__instance, newSeed);
+                                ClipboardHelper.CopyToClipboard($"World Seed: {newSeed} (Confirmed)");
+                            }
+                            else
+                            {
+                                ClipboardHelper.CopyToClipboard("Seed input canceled (empty)");
+                            }
                             Event.current.Use();
                             patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Escape)
+                        {
+                            // Cancel seed input
+                            WorldParamsNavigationState.CancelSeedEdit();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Backspace)
+                        {
+                            // Remove character
+                            WorldParamsNavigationState.RemoveCharFromSeedBuffer();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (Event.current.character != '\0' && !char.IsControl(Event.current.character))
+                        {
+                            // Add character to buffer
+                            WorldParamsNavigationState.AddCharToSeedBuffer(Event.current.character);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                    }
+                    else
+                    {
+                        // Normal navigation mode
+                        if (keyCode == KeyCode.UpArrow)
+                        {
+                            WorldParamsNavigationState.NavigateUp();
+                            CopyCurrentFieldValue(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.DownArrow)
+                        {
+                            WorldParamsNavigationState.NavigateDown();
+                            CopyCurrentFieldValue(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.LeftArrow)
+                        {
+                            ModifyCurrentField(__instance, -1);
+                            CopyCurrentFieldValue(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.RightArrow)
+                        {
+                            ModifyCurrentField(__instance, 1);
+                            CopyCurrentFieldValue(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Return || keyCode == KeyCode.KeypadEnter)
+                        {
+                            // Enter key on Seed field starts text input mode
+                            if (WorldParamsNavigationState.GetCurrentFieldName() == "Seed")
+                            {
+                                string currentSeed = (string)AccessTools.Field(typeof(Page_CreateWorldParams), "seedString").GetValue(__instance);
+                                WorldParamsNavigationState.StartSeedEdit(currentSeed);
+                                Event.current.Use();
+                                patchActive = true;
+                            }
+                        }
+                        else if (keyCode == KeyCode.R)
+                        {
+                            // Randomize seed
+                            if (WorldParamsNavigationState.GetCurrentFieldName() == "Seed")
+                            {
+                                string newSeed = GenText.RandomSeedString();
+                                AccessTools.Field(typeof(Page_CreateWorldParams), "seedString").SetValue(__instance, newSeed);
+                                ClipboardHelper.CopyToClipboard($"World Seed: {newSeed} (Randomized)");
+                                Event.current.Use();
+                                patchActive = true;
+                            }
                         }
                     }
                 }
@@ -90,8 +147,8 @@ namespace RimWorldAccess
             switch (fieldName)
             {
                 case "Seed":
-                    // Can't modify seed with arrows, use R to randomize
-                    ClipboardHelper.CopyToClipboard("Press R to randomize seed");
+                    // Can't modify seed with arrows, use R to randomize or Enter to type
+                    ClipboardHelper.CopyToClipboard("Press Enter to type custom seed, or R to randomize");
                     break;
 
                 case "PlanetCoverage":
@@ -225,8 +282,17 @@ namespace RimWorldAccess
 
                 // Draw indicator of current field at top
                 Rect indicatorRect = new Rect(rect.x + 10f, rect.y + 10f, 400f, 30f);
-                string fieldName = WorldParamsNavigationState.GetCurrentFieldName();
-                string text = $"[Editing: {fieldName}] (Use Arrow Keys)";
+                string text;
+
+                if (WorldParamsNavigationState.IsEditingSeed)
+                {
+                    text = $"[Typing Seed: {WorldParamsNavigationState.SeedInputBuffer}] (Enter=Confirm, Esc=Cancel)";
+                }
+                else
+                {
+                    string fieldName = WorldParamsNavigationState.GetCurrentFieldName();
+                    text = $"[Editing: {fieldName}] (Use Arrow Keys)";
+                }
 
                 Widgets.DrawBoxSolid(indicatorRect, new Color(0.2f, 0.2f, 0.2f, 0.8f));
                 Text.Font = GameFont.Small;

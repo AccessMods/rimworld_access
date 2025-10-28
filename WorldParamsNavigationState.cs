@@ -11,6 +11,10 @@ namespace RimWorldAccess
         private static bool initialized = false;
         private static int currentFieldIndex = 0;
 
+        // Text input state for seed editing
+        private static bool isEditingSeed = false;
+        private static string seedInputBuffer = "";
+
         // Field identifiers
         private enum WorldParamField
         {
@@ -154,7 +158,7 @@ namespace RimWorldAccess
             {
                 case WorldParamField.Seed:
                     fieldName = "World Seed";
-                    description = "Random seed for world generation. Use Left/Right to modify.";
+                    description = "Random seed for world generation. Press Enter to type custom seed, or R to randomize.";
                     break;
 
                 case WorldParamField.PlanetCoverage:
@@ -230,5 +234,46 @@ namespace RimWorldAccess
 
         public static int CurrentFieldIndex => currentFieldIndex;
         public static int FieldCount => availableFields.Count;
+
+        // Seed text input methods
+        public static void StartSeedEdit(string currentSeed)
+        {
+            isEditingSeed = true;
+            seedInputBuffer = currentSeed ?? "";
+            ClipboardHelper.CopyToClipboard($"[Editing Seed] Type seed, Enter to confirm, Escape to cancel. Current: {seedInputBuffer}");
+        }
+
+        public static void CancelSeedEdit()
+        {
+            isEditingSeed = false;
+            seedInputBuffer = "";
+            ClipboardHelper.CopyToClipboard("Seed editing canceled");
+        }
+
+        public static string ConfirmSeedEdit()
+        {
+            isEditingSeed = false;
+            string result = seedInputBuffer;
+            seedInputBuffer = "";
+            return result;
+        }
+
+        public static void AddCharToSeedBuffer(char c)
+        {
+            seedInputBuffer += c;
+            ClipboardHelper.CopyToClipboard($"[Editing Seed] {seedInputBuffer}");
+        }
+
+        public static void RemoveCharFromSeedBuffer()
+        {
+            if (seedInputBuffer.Length > 0)
+            {
+                seedInputBuffer = seedInputBuffer.Substring(0, seedInputBuffer.Length - 1);
+                ClipboardHelper.CopyToClipboard($"[Editing Seed] {seedInputBuffer}");
+            }
+        }
+
+        public static bool IsEditingSeed => isEditingSeed;
+        public static string SeedInputBuffer => seedInputBuffer;
     }
 }
