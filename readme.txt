@@ -43,15 +43,33 @@ ZONE SYSTEM (Press Z)
 2. Use Arrow Keys to navigate, space to add/remove cells, enter to confirm, or escape to cancel.
 
 
+SCHEDULE MENU (Press S)
+------------------------
+Manage colonist work schedules across all 24 hours:
+
+Arrow Keys    Navigate grid (Up/Down: pawns, Left/Right: hours)
+Tab           Cycle assignment type and apply to current cell (Anything/Work/Joy/Sleep/Meditate)
+Space         Apply current selection to cell
+Shift+Right   Fill rest of row with selected assignment
+Ctrl+C        Copy current pawn's entire schedule
+Ctrl+V        Paste copied schedule to current pawn
+Enter         Save all pending changes and close
+Escape        Cancel changes and close
+
+Navigation: Use arrows to move through the grid. Current cell shows pawn name, hour, and assignment.
+Changes are marked as "(pending)" until you press Enter to save.
+
+
 COLONIST ACTIONS
 ----------------
 ]             Open order menu (includes draft mode orders like Move, Attack)
 R             Toggle draft mode for selected colonist
 Alt+M         Display mood information and thoughts
-alt + n: display needs.
-alt + h, display health.
-alt + w, open work menu, space can toggle work types on and off, enter confirms.
-alt + g: display gear.
+Alt+N         Display needs
+Alt+H         Display health
+Alt+W         Open work menu (Space toggles work types, Enter confirms)
+Alt+G         Display gear
+S             Open schedule menu (manage colonist timetables)
 
 
 QUICK NAVIGATION (Press J)

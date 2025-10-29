@@ -102,6 +102,12 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Don't process arrow keys if the schedule menu is active
+            if (WindowlessScheduleState.IsActive)
+            {
+                return;
+            }
+
             // Don't process arrow keys if building inspect menu is active
             if (BuildingInspectState.IsActive)
             {

@@ -9,7 +9,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Unified Harmony patch for UIRoot.UIRootOnGUI to handle all keyboard accessibility features.
-    /// Handles: Escape key for pause menu, Enter key for building inspection, ] key for colonist orders, J key for jump menu, Alt+M for mood info, and all windowless menu navigation.
+    /// Handles: Escape key for pause menu, Enter key for building inspection, ] key for colonist orders, J key for jump menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -232,6 +232,80 @@ namespace RimWorldAccess
             // the events before they reach this patch. However, we DO need to continue processing
             // to handle WindowlessFloatMenuState which can be active at the same time as BillsMenuState.
 
+            // ===== PRIORITY 4.55: Handle schedule menu if active =====
+            if (WindowlessScheduleState.IsActive)
+            {
+                bool handled = false;
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+
+                if (key == KeyCode.UpArrow)
+                {
+                    WindowlessScheduleState.MoveUp();
+                    handled = true;
+                }
+                else if (key == KeyCode.DownArrow)
+                {
+                    WindowlessScheduleState.MoveDown();
+                    handled = true;
+                }
+                else if (key == KeyCode.LeftArrow)
+                {
+                    WindowlessScheduleState.MoveLeft();
+                    handled = true;
+                }
+                else if (key == KeyCode.RightArrow)
+                {
+                    if (shift)
+                    {
+                        WindowlessScheduleState.FillRow();
+                    }
+                    else
+                    {
+                        WindowlessScheduleState.MoveRight();
+                    }
+                    handled = true;
+                }
+                else if (key == KeyCode.Tab)
+                {
+                    WindowlessScheduleState.CycleAssignment();
+                    handled = true;
+                }
+                else if (key == KeyCode.Space)
+                {
+                    WindowlessScheduleState.ApplyAssignment();
+                    handled = true;
+                }
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    // Confirm and close
+                    WindowlessScheduleState.Confirm();
+                    handled = true;
+                }
+                else if (key == KeyCode.Escape)
+                {
+                    // Cancel and close
+                    WindowlessScheduleState.Cancel();
+                    handled = true;
+                }
+                else if (ctrl && key == KeyCode.C)
+                {
+                    WindowlessScheduleState.CopySchedule();
+                    handled = true;
+                }
+                else if (ctrl && key == KeyCode.V)
+                {
+                    WindowlessScheduleState.PasteSchedule();
+                    handled = true;
+                }
+
+                if (handled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 4.6: Handle research detail view if active =====
             if (WindowlessResearchDetailState.IsActive)
             {
@@ -444,6 +518,30 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.6: Open windowless schedule menu with S key =====
+            if (key == KeyCode.S)
+            {
+                // Only open schedule if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                // 4. Schedule menu is not already active
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !WindowlessScheduleState.IsActive)
+                {
+                    // Prevent the default S key behavior
+                    Event.current.Use();
+
+                    // Open the windowless schedule menu
+                    WindowlessScheduleState.Open();
+
+                    return;
+                }
+            }
+
             // ===== PRIORITY 7: Open jump menu with J key (if no menu is active and we're in-game) =====
             if (key == KeyCode.J)
             {
@@ -652,6 +750,98 @@ namespace RimWorldAccess
                 // Consume the event
                 Event.current.Use();
             }
+        }
+
+        /// <summary>
+        /// Postfix patch that draws visual overlays for active windowless menus.
+        /// </summary>
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            // Draw schedule menu overlay if active
+            if (WindowlessScheduleState.IsActive)
+            {
+                DrawScheduleMenuOverlay();
+            }
+        }
+
+        /// <summary>
+        /// Draws the visual overlay for the windowless schedule menu.
+        /// </summary>
+        private static void DrawScheduleMenuOverlay()
+        {
+            if (WindowlessScheduleState.Pawns.Count == 0)
+                return;
+
+            if (WindowlessScheduleState.SelectedPawnIndex < 0 ||
+                WindowlessScheduleState.SelectedPawnIndex >= WindowlessScheduleState.Pawns.Count)
+                return;
+
+            Pawn selectedPawn = WindowlessScheduleState.Pawns[WindowlessScheduleState.SelectedPawnIndex];
+            if (selectedPawn?.timetable == null)
+                return;
+
+            int hour = WindowlessScheduleState.SelectedHourIndex;
+            TimeAssignmentDef currentAssignment = selectedPawn.timetable.GetAssignment(hour);
+
+            // Get screen dimensions
+            float screenWidth = UI.screenWidth;
+            float screenHeight = UI.screenHeight;
+
+            // Create overlay rect (top-center of screen)
+            float overlayWidth = 800f;
+            float overlayHeight = 140f;
+            float overlayX = (screenWidth - overlayWidth) / 2f;
+            float overlayY = 20f;
+
+            Rect overlayRect = new Rect(overlayX, overlayY, overlayWidth, overlayHeight);
+
+            // Draw semi-transparent background
+            Color backgroundColor = new Color(0.1f, 0.1f, 0.1f, 0.9f);
+            Widgets.DrawBoxSolid(overlayRect, backgroundColor);
+
+            // Draw border
+            Color borderColor = new Color(0.5f, 0.7f, 1.0f, 1.0f);
+            Widgets.DrawBox(overlayRect, 2);
+
+            // Draw text
+            Text.Font = GameFont.Small;
+            Text.Anchor = TextAnchor.MiddleCenter;
+
+            int pawnNum = WindowlessScheduleState.SelectedPawnIndex + 1;
+            int totalPawns = WindowlessScheduleState.Pawns.Count;
+            string title = $"Schedule Menu - {selectedPawn.LabelShort} ({pawnNum}/{totalPawns}) - Hour {hour}";
+            string currentInfo = $"Current: {currentAssignment.label}";
+            string instructions1 = "Arrows: Navigate | Tab: Change Cell | Space: Apply Selected";
+            string instructions2 = "Shift+Right: Fill Row | Ctrl+C/V: Copy/Paste | Enter: Save | Esc: Cancel";
+
+            Rect titleRect = new Rect(overlayX, overlayY + 10f, overlayWidth, 30f);
+            Rect infoRect = new Rect(overlayX, overlayY + 40f, overlayWidth, 25f);
+            Rect instructions1Rect = new Rect(overlayX, overlayY + 70f, overlayWidth, 25f);
+            Rect instructions2Rect = new Rect(overlayX, overlayY + 100f, overlayWidth, 25f);
+
+            Widgets.Label(titleRect, title);
+            Widgets.Label(infoRect, currentInfo);
+
+            Text.Font = GameFont.Tiny;
+            Widgets.Label(instructions1Rect, instructions1);
+            Widgets.Label(instructions2Rect, instructions2);
+
+            // Reset text settings
+            Text.Anchor = TextAnchor.UpperLeft;
+            Text.Font = GameFont.Small;
+        }
+
+        /// <summary>
+        /// Gets the label of the currently selected assignment type.
+        /// </summary>
+        private static string GetSelectedAssignmentLabel()
+        {
+            if (WindowlessScheduleState.SelectedAssignment != null)
+            {
+                return WindowlessScheduleState.SelectedAssignment.label;
+            }
+            return "Unknown";
         }
 
 }
