@@ -31,6 +31,12 @@ namespace RimWorldAccess
             if (key == KeyCode.None)
                 return;
 
+            // Log if area painting is active
+            if (AreaPaintingState.IsActive)
+            {
+                MelonLoader.MelonLogger.Msg($"RimWorld Access: UnifiedKeyboardPatch - Area painting is ACTIVE, key={key}");
+            }
+
             // ===== PRIORITY 1: Handle delete confirmation if active =====
             if (WindowlessDeleteConfirmationState.IsActive)
             {
@@ -60,6 +66,40 @@ namespace RimWorldAccess
                 else if (key == KeyCode.Escape)
                 {
                     WindowlessConfirmationState.Cancel();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 2.5: Handle area painting mode if active =====
+            if (AreaPaintingState.IsActive)
+            {
+                MelonLoader.MelonLogger.Msg($"RimWorld Access: Area painting active, handling key {key}");
+                bool handled = false;
+
+                if (key == KeyCode.Space)
+                {
+                    MelonLoader.MelonLogger.Msg("RimWorld Access: Space pressed in area painting mode");
+                    AreaPaintingState.ToggleStageCell();
+                    handled = true;
+                }
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    MelonLoader.MelonLogger.Msg("RimWorld Access: Enter pressed in area painting mode");
+                    AreaPaintingState.Confirm();
+                    handled = true;
+                }
+                else if (key == KeyCode.Escape)
+                {
+                    MelonLoader.MelonLogger.Msg("RimWorld Access: Escape pressed in area painting mode");
+                    AreaPaintingState.Cancel();
+                    handled = true;
+                }
+                // Note: Arrow keys are NOT handled here - they pass through to MapNavigationPatch
+                // The ZoneCreationAnnouncementPatch postfix will add "Selected" prefix if needed
+
+                if (handled)
+                {
                     Event.current.Use();
                     return;
                 }

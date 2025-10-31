@@ -120,6 +120,18 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Don't process arrow keys if the drug policy editor is active
+            if (WindowlessDrugPolicyState.IsActive)
+            {
+                return;
+            }
+
+            // Don't process arrow keys if the area manager is active
+            if (WindowlessAreaState.IsActive)
+            {
+                return;
+            }
+
             // Don't process arrow keys if the schedule menu is active
             if (WindowlessScheduleState.IsActive)
             {

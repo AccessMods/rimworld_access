@@ -311,20 +311,27 @@ namespace RimWorldAccess
                     }
                     break;
 
-                case 2: // Drug Policies - Open drug policies dialog
+                case 2: // Drug Policies - Open windowless drug policies manager
                     if (Current.Game?.drugPolicyDatabase != null)
                     {
                         // Pass the current pawn's drug policy to open that policy for editing
                         DrugPolicy currentPolicy = currentPawn?.drugs?.CurrentPolicy;
-                        Find.WindowStack.Add(new Dialog_ManageDrugPolicies(currentPolicy));
+
+                        // Close the assign menu before opening the policy editor
+                        Close();
+
+                        WindowlessDrugPolicyState.Open(currentPolicy);
                         ClipboardHelper.CopyToClipboard("Opened drug policies manager");
                     }
                     break;
 
-                case 3: // Allowed Areas - Open areas dialog
+                case 3: // Allowed Areas - Open windowless areas manager
                     if (Find.CurrentMap?.areaManager != null)
                     {
-                        Find.WindowStack.Add(new Dialog_ManageAreas(Find.CurrentMap));
+                        // Close the assign menu before opening the area manager
+                        Close();
+
+                        WindowlessAreaState.Open(Find.CurrentMap);
                         ClipboardHelper.CopyToClipboard("Opened areas manager");
                     }
                     break;

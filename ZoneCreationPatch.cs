@@ -99,8 +99,8 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.Last)] // Run after MapNavigationPatch
         public static void Postfix(CameraDriver __instance)
         {
-            // Only active when in zone creation mode
-            if (!ZoneCreationState.IsInCreationMode)
+            // Only active when in zone creation or area painting mode
+            if (!ZoneCreationState.IsInCreationMode && !AreaPaintingState.IsActive)
                 return;
 
             // Check if an arrow key was just pressed
@@ -116,13 +116,24 @@ namespace RimWorldAccess
             if (arrowKeyPressed)
             {
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
-                
+
+                // Check if cell is selected in either zone creation or area painting
+                bool isSelected = false;
+                if (ZoneCreationState.IsInCreationMode)
+                {
+                    isSelected = ZoneCreationState.IsCellSelected(currentPosition);
+                }
+                else if (AreaPaintingState.IsActive)
+                {
+                    isSelected = AreaPaintingState.StagedCells.Contains(currentPosition);
+                }
+
                 // If this cell is selected, prepend "Selected" to the announcement
-                if (ZoneCreationState.IsCellSelected(currentPosition))
+                if (isSelected)
                 {
                     // Get the last announced info and modify it
                     string lastInfo = MapNavigationState.LastAnnouncedInfo;
-                    
+
                     // Only modify if it doesn't already start with "Selected"
                     if (!lastInfo.StartsWith("Selected"))
                     {
