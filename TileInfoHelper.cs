@@ -26,70 +26,123 @@ namespace RimWorldAccess
             // Get all things at this position
             List<Thing> things = position.GetThingList(map);
 
-            // List all things on the tile (up to 5 items, then summarize)
-            int itemsListed = 0;
-            int maxItemsToList = 5;
+            // Categorize things
+            var pawns = new List<Pawn>();
+            var buildings = new List<Building>();
+            var items = new List<Thing>();
+            var plants = new List<Plant>();
+
+            foreach (var thing in things)
+            {
+                if (thing is Pawn pawn)
+                    pawns.Add(pawn);
+                else if (thing is Building building)
+                    buildings.Add(building);
+                else if (thing is Plant plant)
+                    plants.Add(plant);
+                else
+                    items.Add(thing);
+            }
+
             bool addedSomething = false;
 
-            foreach (var thing in things.Take(maxItemsToList))
+            // Add individual pawns (most important)
+            foreach (var pawn in pawns.Take(3))
             {
                 if (addedSomething) sb.Append(", ");
+                sb.Append(pawn.LabelShort);
+                addedSomething = true;
+            }
+            if (pawns.Count > 3)
+            {
+                if (addedSomething) sb.Append(", ");
+                sb.Append($"and {pawns.Count - 3} more pawns");
+                addedSomething = true;
+            }
 
-                // Get the label for this thing
-                string label = thing.LabelShort;
+            // Add buildings with power and temperature info
+            foreach (var building in buildings.Take(2))
+            {
+                if (addedSomething) sb.Append(", ");
+                sb.Append(building.LabelShort);
 
-                // Special handling for forbidden items
-                if (thing is Thing item)
+                // Add temperature control information if building is a cooler/heater
+                string tempControlInfo = GetTemperatureControlInfo(building);
+                if (!string.IsNullOrEmpty(tempControlInfo))
                 {
-                    CompForbiddable forbiddable = item.TryGetComp<CompForbiddable>();
-                    if (forbiddable != null && forbiddable.Forbidden)
-                    {
-                        label = "Forbidden " + label;
-                    }
+                    sb.Append(", ");
+                    sb.Append(tempControlInfo);
                 }
 
-                sb.Append(label);
-                addedSomething = true;
-                itemsListed++;
-            }
+                // Add power information if building has power components
+                string powerInfo = PowerInfoHelper.GetPowerInfo(building);
+                if (!string.IsNullOrEmpty(powerInfo))
+                {
+                    sb.Append(", ");
+                    sb.Append(powerInfo);
+                }
 
-            // If there are more items than we listed, add summary
-            if (things.Count > maxItemsToList)
+                addedSomething = true;
+            }
+            if (buildings.Count > 2)
             {
                 if (addedSomething) sb.Append(", ");
-                sb.Append($"and {things.Count - maxItemsToList} more");
+                sb.Append($"and {buildings.Count - 2} more buildings");
                 addedSomething = true;
             }
 
-            // If tile is empty, check if terrain has audio match
-            if (!addedSomething)
+            // Add items
+            if (items.Count > 0)
             {
-                TerrainDef terrain = position.GetTerrain(map);
-                if (terrain != null && !TerrainAudioHelper.HasAudioMatch(terrain))
+                if (addedSomething) sb.Append(", ");
+                if (items.Count == 1)
                 {
-                    // No audio match - announce the terrain name
-                    sb.Append(terrain.LabelCap);
-                    addedSomething = true;
+                    string itemLabel = items[0].LabelShort;
+                    CompForbiddable forbiddable = items[0].TryGetComp<CompForbiddable>();
+                    if (forbiddable != null && forbiddable.Forbidden)
+                    {
+                        itemLabel = "Forbidden " + itemLabel;
+                    }
+                    sb.Append(itemLabel);
                 }
                 else
                 {
-                    // Has audio match or no terrain - just say "Empty"
-                    sb.Append("Empty");
-                    addedSomething = true;
+                    sb.Append($"{items.Count} items");
                 }
+                addedSomething = true;
+            }
+
+            // Add plants if present and nothing else important
+            if (plants.Count > 0 && !addedSomething)
+            {
+                sb.Append(plants[0].LabelShort);
+                addedSomething = true;
+            }
+
+            // Check if terrain has no audio match - if so, announce terrain name
+            TerrainDef terrain = position.GetTerrain(map);
+            if (terrain != null && !TerrainAudioHelper.HasAudioMatch(terrain))
+            {
+                if (addedSomething) sb.Append(", ");
+                sb.Append(terrain.LabelCap);
+                addedSomething = true;
             }
 
             // Add zone information if present
             Zone zone = position.GetZone(map);
             if (zone != null)
             {
-                sb.Append($", in {zone.label}");
+                if (addedSomething) sb.Append(", ");
+                sb.Append($"in {zone.label}");
             }
 
-            // Add indoor/outdoor status
+            // Add roofed/unroofed status
             RoofDef roof = position.GetRoof(map);
-            string locationStatus = (roof != null) ? "indoors" : "outdoors";
-            sb.Append($", {locationStatus}");
+            string roofStatus = (roof != null) ? "roofed" : "unroofed";
+            if (addedSomething)
+                sb.Append($", {roofStatus}");
+            else
+                sb.Append(roofStatus);
 
             // Add light level
             PsychGlow lightLevel = map.glowGrid.PsychGlowAt(position);
