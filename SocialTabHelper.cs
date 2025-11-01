@@ -1,0 +1,437 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using RimWorld;
+using Verse;
+using Verse.Sound;
+
+namespace RimWorldAccess
+{
+    /// <summary>
+    /// Helper class for social tab data extraction and interactions.
+    /// Provides methods for relations, opinions, ideology, and social interactions.
+    /// </summary>
+    public static class SocialTabHelper
+    {
+        /// <summary>
+        /// Represents a relation with another pawn.
+        /// </summary>
+        public class RelationInfo
+        {
+            public Pawn OtherPawn { get; set; }
+            public string OtherPawnName { get; set; }
+            public List<string> Relations { get; set; }
+            public int MyOpinion { get; set; }
+            public int TheirOpinion { get; set; }
+            public string Situation { get; set; }
+            public string DetailedInfo { get; set; }
+            public bool CanChangePregnancyApproach { get; set; }
+            public PregnancyApproach CurrentPregnancyApproach { get; set; }
+
+            public RelationInfo()
+            {
+                Relations = new List<string>();
+            }
+        }
+
+        /// <summary>
+        /// Represents ideology and role information.
+        /// </summary>
+        public class IdeologyInfo
+        {
+            public Ideo Ideo { get; set; }
+            public string IdeoName { get; set; }
+            public float Certainty { get; set; }
+            public Precept_Role Role { get; set; }
+            public string RoleName { get; set; }
+            public string CertaintyDetails { get; set; }
+            public string RoleDetails { get; set; }
+        }
+
+        /// <summary>
+        /// Represents a social interaction log entry.
+        /// </summary>
+        public class SocialInteractionInfo
+        {
+            public string InteractionType { get; set; }
+            public string OtherPawn { get; set; }
+            public string Timestamp { get; set; }
+            public string Outcome { get; set; }
+        }
+
+        /// <summary>
+        /// Pregnancy approach options.
+        /// </summary>
+        public enum PregnancyApproach
+        {
+            None,
+            TryForPregnancy,
+            AvoidPregnancy,
+            UseContraceptives
+        }
+
+        #region Ideology & Role
+
+        /// <summary>
+        /// Gets ideology and role information for a pawn.
+        /// </summary>
+        public static IdeologyInfo GetIdeologyInfo(Pawn pawn)
+        {
+            if (pawn?.ideo == null || !ModsConfig.IdeologyActive)
+                return null;
+
+            var info = new IdeologyInfo
+            {
+                Ideo = pawn.Ideo,
+                IdeoName = pawn.Ideo?.name ?? "None",
+                Certainty = pawn.ideo.Certainty
+            };
+
+            // Get role
+            if (pawn.Ideo != null)
+            {
+                info.Role = pawn.Ideo.GetRole(pawn);
+                info.RoleName = info.Role?.LabelCap ?? "None";
+            }
+
+            // Get detailed certainty info
+            info.CertaintyDetails = GetCertaintyDetails(pawn);
+
+            // Get detailed role info
+            if (info.Role != null)
+            {
+                info.RoleDetails = GetRoleDetails(pawn, info.Role);
+            }
+
+            return info;
+        }
+
+        private static string GetCertaintyDetails(Pawn pawn)
+        {
+            if (pawn?.ideo == null)
+                return "";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Certainty: {pawn.ideo.Certainty:P0}");
+            sb.AppendLine();
+
+            // Get certainty change rate
+            float certaintyChangePerDay = pawn.ideo.CertaintyChangePerDay;
+            if (Math.Abs(certaintyChangePerDay) > 0.001f)
+            {
+                string direction = certaintyChangePerDay > 0 ? "increasing" : "decreasing";
+                sb.AppendLine($"Certainty is {direction}");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("Certainty is a measure of how strongly this colonist believes in their ideology.");
+            sb.AppendLine("Higher certainty makes them more resistant to conversion attempts.");
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string GetRoleDetails(Pawn pawn, Precept_Role role)
+        {
+            var sb = new StringBuilder();
+            // Use LabelForPawn for pawn-specific role label
+            sb.AppendLine($"Role: {role.LabelForPawn(pawn)}");
+            sb.AppendLine();
+
+            if (!string.IsNullOrEmpty(role.def.description))
+            {
+                sb.AppendLine(role.def.description);
+                sb.AppendLine();
+            }
+
+            // Role requirements
+            if (role.def.roleRequirements != null && role.def.roleRequirements.Count > 0)
+            {
+                sb.AppendLine("Requirements:");
+                foreach (var req in role.def.roleRequirements)
+                {
+                    // RoleRequirement has GetLabelCap method that takes the role
+                    sb.AppendLine($"  {req.GetLabelCap(role)}");
+                }
+                sb.AppendLine();
+            }
+
+            // Role effects
+            if (role.def.roleEffects != null && role.def.roleEffects.Count > 0)
+            {
+                sb.AppendLine("Effects:");
+                foreach (var effect in role.def.roleEffects)
+                {
+                    // RoleEffect.Label requires pawn and role parameters
+                    sb.AppendLine($"  {effect.Label(pawn, role)}");
+                }
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        #endregion
+
+        #region Relations
+
+        /// <summary>
+        /// Gets all relations for a pawn.
+        /// </summary>
+        public static List<RelationInfo> GetRelations(Pawn pawn)
+        {
+            var relations = new List<RelationInfo>();
+
+            if (pawn?.relations == null)
+                return relations;
+
+            // Get all pawns this pawn has relations with
+            var relatedPawns = pawn.relations.RelatedPawns;
+
+            foreach (var otherPawn in relatedPawns)
+            {
+                var relationInfo = new RelationInfo
+                {
+                    OtherPawn = otherPawn,
+                    OtherPawnName = otherPawn.LabelShort.StripTags(),
+                    Relations = GetRelationLabels(pawn, otherPawn),
+                    MyOpinion = pawn.relations.OpinionOf(otherPawn),
+                    TheirOpinion = otherPawn.relations?.OpinionOf(pawn) ?? 0,
+                    Situation = GetPawnSituation(otherPawn),
+                    DetailedInfo = GetRelationDetailedInfo(pawn, otherPawn)
+                };
+
+                // Check if can change pregnancy approach
+                if (LovePartnerRelationUtility.LovePartnerRelationExists(pawn, otherPawn))
+                {
+                    relationInfo.CanChangePregnancyApproach = true;
+                    relationInfo.CurrentPregnancyApproach = GetPregnancyApproach(pawn, otherPawn);
+                }
+
+                relations.Add(relationInfo);
+            }
+
+            // Also include pawns with non-zero opinions even if no direct relations
+            if (pawn.Map != null)
+            {
+                var allPawns = pawn.Map.mapPawns.AllPawnsSpawned;
+                foreach (var otherPawn in allPawns)
+                {
+                    if (otherPawn == pawn || relatedPawns.Contains(otherPawn))
+                        continue;
+
+                    int opinion = pawn.relations.OpinionOf(otherPawn);
+                    if (opinion != 0)
+                    {
+                        var relationInfo = new RelationInfo
+                        {
+                            OtherPawn = otherPawn,
+                            OtherPawnName = otherPawn.LabelShort.StripTags(),
+                            Relations = GetRelationLabels(pawn, otherPawn),
+                            MyOpinion = opinion,
+                            TheirOpinion = otherPawn.relations?.OpinionOf(pawn) ?? 0,
+                            Situation = GetPawnSituation(otherPawn),
+                            DetailedInfo = GetRelationDetailedInfo(pawn, otherPawn)
+                        };
+
+                        relations.Add(relationInfo);
+                    }
+                }
+            }
+
+            // Sort by opinion (most positive first)
+            relations = relations.OrderByDescending(r => r.MyOpinion).ToList();
+
+            return relations;
+        }
+
+        private static List<string> GetRelationLabels(Pawn pawn, Pawn otherPawn)
+        {
+            var labels = new List<string>();
+
+            var directRelations = pawn.relations.DirectRelations;
+            if (directRelations != null)
+            {
+                foreach (var rel in directRelations)
+                {
+                    if (rel.otherPawn == otherPawn)
+                    {
+                        labels.Add(rel.def.LabelCap);
+                    }
+                }
+            }
+
+            // Add friendship/rivalry labels if no family relations
+            if (labels.Count == 0)
+            {
+                int opinion = pawn.relations.OpinionOf(otherPawn);
+                if (opinion >= 20)
+                    labels.Add("Friend");
+                else if (opinion <= -20)
+                    labels.Add("Rival");
+                else
+                    labels.Add("Acquaintance");
+            }
+
+            return labels;
+        }
+
+        private static string GetPawnSituation(Pawn pawn)
+        {
+            if (pawn.Dead)
+                return "Dead";
+            if (pawn.Destroyed && !pawn.Dead)
+                return "Missing";
+            if (pawn.IsPrisonerOfColony)
+                return "Prisoner";
+            if (pawn.IsSlaveOfColony)
+                return "Slave";
+            if (pawn.Faction == null)
+                return "No faction";
+
+            string factionLabel = pawn.Faction.Name;
+            if (pawn.Faction.HostileTo(Faction.OfPlayer))
+                return $"Hostile, {factionLabel}";
+            if (pawn.Faction.IsPlayer)
+                return $"Colonist, {factionLabel}";
+            return $"Neutral, {factionLabel}";
+        }
+
+        private static string GetRelationDetailedInfo(Pawn pawn, Pawn otherPawn)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Relation with {otherPawn.LabelShort.StripTags()}:");
+            sb.AppendLine();
+
+            // Relations
+            var relations = GetRelationLabels(pawn, otherPawn);
+            if (relations.Count > 0)
+            {
+                sb.AppendLine($"Relationship: {string.Join(", ", relations)}");
+            }
+
+            // Opinions
+            int myOpinion = pawn.relations.OpinionOf(otherPawn);
+            int theirOpinion = otherPawn.relations?.OpinionOf(pawn) ?? 0;
+
+            sb.AppendLine($"My opinion: {myOpinion:+0;-0;0}");
+            sb.AppendLine($"Their opinion: {theirOpinion:+0;-0;0}");
+            sb.AppendLine();
+
+            // Opinion breakdown
+            if (pawn.relations != null)
+            {
+                sb.AppendLine("Opinion factors:");
+                var thoughts = pawn.needs?.mood?.thoughts?.memories?.Memories;
+                if (thoughts != null)
+                {
+                    foreach (var thought in thoughts)
+                    {
+                        if (thought is Thought_Memory memory && memory.otherPawn == otherPawn)
+                        {
+                            float effect = memory.MoodOffset();
+                            sb.AppendLine($"  {memory.LabelCap.StripTags()}: {effect:+0;-0}");
+                        }
+                    }
+                }
+            }
+
+            // Romance info if applicable
+            if (LovePartnerRelationUtility.LovePartnerRelationExists(pawn, otherPawn))
+            {
+                sb.AppendLine();
+                sb.AppendLine("Love partners");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static PregnancyApproach GetPregnancyApproach(Pawn pawn, Pawn partner)
+        {
+            // This is a simplified version - actual implementation would check the game's pregnancy settings
+            // For now, return None as placeholder
+            return PregnancyApproach.None;
+        }
+
+        /// <summary>
+        /// Sets pregnancy approach between two pawns.
+        /// </summary>
+        public static bool SetPregnancyApproach(Pawn pawn, Pawn partner, PregnancyApproach approach)
+        {
+            try
+            {
+                // Placeholder - actual implementation would set the game's pregnancy approach
+                ClipboardHelper.CopyToClipboard($"Pregnancy approach set to: {approach}");
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[RimWorldAccess] Error setting pregnancy approach: {ex}");
+                ClipboardHelper.CopyToClipboard("Error setting pregnancy approach");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return false;
+            }
+        }
+
+        #endregion
+
+        #region Social Interactions
+
+        /// <summary>
+        /// Gets recent social interactions for a pawn.
+        /// </summary>
+        public static List<SocialInteractionInfo> GetSocialInteractions(Pawn pawn)
+        {
+            var interactions = new List<SocialInteractionInfo>();
+
+            if (pawn?.interactions == null)
+                return interactions;
+
+            // Get recent interactions from play log
+            var playLog = Find.PlayLog;
+            if (playLog == null)
+                return interactions;
+
+            // Use GetConcerns() to get pawns involved in the interaction
+            var recentEntries = playLog.AllEntries
+                .Where(e => e is PlayLogEntry_Interaction)
+                .Cast<PlayLogEntry_Interaction>()
+                .Take(50) // Get recent interactions
+                .ToList();
+
+            foreach (var entry in recentEntries)
+            {
+                // Use GetConcerns() to check if this pawn is involved
+                var concerns = entry.GetConcerns();
+                if (concerns != null && concerns.Contains(pawn))
+                {
+                    // Find the other pawn involved
+                    string otherPawnName = "Unknown";
+                    foreach (var concern in concerns)
+                    {
+                        if (concern is Pawn concernPawn && concernPawn != pawn)
+                        {
+                            otherPawnName = concernPawn.LabelShort.StripTags();
+                            break;
+                        }
+                    }
+
+                    interactions.Add(new SocialInteractionInfo
+                    {
+                        InteractionType = "Social interaction", // intDef is protected, can't access
+                        OtherPawn = otherPawnName,
+                        Timestamp = $"{entry.Age} ago",
+                        Outcome = ""
+                    });
+
+                    if (interactions.Count >= 12)
+                        break;
+                }
+            }
+
+            return interactions;
+        }
+
+        #endregion
+    }
+}

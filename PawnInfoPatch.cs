@@ -51,48 +51,14 @@ namespace RimWorldAccess
                 HandleJumpToSelectedPawn();
                 handled = true;
             }
-            // Handle Alt+H: Health information
-            else if (key == KeyCode.H)
-            {
-                HandlePawnInfo(PawnInfoType.Health);
-                handled = true;
-            }
-            // Handle Alt+N: Needs information
-            else if (key == KeyCode.N)
-            {
-                HandlePawnInfo(PawnInfoType.Needs);
-                handled = true;
-            }
-            // Handle Alt+G: Gear information
-            else if (key == KeyCode.G)
-            {
-                HandlePawnInfo(PawnInfoType.Gear);
-                handled = true;
-            }
-            // Handle Alt+S: Social information
-            else if (key == KeyCode.S)
-            {
-                HandlePawnInfo(PawnInfoType.Social);
-                handled = true;
-            }
-            // Handle Alt+T: Training information
-            else if (key == KeyCode.T)
-            {
-                HandlePawnInfo(PawnInfoType.Training);
-                handled = true;
-            }
-            // Handle Alt+R: Character information
-            else if (key == KeyCode.R)
-            {
-                HandlePawnInfo(PawnInfoType.Character);
-                handled = true;
-            }
             // Handle Alt+W: Work menu (interactive)
             else if (key == KeyCode.W)
             {
                 HandleWorkMenu();
                 handled = true;
             }
+            // Note: Alt+H, Alt+N, Alt+G, Alt+S, Alt+T, Alt+R shortcuts have been removed.
+            // All pawn information is now accessible through the 'i' key inspection menu (WindowlessInspectionState).
 
             // If we handled the key, consume the event to prevent game processing
             if (handled)

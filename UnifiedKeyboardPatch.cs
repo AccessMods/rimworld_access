@@ -10,7 +10,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Unified Harmony patch for UIRoot.UIRootOnGUI to handle all keyboard accessibility features.
-    /// Handles: Escape key for pause menu, Enter key for building inspection, ] key for colonist orders, J key for jump menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
+    /// Handles: Escape key for pause menu, Enter key for building inspection, ] key for colonist orders, I key for inspection menu, J key for jump menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -467,6 +467,15 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 4.8: Handle inspection menu if active =====
+            if (WindowlessInspectionState.IsActive)
+            {
+                if (WindowlessInspectionState.HandleInput(Event.current))
+                {
+                    return;
+                }
+            }
+
             // ===== PRIORITY 5: Handle order float menu if active =====
             if (WindowlessFloatMenuState.IsActive)
             {
@@ -747,6 +756,29 @@ namespace RimWorldAccess
 
                     // Open the research menu
                     WindowlessResearchMenuState.Open();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 7.6: Open inspection menu with I key (if no menu is active and we're in-game) =====
+            if (key == KeyCode.I)
+            {
+                // Only open inspection menu if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                // 4. Map navigation is initialized
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    MapNavigationState.IsInitialized)
+                {
+                    // Prevent the default I key behavior
+                    Event.current.Use();
+
+                    // Open the inspection menu at the current cursor position
+                    WindowlessInspectionState.Open(MapNavigationState.CurrentCursorPosition);
                     return;
                 }
             }

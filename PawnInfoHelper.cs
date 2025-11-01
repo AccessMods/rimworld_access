@@ -41,7 +41,7 @@ namespace RimWorldAccess
                 return $"{pawn.LabelShort}: No health tracker";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Health ===");
+            sb.AppendLine($"{pawn.LabelShort} Health:");
 
             // Overall health state
             sb.AppendLine($"State: {pawn.health.State}");
@@ -120,7 +120,7 @@ namespace RimWorldAccess
                 return $"{pawn.LabelShort}: No needs tracker";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Needs ===");
+            sb.AppendLine($"{pawn.LabelShort} Needs:");
 
             var needs = pawn.needs.AllNeeds;
             if (needs != null && needs.Count > 0)
@@ -158,7 +158,7 @@ namespace RimWorldAccess
                 return "No pawn selected";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Gear ===");
+            sb.AppendLine($"{pawn.LabelShort} Gear:");
 
             // Equipment (weapons)
             if (pawn.equipment != null && pawn.equipment.Primary != null)
@@ -196,7 +196,7 @@ namespace RimWorldAccess
                 }
             }
 
-            if (sb.Length == $"=== {pawn.LabelShort} Gear ===\n".Length)
+            if (sb.Length == $"{pawn.LabelShort} Gear:\n".Length)
             {
                 sb.AppendLine("No equipment, apparel, or inventory items");
             }
@@ -217,7 +217,7 @@ namespace RimWorldAccess
                 return $"{pawn.LabelShort}: No relations tracker";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Social ===");
+            sb.AppendLine($"{pawn.LabelShort} Social:");
 
             // Direct relations (family, lovers, etc.)
             var directRelations = pawn.relations.DirectRelations;
@@ -284,7 +284,7 @@ namespace RimWorldAccess
                 return $"{pawn.LabelShort}: Not trainable";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Training ===");
+            sb.AppendLine($"{pawn.LabelShort} Training:");
 
             var trainableDefs = DefDatabase<TrainableDef>.AllDefsListForReading;
             var trainedSkills = new List<string>();
@@ -342,7 +342,7 @@ namespace RimWorldAccess
                 return "No pawn selected";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Character ===");
+            sb.AppendLine($"{pawn.LabelShort} Character:");
 
             // Basic info
             if (pawn.ageTracker != null)
@@ -416,7 +416,7 @@ namespace RimWorldAccess
                 return $"{pawn.LabelShort}: No work settings";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {pawn.LabelShort} Work ===");
+            sb.AppendLine($"{pawn.LabelShort} Work:");
 
             var workTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading;
             var enabledWork = new List<string>();

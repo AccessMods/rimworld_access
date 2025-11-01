@@ -441,7 +441,7 @@ namespace RimWorldAccess
             Hediff hediff = pawn.health.hediffSet.hediffs[index];
             string partText = hediff.Part != null ? $" on {hediff.Part.Label}" : "";
 
-            return $"{hediff.LabelCap}{partText} - {hediff.SeverityLabel}";
+            return $"{hediff.LabelCap.StripTags()}{partText} - {hediff.SeverityLabel}";
         }
 
         private static string GetRelationText(Pawn pawn, int index)
@@ -461,7 +461,7 @@ namespace RimWorldAccess
                 return "No traits";
 
             Trait trait = pawn.story.traits.allTraits[index];
-            return $"{trait.LabelCap}: {trait.TipString(pawn)}";
+            return $"{trait.LabelCap.StripTags()}: {trait.TipString(pawn).StripTags()}";
         }
 
         private static string GetGearText(Pawn pawn, int index)
@@ -470,7 +470,7 @@ namespace RimWorldAccess
                 return "No equipment";
 
             ThingWithComps equipment = pawn.equipment.AllEquipmentListForReading[index];
-            return $"{equipment.LabelCap} - {equipment.DescriptionDetailed}";
+            return $"{equipment.LabelCap.StripTags()} - {equipment.DescriptionDetailed}";
         }
 
         private static int GetIncapableOfCount(Pawn pawn)
@@ -548,7 +548,7 @@ namespace RimWorldAccess
                 {
                     if (trait.def.disabledWorkTags != WorkTags.None && (trait.def.disabledWorkTags & selectedTag) != 0)
                     {
-                        sb.AppendLine($"- Trait: {trait.LabelCap}");
+                        sb.AppendLine($"- Trait: {trait.LabelCap.StripTags()}");
                     }
                 }
             }
@@ -778,7 +778,7 @@ namespace RimWorldAccess
                     {
                         case Section.Biography:
                             // Get full biography info
-                            infoText.AppendLine($"=== {pawn.Name} ===");
+                            infoText.AppendLine($"{pawn.Name}:");
                             infoText.AppendLine($"Gender: {pawn.gender}");
                             infoText.AppendLine($"Age: {pawn.ageTracker.AgeBiologicalYears} years");
                             infoText.AppendLine($"Title: {pawn.story.TitleCap}");
@@ -800,8 +800,8 @@ namespace RimWorldAccess
                             if (pawn.story?.traits?.allTraits != null && currentDetailIndex < pawn.story.traits.allTraits.Count)
                             {
                                 Trait trait = pawn.story.traits.allTraits[currentDetailIndex];
-                                infoText.AppendLine($"=== {trait.LabelCap} ===");
-                                infoText.AppendLine(trait.TipString(pawn));
+                                infoText.AppendLine($"{trait.LabelCap.StripTags()}:");
+                                infoText.AppendLine(trait.TipString(pawn).StripTags());
                             }
                             break;
 
@@ -809,7 +809,7 @@ namespace RimWorldAccess
                             if (pawn.skills?.skills != null && currentDetailIndex < pawn.skills.skills.Count)
                             {
                                 SkillRecord skill = pawn.skills.skills[currentDetailIndex];
-                                infoText.AppendLine($"=== {skill.def.skillLabel} ===");
+                                infoText.AppendLine($"{skill.def.skillLabel}:");
                                 infoText.AppendLine($"Level: {skill.Level}");
                                 infoText.AppendLine($"Passion: {skill.passion}");
                                 if (skill.TotallyDisabled)
@@ -825,7 +825,7 @@ namespace RimWorldAccess
                             if (pawn.health?.hediffSet?.hediffs != null && currentDetailIndex < pawn.health.hediffSet.hediffs.Count)
                             {
                                 Hediff hediff = pawn.health.hediffSet.hediffs[currentDetailIndex];
-                                infoText.AppendLine($"=== {hediff.LabelCap} ===");
+                                infoText.AppendLine($"{hediff.LabelCap.StripTags()}:");
                                 if (hediff.Part != null)
                                 {
                                     infoText.AppendLine($"Part: {hediff.Part.Label}");
@@ -840,7 +840,7 @@ namespace RimWorldAccess
                             if (pawn.equipment?.AllEquipmentListForReading != null && currentDetailIndex < pawn.equipment.AllEquipmentListForReading.Count)
                             {
                                 ThingWithComps equipment = pawn.equipment.AllEquipmentListForReading[currentDetailIndex];
-                                infoText.AppendLine($"=== {equipment.LabelCap} ===");
+                                infoText.AppendLine($"{equipment.LabelCap.StripTags()}:");
                                 infoText.AppendLine(equipment.DescriptionDetailed);
                             }
                             break;
@@ -850,7 +850,7 @@ namespace RimWorldAccess
                             {
                                 DirectPawnRelation relation = pawn.relations.DirectRelations[currentDetailIndex];
                                 int opinion = pawn.relations.OpinionOf(relation.otherPawn);
-                                infoText.AppendLine($"=== {relation.otherPawn.LabelShort} ===");
+                                infoText.AppendLine($"{relation.otherPawn.LabelShort}:");
                                 infoText.AppendLine($"Relation: {relation.def.label}");
                                 infoText.AppendLine($"Opinion: {opinion:+#;-#;0}");
                                 infoText.AppendLine();
@@ -860,12 +860,12 @@ namespace RimWorldAccess
 
                         case Section.IncapableOf:
                             // Just show the same text as the detail view
-                            infoText.AppendLine($"=== {pawn.Name} - Incapabilities ===");
+                            infoText.AppendLine($"{pawn.Name} - Incapabilities:");
                             infoText.AppendLine(GetIncapableOfText(pawn, currentDetailIndex));
                             break;
 
                         default:
-                            infoText.AppendLine($"=== {pawn.Name} ===");
+                            infoText.AppendLine($"{pawn.Name}:");
                             infoText.AppendLine("No detailed info available");
                             break;
                     }
@@ -873,7 +873,7 @@ namespace RimWorldAccess
                 else
                 {
                     // Default: pawn summary
-                    infoText.AppendLine($"=== {pawn.Name} ===");
+                    infoText.AppendLine($"{pawn.Name}:");
                     infoText.AppendLine($"Title: {pawn.story.TitleCap}");
                     infoText.AppendLine($"Age: {pawn.ageTracker.AgeBiologicalYears}");
                 }
