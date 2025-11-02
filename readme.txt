@@ -20,26 +20,105 @@ Enter         Select menu item
 
 IN-GAME NAVIGATION
 ------------------
-Arrow Keys    Move map cursor (announces terrain, buildings, items, pawns)
-, (comma)     Cycle to previous colonist
-. (period)    Cycle to next colonist
-Enter         Open inspection menu at cursor position
+RimWorld Access provides tile-by-tile map navigation using arrow keys. The camera
+automatically follows your cursor position, keeping it centered on screen.
+
+BASIC MOVEMENT:
+Arrow Keys    Move cursor one tile in any direction
+              - Up Arrow: North (positive Z axis)
+              - Down Arrow: South (negative Z axis)
+              - Left Arrow: West (negative X axis)
+              - Right Arrow: East (positive X axis)
+
+, (comma)     Cycle to previous colonist (selects but doesn't move camera)
+. (period)    Cycle to next colonist (selects but doesn't move camera)
+I         Open inspection menu at cursor position
+Enter           Open building settings.
 Escape        Open pause menu
+
+NAVIGATION FEATURES:
+- Automatic camera following: Camera jumps to center on cursor position after each move
+- Audio feedback: Plays terrain-specific sounds when moving (grass, stone, wood, etc.)
+- Boundary detection: "Map boundary" message when attempting to move past map edge
+- Automatic announcements: Tile information copied to clipboard after each move
+- Fog of war: Tiles in unexplored areas announce as "unseen" with no other info
+
+TILE SUMMARY FORMAT:
+When you move to a tile, you'll hear information in this order:
+1. Pawns (up to 3 by name, then "and X more pawns")
+2. Buildings (up to 2 with power/temperature info, then "and X more buildings")
+3. Items (single item with stack count, or "X items" for multiple)
+4. Plants (first plant if nothing else is present)
+5. Terrain type (only if no audio feedback available)
+6. Zone name (e.g., "stockpile zone 1", "growing zone 2")
+7. Roofed status (only announced when roofed - unroofed tiles say nothing)
+8. Light level (dark, dim, lit, bright)
+9. Coordinates (e.g., "103, 204")
+
+Examples:
+- "John, Steel wall, roofed, lit, 52, 48"
+- "5 items, growing zone 1, bright, 103, 204"
+- "unseen" (for unexplored tiles)
+- "Map boundary" (when at edge)
 
 (Note: All menus use Arrow Keys to navigate, Enter to confirm, Escape to close)
 
 
-TILE INFORMATION (Keys 1-5)
-----------------------------
-While navigating the map with arrow keys, press these keys to get specific information
-about the tile under the cursor:
+TILE INFORMATION HOTKEYS (Keys 1-5)
+------------------------------------
+While navigating the map, press number keys (1-5) to get detailed information about
+the current cursor position. These work with both top row number keys and numpad.
 
-1             List all items and pawns at cursor position
-2             Show flooring details (terrain type, beauty, cleanliness, path cost)
-3             Display plant information (species, growth %, harvestable status)
-4             Report light level and glow value
-5             Show temperature (°C) and indoor/outdoor status
+NOTE: Shift+1/2/3 are reserved for time controls. Number keys only work when Shift
+is NOT held down.
 
+KEY 1 - ITEMS AND PAWNS
+Lists all items and pawns at the cursor position:
+- Pawns: All colonists/animals by name (e.g., "John, Sarah, Mike")
+- Items: Up to 10 items with stack counts (e.g., "Steel x50, Wood x100, Medicine x20")
+- Shows "Forbidden" prefix for forbidden items
+- Shows "and X more" if more than 10 items present
+- Returns "no items or pawns" if tile is empty
+
+KEY 2 - FLOORING DETAILS
+Shows terrain information:
+- Terrain type (e.g., "Slate floor", "Soil", "Concrete")
+- Smoothness (smooth/rough for stone floors)
+- Beauty rating (if non-zero)
+- Cleanliness value (if non-zero)
+- Path cost (movement speed modifier)
+Example: "Slate floor, smooth, beauty 2, cleanliness 0.2, path cost 0"
+
+KEY 3 - PLANT INFORMATION
+Displays plant details:
+- Plant species name
+- Growth percentage (0-100%)
+- Harvestable status (harvestable/not harvestable)
+- Dying status (if applicable)
+- Lists multiple plants if present
+Example: "Potato plant (75% grown), not harvestable"
+Returns "no plants" if no plants at cursor
+
+KEY 4 - BRIGHTNESS AND TEMPERATURE (COMBINED)
+Shows environmental conditions:
+- Light level description (dark, dim, lit, bright)
+- Glow value (numeric light level, 0.0-1.0+)
+- Temperature in Celsius
+- Indoor/outdoor status (based on roof presence)
+- Temperature control buildings (coolers, heaters, vents with settings)
+Example: "lit (0.65 glow), 21.3°C, indoors. Cooler: cooling north, heating south, target 18°C"
+
+KEY 5 - ROOM STATISTICS
+Shows room quality metrics (only for enclosed rooms with roofs):
+- Room type/role (Bedroom, Dining room, Hospital, etc.)
+- Impressiveness rating (affects mood)
+- Cleanliness value (affects disease/infection chance)
+- Wealth value (total value of room contents)
+Example: "Bedroom, impressiveness 45, cleanliness 0.3, wealth 1250"
+Returns "outdoors" if no roof present
+Returns "no room" if room data unavailable
+
+COOLDOWN: All detail requests have a 0.3 second cooldown to prevent accidental spam
 
 TIME CONTROLS
 -------------
@@ -116,7 +195,7 @@ Notes:
 - In manual priority mode, lower numbers execute first (1 before 2 before 3 before 4)
 - Work types with the same priority number use list order as tiebreaker
 - Changes are marked as "(pending)" until you press Enter to save
-- Column reordering (Shift+Up/Down) affects all colonists globally.  As far as I am aware, this is an unavoidable quirk of the game's logic, and not something I can change.
+- Column reordering (Shift+Up/Down) affects all colonists globally.
 
 
 ASSIGN MENU (Press Shift+A)
@@ -156,7 +235,7 @@ Notes:
 - Food policies restrict what foods colonists can eat
 - Drug policies control when and how colonists use drugs
 - Allowed areas restrict where colonists can go
-- Reading policies (Ideology DLC) control what colonists read for ideological development.  These policies are untested, and the custom editor is not yet supported.  I do not have the DCLs yet, so I will be saving all DLC features for later.  
+- Reading policies (Ideology DLC) control colonist ideological development.
 
 
 QUICK NAVIGATION (Press J)
@@ -177,6 +256,3 @@ OTHER SHORTCUTS
 Delete        Delete selected save file (in save/load menu)
 p      open research project selection menu.
 
-ADDITIONAL NOTES
-----------------
-This is a closed beta.  Many features are not supported, and those that are may have unexpected bugs or interactions.  

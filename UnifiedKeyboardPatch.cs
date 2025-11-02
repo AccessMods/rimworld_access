@@ -10,7 +10,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Unified Harmony patch for UIRoot.UIRootOnGUI to handle all keyboard accessibility features.
-    /// Handles: Escape key for pause menu, Enter key for building inspection, ] key for colonist orders, I key for inspection menu, J key for jump menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
+    /// Handles: Escape key for pause menu, Enter key for building inspection/beds, ] key for colonist orders, I key for inspection menu, J key for jump menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -855,7 +855,19 @@ namespace RimWorldAccess
                     }
                 }
 
-                // Second priority: buildings with temperature control (coolers, heaters, etc.)
+                // Second priority: beds - open bed assignment menu
+                foreach (Thing thing in thingsAtPosition)
+                {
+                    if (thing is Building_Bed bed)
+                    {
+                        // Directly open bed assignment menu
+                        BedAssignmentState.Open(bed);
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                // Third priority: buildings with temperature control (coolers, heaters, etc.)
                 foreach (Thing thing in thingsAtPosition)
                 {
                     if (thing is Building building)
@@ -871,7 +883,7 @@ namespace RimWorldAccess
                     }
                 }
 
-                // Third priority: buildings with inspect tabs
+                // Fourth priority: buildings with inspect tabs
                 foreach (Thing thing in thingsAtPosition)
                 {
                     if (thing.def.inspectorTabs != null && thing.def.inspectorTabs.Count > 0)

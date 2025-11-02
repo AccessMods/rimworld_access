@@ -168,6 +168,12 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Don't process arrow keys if bed assignment menu is active
+            if (BedAssignmentState.IsActive)
+            {
+                return;
+            }
+
             // Don't process arrow keys if research menu is active
             if (WindowlessResearchMenuState.IsActive)
             {

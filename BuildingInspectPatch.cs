@@ -7,7 +7,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Harmony patch to handle keyboard input for building inspection menus.
-    /// Intercepts keyboard events when BuildingInspectState, BillsMenuState, BillConfigState, ThingFilterMenuState, or TempControlMenuState is active.
+    /// Intercepts keyboard events when BuildingInspectState, BillsMenuState, BillConfigState, ThingFilterMenuState, TempControlMenuState, or BedAssignmentState is active.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -32,6 +32,13 @@ namespace RimWorldAccess
             if (TempControlMenuState.IsActive)
             {
                 HandleTempControlInput();
+                return;
+            }
+
+            // Handle BedAssignmentState (high priority - it's a building settings menu)
+            if (BedAssignmentState.IsActive)
+            {
+                HandleBedAssignmentInput();
                 return;
             }
 
@@ -318,6 +325,35 @@ namespace RimWorldAccess
                 case KeyCode.Escape:
                     RangeEditMenuState.Close();
                     ClipboardHelper.CopyToClipboard("Cancelled range editing");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+        private static void HandleBedAssignmentInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.UpArrow:
+                    BedAssignmentState.SelectPrevious();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.DownArrow:
+                    BedAssignmentState.SelectNext();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    BedAssignmentState.ExecuteSelected();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    BedAssignmentState.GoBack();
                     Event.current.Use();
                     break;
             }

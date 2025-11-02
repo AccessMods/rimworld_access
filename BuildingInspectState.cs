@@ -150,6 +150,15 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Check if building is a bed
+            if (selectedBuilding is Building_Bed bed)
+            {
+                // Close building inspect and open bed assignment menu
+                Close();
+                BedAssignmentState.Open(bed);
+                return;
+            }
+
             // Check if building has temperature control
             if (selectedBuilding is Building building)
             {
