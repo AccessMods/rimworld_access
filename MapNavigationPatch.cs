@@ -129,34 +129,50 @@ namespace RimWorldAccess
             // Check for arrow key input
             IntVec3 moveOffset = IntVec3.Zero;
             bool keyPressed = false;
+            bool isTerrainJump = false;
+
+            // Check if Ctrl is held down for terrain jumping
+            bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
             // Check each arrow key direction
             if (Input.GetKeyDown(KeyCode.UpArrow))
             {
                 moveOffset = IntVec3.North; // North is positive Z
                 keyPressed = true;
+                isTerrainJump = ctrlHeld;
             }
             else if (Input.GetKeyDown(KeyCode.DownArrow))
             {
                 moveOffset = IntVec3.South; // South is negative Z
                 keyPressed = true;
+                isTerrainJump = ctrlHeld;
             }
             else if (Input.GetKeyDown(KeyCode.LeftArrow))
             {
                 moveOffset = IntVec3.West; // West is negative X
                 keyPressed = true;
+                isTerrainJump = ctrlHeld;
             }
             else if (Input.GetKeyDown(KeyCode.RightArrow))
             {
                 moveOffset = IntVec3.East; // East is positive X
                 keyPressed = true;
+                isTerrainJump = ctrlHeld;
             }
 
             // If an arrow key was pressed, move the cursor and update camera
             if (keyPressed)
             {
-                // Move the cursor position
-                bool positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
+                // Move the cursor position - either terrain jump or normal movement
+                bool positionChanged;
+                if (isTerrainJump)
+                {
+                    positionChanged = MapNavigationState.JumpToNextTerrainType(moveOffset, Find.CurrentMap);
+                }
+                else
+                {
+                    positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
+                }
 
                 if (positionChanged)
                 {

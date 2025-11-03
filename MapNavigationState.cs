@@ -110,5 +110,58 @@ namespace RimWorldAccess
             lastAnnouncedInfo = "";
             isInitialized = false;
         }
+
+        /// <summary>
+        /// Jumps to the next tile with a different terrain type in the specified direction.
+        /// Returns true if the position changed.
+        /// </summary>
+        public static bool JumpToNextTerrainType(IntVec3 direction, Map map)
+        {
+            if (map == null || !isInitialized)
+                return false;
+
+            // Get the current terrain at the cursor position
+            TerrainDef currentTerrain = currentCursorPosition.GetTerrain(map);
+            if (currentTerrain == null)
+                return false;
+
+            IntVec3 searchPosition = currentCursorPosition;
+
+            // Search in the specified direction until we find a different terrain type
+            // Limit search to prevent infinite loops
+            int maxSteps = UnityEngine.Mathf.Max(map.Size.x, map.Size.z);
+
+            for (int step = 0; step < maxSteps; step++)
+            {
+                // Move one step in the direction
+                searchPosition += direction;
+
+                // Check if we're still within map bounds
+                if (!searchPosition.InBounds(map))
+                {
+                    // Hit map boundary, clamp to edge and stop
+                    searchPosition.x = UnityEngine.Mathf.Clamp(searchPosition.x, 0, map.Size.x - 1);
+                    searchPosition.z = UnityEngine.Mathf.Clamp(searchPosition.z, 0, map.Size.z - 1);
+                    break;
+                }
+
+                // Check if this tile has a different terrain type
+                TerrainDef searchTerrain = searchPosition.GetTerrain(map);
+                if (searchTerrain != null && searchTerrain != currentTerrain)
+                {
+                    // Found a different terrain type, stop searching
+                    break;
+                }
+            }
+
+            // Update position if we moved
+            if (searchPosition != currentCursorPosition)
+            {
+                currentCursorPosition = searchPosition;
+                return true;
+            }
+
+            return false;
+        }
     }
 }
