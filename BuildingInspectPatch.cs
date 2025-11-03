@@ -41,6 +41,42 @@ namespace RimWorldAccess
                 HandleBedAssignmentInput();
                 return;
             }
+            // Handle FlickableComponentState (building component menu)
+            if (FlickableComponentState.IsActive)
+            {
+                HandleFlickableComponentInput();
+                return;
+            }
+
+            // Handle RefuelableComponentState (building component menu)
+            if (RefuelableComponentState.IsActive)
+            {
+                HandleRefuelableComponentInput();
+                return;
+            }
+
+            // Handle BreakdownableComponentState (building component menu)
+            if (BreakdownableComponentState.IsActive)
+            {
+                HandleBreakdownableComponentInput();
+                return;
+            }
+            // Handle DoorControlState (building-specific menu)
+            if (DoorControlState.IsActive)
+            {
+                HandleDoorControlInput();
+                return;
+            }
+            // Handle ForbidControlState (building component menu)
+            if (ForbidControlState.IsActive)
+            {
+                HandleForbidControlInput();
+                return;
+            }
+
+
+
+
 
             // Handle ThingFilterMenuState (second highest priority - it's a submenu)
             if (ThingFilterMenuState.IsActive)
@@ -358,5 +394,144 @@ namespace RimWorldAccess
                     break;
             }
         }
+        private static void HandleFlickableComponentInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.Space:
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    FlickableComponentState.TogglePower();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.D:
+                    FlickableComponentState.AnnounceDetailedStatus();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    FlickableComponentState.Close();
+                    ClipboardHelper.CopyToClipboard("Closed power control menu");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+        private static void HandleRefuelableComponentInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.UpArrow:
+                    RefuelableComponentState.SelectPrevious();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.DownArrow:
+                    RefuelableComponentState.SelectNext();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    RefuelableComponentState.ExecuteSelected();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.LeftArrow:
+                    RefuelableComponentState.DecreaseTargetFuel();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.RightArrow:
+                    RefuelableComponentState.IncreaseTargetFuel();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    RefuelableComponentState.Close();
+                    ClipboardHelper.CopyToClipboard("Closed fuel settings menu");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+        private static void HandleBreakdownableComponentInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.R:
+                    BreakdownableComponentState.RefreshStatus();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    BreakdownableComponentState.Close();
+                    ClipboardHelper.CopyToClipboard("Closed breakdown status view");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+        private static void HandleDoorControlInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.Space:
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    DoorControlState.ToggleHoldOpen();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.D:
+                    DoorControlState.AnnounceDetailedStatus();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    DoorControlState.Close();
+                    ClipboardHelper.CopyToClipboard("Closed door controls");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+        private static void HandleForbidControlInput()
+        {
+            KeyCode key = Event.current.keyCode;
+
+            switch (key)
+            {
+                case KeyCode.Space:
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    ForbidControlState.ToggleForbidden();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.D:
+                    ForbidControlState.AnnounceDetailedStatus();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Escape:
+                    ForbidControlState.Close();
+                    ClipboardHelper.CopyToClipboard("Closed forbid controls");
+                    Event.current.Use();
+                    break;
+            }
+        }
+
+
+
     }
 }

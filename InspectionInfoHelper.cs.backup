@@ -120,17 +120,6 @@ namespace RimWorldAccess
                 if (powerComp != null)
                     categories.Add("Power");
 
-                // Dynamically discover and add component categories
-                var discoveredComponents = BuildingComponentsHelper.GetDiscoverableComponents(building);
-                foreach (var component in discoveredComponents)
-                {
-                    // Only add if not already covered by specialized menus above
-                    if (!categories.Contains(component.CategoryName))
-                    {
-                        categories.Add(component.CategoryName);
-                    }
-                }
-
                 // Add stats category for all buildings
                 categories.Add("Stats");
             }

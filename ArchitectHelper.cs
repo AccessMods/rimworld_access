@@ -87,6 +87,26 @@ namespace RimWorldAccess
                 }
 
                 MelonLoader.MelonLogger.Msg($"After filtering: {designators.Count} designators available");
+
+                // Add missing designators for Orders category
+                if (category.defName == "Orders")
+                {
+                    // Add Uninstall designator if not already present
+                    bool hasUninstall = designators.Any(d => d is Designator_Uninstall);
+                    if (!hasUninstall)
+                    {
+                        designators.Add(new Designator_Uninstall());
+                        MelonLoader.MelonLogger.Msg("Added Designator_Uninstall to Orders category");
+                    }
+
+                    // Add Open designator if not already present
+                    bool hasOpen = designators.Any(d => d is Designator_Open);
+                    if (!hasOpen)
+                    {
+                        designators.Add(new Designator_Open());
+                        MelonLoader.MelonLogger.Msg("Added Designator_Open to Orders category");
+                    }
+                }
             }
             catch (System.Exception ex)
             {

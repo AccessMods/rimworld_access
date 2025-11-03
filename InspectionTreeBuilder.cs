@@ -190,7 +190,8 @@ namespace RimWorldAccess
             return (category == "Bills" && building is IBillGiver) ||
                    (category == "Bed Assignment" && building is Building_Bed) ||
                    (category == "Temperature" && building.TryGetComp<CompTempControl>() != null) ||
-                   (category == "Storage" && building is IStoreSettingsParent);
+                   (category == "Storage" && building is IStoreSettingsParent) ||
+                   BuildingComponentsHelper.GetDiscoverableComponents(building).Any(c => c.CategoryName == category && !c.IsReadOnly);
         }
 
         /// <summary>
@@ -241,6 +242,43 @@ namespace RimWorldAccess
                 {
                     StorageSettingsMenuState.Open(settings);
                 }
+            }
+            else
+            {
+                // Check if this is a dynamically discovered component category
+                var component = BuildingComponentsHelper.GetComponentByType(building, "CompFlickable");
+                if (component != null && component.CategoryName == category)
+                {
+                    FlickableComponentState.Open(building);
+                    return;
+                }
+
+                component = BuildingComponentsHelper.GetComponentByType(building, "CompRefuelable");
+                if (component != null && component.CategoryName == category)
+                {
+                    RefuelableComponentState.Open(building);
+                    return;
+                }
+
+                component = BuildingComponentsHelper.GetComponentByType(building, "CompBreakdownable");
+                if (component != null && component.CategoryName == category)
+                {
+                    BreakdownableComponentState.Open(building);
+                    return;
+                }
+                component = BuildingComponentsHelper.GetComponentByType(building, "Building_Door");
+                if (component != null && component.CategoryName == category)
+                {
+                    DoorControlState.Open(building);
+                    return;
+                }
+                component = BuildingComponentsHelper.GetComponentByType(building, "CompForbiddable");
+                if (component != null && component.CategoryName == category)
+                {
+                    ForbidControlState.Open(building);
+                    return;
+                }
+
             }
         }
 
