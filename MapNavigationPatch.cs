@@ -28,6 +28,7 @@ namespace RimWorldAccess
                 WindowlessPauseMenuState.IsActive ||
                 JumpMenuState.IsActive ||
                 NotificationMenuState.IsActive ||
+                QuestMenuState.IsActive ||
                 WindowlessSaveMenuState.IsActive ||
                 WindowlessConfirmationState.IsActive ||
                 WindowlessDeleteConfirmationState.IsActive ||

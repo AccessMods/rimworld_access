@@ -10,7 +10,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Unified Harmony patch for UIRoot.UIRootOnGUI to handle all keyboard accessibility features.
-    /// Handles: Escape key for pause menu, Enter key for building inspection/beds, ] key for colonist orders, I key for inspection menu, J key for jump menu, L key for notification menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
+    /// Handles: Escape key for pause menu, Enter key for building inspection/beds, ] key for colonist orders, I key for inspection menu, J key for jump menu, L key for notification menu, Q key for quest menu, Alt+M for mood info, S for schedule, and all windowless menu navigation.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -423,6 +423,59 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 4.73: Handle quest menu if active =====
+            if (QuestMenuState.IsActive)
+            {
+                bool handled = false;
+
+                if (key == KeyCode.DownArrow)
+                {
+                    QuestMenuState.SelectNext();
+                    handled = true;
+                }
+                else if (key == KeyCode.UpArrow)
+                {
+                    QuestMenuState.SelectPrevious();
+                    handled = true;
+                }
+                else if (key == KeyCode.RightArrow)
+                {
+                    QuestMenuState.NextTab();
+                    handled = true;
+                }
+                else if (key == KeyCode.LeftArrow)
+                {
+                    QuestMenuState.PreviousTab();
+                    handled = true;
+                }
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    QuestMenuState.ViewSelectedQuest();
+                    handled = true;
+                }
+                else if (key == KeyCode.A)
+                {
+                    QuestMenuState.AcceptQuest();
+                    handled = true;
+                }
+                else if (key == KeyCode.D)
+                {
+                    QuestMenuState.ToggleDismissQuest();
+                    handled = true;
+                }
+                else if (key == KeyCode.Escape)
+                {
+                    QuestMenuState.Close();
+                    handled = true;
+                }
+
+                if (handled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 4.75: Handle jump menu if active =====
             if (JumpMenuState.IsActive)
             {
@@ -605,6 +658,7 @@ namespace RimWorldAccess
                                     ZoneCreationState.IsInCreationMode ||
                                     JumpMenuState.IsActive ||
                                     NotificationMenuState.IsActive ||
+                                    QuestMenuState.IsActive ||
                                     WindowlessFloatMenuState.IsActive ||
                                     WindowlessPauseMenuState.IsActive ||
                                     WindowlessSaveMenuState.IsActive ||
@@ -843,7 +897,28 @@ namespace RimWorldAccess
                 }
             }
 
-            // ===== PRIORITY 7.5: Open research menu with P key (if no menu is active and we're in-game) =====
+            // ===== PRIORITY 7.5: Open quest menu with Q key (if no menu is active and we're in-game) =====
+            if (key == KeyCode.Q)
+            {
+                // Only open quest menu if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode)
+                {
+                    // Prevent the default Q key behavior
+                    Event.current.Use();
+
+                    // Open the quest menu
+                    QuestMenuState.Open();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 7.55: Open research menu with P key (if no menu is active and we're in-game) =====
             if (key == KeyCode.P)
             {
                 // Only open research menu if:

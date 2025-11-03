@@ -60,6 +60,10 @@ namespace RimWorldAccess
             if (WindowlessFloatMenuState.IsActive)
                 return;
 
+            // Don't process if quest menu is active (A key accepts quests)
+            if (QuestMenuState.IsActive)
+                return;
+
             // If already in architect mode (but in placement), cancel back to menu
             if (ArchitectState.IsInPlacementMode)
             {
