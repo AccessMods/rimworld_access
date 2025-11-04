@@ -311,7 +311,7 @@ namespace RimWorldAccess
             }
             else if (category == "Social")
             {
-                BuildDetailedInfoChildren(categoryItem, obj, category);
+                BuildSocialChildren(categoryItem, pawn);
             }
             else if (category == "Training")
             {
@@ -519,6 +519,295 @@ namespace RimWorldAccess
             };
 
             skillItem.Children.Add(detailItem);
+        }
+
+        /// <summary>
+        /// Builds children for Social category.
+        /// </summary>
+        private static void BuildSocialChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            // Add Relations as expandable item
+            var relationsItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.SubCategory,
+                Label = "Relations",
+                Data = pawn,
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = true,
+                IsExpanded = false
+            };
+            relationsItem.OnActivate = () => BuildSocialRelationsChildren(relationsItem, pawn);
+            parentItem.Children.Add(relationsItem);
+
+            // Add Social Interactions as expandable item
+            var interactionsItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.SubCategory,
+                Label = "Social Interactions",
+                Data = pawn,
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = true,
+                IsExpanded = false
+            };
+            interactionsItem.OnActivate = () => BuildSocialInteractionsChildren(interactionsItem, pawn);
+            parentItem.Children.Add(interactionsItem);
+
+            // Add Ideology if applicable
+            if (ModsConfig.IdeologyActive && pawn.ideo != null)
+            {
+                var ideologyItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = "Ideology & Role",
+                    Data = pawn,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                ideologyItem.OnActivate = () => BuildIdeologyChildren(ideologyItem, pawn);
+                parentItem.Children.Add(ideologyItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Relations sub-category.
+        /// </summary>
+        private static void BuildSocialRelationsChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            var relations = SocialTabHelper.GetRelations(pawn);
+
+            if (relations.Count == 0)
+            {
+                var noRelationsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No relations",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noRelationsItem);
+                return;
+            }
+
+            foreach (var relation in relations)
+            {
+                string relationsStr = relation.Relations.Count > 0 ? string.Join(", ", relation.Relations) : "Acquaintance";
+                var relationItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"{relation.OtherPawnName} ({relationsStr}, opinion: {relation.MyOpinion:+0;-0;0})",
+                    Data = relation,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                relationItem.OnActivate = () => BuildRelationDetailChildren(relationItem, relation);
+                parentItem.Children.Add(relationItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds detail children for a specific relation.
+        /// </summary>
+        private static void BuildRelationDetailChildren(InspectionTreeItem relationItem, SocialTabHelper.RelationInfo relation)
+        {
+            if (relationItem.Children.Count > 0)
+                return; // Already built
+
+            string detailedInfo = relation.DetailedInfo.StripTags();
+            var lines = detailedInfo.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var detailItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = line.Trim(),
+                    IndentLevel = relationItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                relationItem.Children.Add(detailItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Social Interactions sub-category.
+        /// </summary>
+        private static void BuildSocialInteractionsChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            var interactions = SocialTabHelper.GetSocialInteractions(pawn);
+
+            if (interactions.Count == 0)
+            {
+                var noInteractionsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No recent social interactions",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noInteractionsItem);
+                return;
+            }
+
+            foreach (var interaction in interactions)
+            {
+                string interactionName = !string.IsNullOrEmpty(interaction.InteractionLabel)
+                    ? interaction.InteractionLabel
+                    : interaction.InteractionType;
+
+                var interactionItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"{interactionName} - {interaction.Timestamp} ago",
+                    Data = interaction,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                interactionItem.OnActivate = () => BuildInteractionDetailChildren(interactionItem, interaction);
+                parentItem.Children.Add(interactionItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds detail children for a specific social interaction.
+        /// </summary>
+        private static void BuildInteractionDetailChildren(InspectionTreeItem interactionItem, SocialTabHelper.SocialInteractionInfo interaction)
+        {
+            if (interactionItem.Children.Count > 0)
+                return; // Already built
+
+            var detailItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = interaction.Description,
+                IndentLevel = interactionItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            interactionItem.Children.Add(detailItem);
+
+            if (interaction.IsFaded)
+            {
+                var fadedItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "[Old interaction]",
+                    IndentLevel = interactionItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                interactionItem.Children.Add(fadedItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Ideology sub-category.
+        /// </summary>
+        private static void BuildIdeologyChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            var ideologyInfo = SocialTabHelper.GetIdeologyInfo(pawn);
+            if (ideologyInfo == null)
+            {
+                var noIdeologyItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No ideology information available",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noIdeologyItem);
+                return;
+            }
+
+            // Add ideology name
+            var ideoNameItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = $"Ideology: {ideologyInfo.IdeoName}",
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            parentItem.Children.Add(ideoNameItem);
+
+            // Add certainty
+            var certaintyItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = $"Certainty: {ideologyInfo.Certainty:P0}",
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            parentItem.Children.Add(certaintyItem);
+
+            // Add role if available
+            if (!string.IsNullOrEmpty(ideologyInfo.RoleName))
+            {
+                var roleItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = $"Role: {ideologyInfo.RoleName}",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(roleItem);
+            }
+
+            // Add detailed certainty info
+            if (!string.IsNullOrEmpty(ideologyInfo.CertaintyDetails))
+            {
+                var certaintyDetails = ideologyInfo.CertaintyDetails.StripTags();
+                var lines = certaintyDetails.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    var detailItem = new InspectionTreeItem
+                    {
+                        Type = InspectionTreeItem.ItemType.DetailText,
+                        Label = line.Trim(),
+                        IndentLevel = parentItem.IndentLevel + 1,
+                        IsExpandable = false
+                    };
+                    parentItem.Children.Add(detailItem);
+                }
+            }
+
+            // Add role details if available
+            if (!string.IsNullOrEmpty(ideologyInfo.RoleDetails))
+            {
+                var roleDetails = ideologyInfo.RoleDetails.StripTags();
+                var lines = roleDetails.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    var detailItem = new InspectionTreeItem
+                    {
+                        Type = InspectionTreeItem.ItemType.DetailText,
+                        Label = line.Trim(),
+                        IndentLevel = parentItem.IndentLevel + 1,
+                        IsExpandable = false
+                    };
+                    parentItem.Children.Add(detailItem);
+                }
+            }
         }
 
         /// <summary>
