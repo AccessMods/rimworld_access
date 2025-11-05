@@ -321,21 +321,59 @@ namespace RimWorldAccess
             sb.AppendLine();
 
             // Opinion breakdown
-            if (pawn.relations != null)
+            sb.AppendLine("Opinion factors:");
+            bool hasFactors = false;
+
+            // Add relation opinion modifiers
+            var directRelations = pawn.relations.DirectRelations;
+            if (directRelations != null)
             {
-                sb.AppendLine("Opinion factors:");
-                var thoughts = pawn.needs?.mood?.thoughts?.memories?.Memories;
-                if (thoughts != null)
+                foreach (var rel in directRelations)
                 {
-                    foreach (var thought in thoughts)
+                    if (rel.otherPawn == otherPawn && rel.def.opinionOffset != 0)
                     {
-                        if (thought is Thought_Memory memory && memory.otherPawn == otherPawn)
-                        {
-                            float effect = memory.MoodOffset();
-                            sb.AppendLine($"  {memory.LabelCap.StripTags()}: {effect:+0;-0}");
-                        }
+                        sb.AppendLine($"  {rel.def.GetGenderSpecificLabelCap(otherPawn)}: {rel.def.opinionOffset:+0;-0;0}");
+                        hasFactors = true;
                     }
                 }
+            }
+
+            // Add social thought opinion modifiers
+            if (pawn.RaceProps.Humanlike && pawn.needs?.mood?.thoughts != null)
+            {
+                var thoughts = pawn.needs.mood.thoughts;
+                var socialThoughts = new List<ISocialThought>();
+                thoughts.GetDistinctSocialThoughtGroups(otherPawn, socialThoughts);
+
+                foreach (var socialThought in socialThoughts)
+                {
+                    int opinionOffset = thoughts.OpinionOffsetOfGroup(socialThought, otherPawn);
+                    if (opinionOffset != 0)
+                    {
+                        Thought thought = (Thought)socialThought;
+                        string label = thought.LabelCapSocial.StripTags();
+
+                        // Check if there are multiple instances of this thought
+                        int count = 1;
+                        if (thought.def.IsMemory && socialThought is Thought_MemorySocial memorySocial)
+                        {
+                            count = thoughts.memories.NumMemoriesInGroup(memorySocial);
+                        }
+
+                        if (count > 1)
+                        {
+                            label += $" x{count}";
+                        }
+
+                        sb.AppendLine($"  {label}: {opinionOffset:+0;-0;0}");
+                        hasFactors = true;
+                    }
+                }
+            }
+
+            if (!hasFactors)
+            {
+                sb.AppendLine("  (None)");
             }
 
             // Romance info if applicable
