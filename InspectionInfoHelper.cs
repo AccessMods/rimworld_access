@@ -288,6 +288,18 @@ namespace RimWorldAccess
         {
             var sb = new StringBuilder();
 
+            // Name information
+            if (pawn.Name is NameTriple nameTriple)
+            {
+                sb.AppendLine($"Name: {nameTriple.ToStringFull}");
+                sb.AppendLine();
+            }
+            else if (pawn.Name != null)
+            {
+                sb.AppendLine($"Name: {pawn.Name}");
+                sb.AppendLine();
+            }
+
             if (pawn.story != null)
             {
                 // Traits
