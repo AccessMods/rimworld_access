@@ -73,6 +73,35 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the label for a category, potentially with additional info.
+        /// </summary>
+        private static string GetCategoryLabel(object obj, string category)
+        {
+            // Special handling for Mood category to show percentage and break thresholds
+            if (category == "Mood" && obj is Pawn pawn && pawn.needs?.mood != null)
+            {
+                float moodPercentage = pawn.needs.mood.CurLevelPercentage * 100f;
+                var sb = new StringBuilder();
+                sb.Append($"{category} ({moodPercentage:F0}%)");
+
+                // Add break thresholds if pawn can have mental breaks
+                if (pawn.mindState?.mentalBreaker != null &&
+                    pawn.mindState.mentalBreaker.CanDoRandomMentalBreaks)
+                {
+                    float minor = pawn.mindState.mentalBreaker.BreakThresholdMinor * 100f;
+                    float major = pawn.mindState.mentalBreaker.BreakThresholdMajor * 100f;
+                    float extreme = pawn.mindState.mentalBreaker.BreakThresholdExtreme * 100f;
+
+                    sb.Append($" - Breaks: Minor {minor:F0}%, Major {major:F0}%, Extreme {extreme:F0}%");
+                }
+
+                return sb.ToString();
+            }
+
+            return category;
+        }
+
+        /// <summary>
         /// Builds a tree item for a category.
         /// </summary>
         private static InspectionTreeItem BuildCategoryItem(object obj, string category, int indent)
@@ -80,7 +109,7 @@ namespace RimWorldAccess
             var item = new InspectionTreeItem
             {
                 Type = InspectionTreeItem.ItemType.Category,
-                Label = category,
+                Label = GetCategoryLabel(obj, category),
                 Data = obj,
                 IndentLevel = indent
             };
@@ -131,7 +160,6 @@ namespace RimWorldAccess
         {
             // Categories that just show simple text inline
             return category == "Overview" ||
-                   category == "Mood" ||
                    category == "Work Priorities" ||
                    category == "Power";
         }
@@ -212,6 +240,7 @@ namespace RimWorldAccess
                    category == "Skills" ||
                    category == "Health" ||
                    category == "Needs" ||
+                   category == "Mood" ||
                    category == "Social" ||
                    category == "Training" ||
                    category == "Character";
@@ -328,6 +357,10 @@ namespace RimWorldAccess
             else if (category == "Needs")
             {
                 BuildDetailedInfoChildren(categoryItem, obj, category);
+            }
+            else if (category == "Mood")
+            {
+                BuildMoodChildren(categoryItem, pawn);
             }
             else if (category == "Social")
             {
@@ -887,6 +920,88 @@ namespace RimWorldAccess
                     };
                     parentItem.Children.Add(detailItem);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Mood category.
+        /// </summary>
+        private static void BuildMoodChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            if (pawn.needs?.mood == null)
+            {
+                var noMoodItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No mood information available",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noMoodItem);
+                return;
+            }
+
+            Need_Mood mood = pawn.needs.mood;
+
+            // Get thoughts affecting mood
+            List<Thought> thoughtGroups = new List<Thought>();
+            PawnNeedsUIUtility.GetThoughtGroupsInDisplayOrder(mood, thoughtGroups);
+
+            if (thoughtGroups.Count == 0)
+            {
+                var noThoughtsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No thoughts affecting mood",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noThoughtsItem);
+                return;
+            }
+
+            // Process each thought group
+            List<Thought> thoughtGroup = new List<Thought>();
+            foreach (Thought group in thoughtGroups)
+            {
+                mood.thoughts.GetMoodThoughts(group, thoughtGroup);
+
+                if (thoughtGroup.Count == 0)
+                    continue;
+
+                // Get the leading thought (most severe in the group)
+                Thought leadingThought = PawnNeedsUIUtility.GetLeadingThoughtInGroup(thoughtGroup);
+
+                if (leadingThought == null || !leadingThought.VisibleInNeedsTab)
+                    continue;
+
+                // Get mood offset for this thought group
+                float moodOffset = mood.thoughts.MoodOffsetOfGroup(group);
+
+                // Format the thought label
+                string thoughtLabel = leadingThought.LabelCap.StripTags();
+                if (thoughtGroup.Count > 1)
+                {
+                    thoughtLabel = $"{thoughtLabel} x{thoughtGroup.Count}";
+                }
+
+                // Format mood offset with sign
+                string offsetText = moodOffset.ToString("+0;-0;0");
+
+                var thoughtItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"{thoughtLabel}: {offsetText}",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+
+                parentItem.Children.Add(thoughtItem);
+
+                thoughtGroup.Clear();
             }
         }
 
