@@ -542,7 +542,7 @@ namespace RimWorldAccess
                 return; // Already built
 
             var sb = new StringBuilder();
-            sb.Append($"XP: {skill.XpTotalEarned:F0}");
+            sb.Append($"XP: {skill.xpSinceLastLevel:F0} / {skill.XpRequiredForLevelUp:F0}");
 
             if (skill.passion != Passion.None)
             {
