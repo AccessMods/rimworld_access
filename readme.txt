@@ -337,6 +337,76 @@ Notes:
 - Empty colonies will show "No items in colony storage"
 
 
+TRADING SYSTEM
+--------------
+The mod provides a windowless, keyboard-accessible trading interface that replaces the
+visual trade dialog with full feature parity. All trades are confirmed before execution.
+
+Opening Trades:
+- Interact with traders normally (caravans, orbital ships, settlements)
+- The accessible trade menu automatically replaces the visual dialog
+
+List View Mode:
+Arrow Up/Down     Navigate items in current category
+Arrow Left/Right  Switch between categories (Currency → Colony Items → Trader Items)
+Enter             Enter quantity adjustment mode for selected item
+A                 Accept trade (shows confirmation dialog)
+G                 Toggle gift mode (when available with friendly factions)
+P                 Show detailed price breakdown for current item
+B                 Announce current trade balance (silver/favor spending)
+R                 Reset current item quantity to zero
+Shift+R           Reset all trade quantities
+Escape            Close trade menu
+
+Quantity Adjustment Mode:
+Up/Down or +/-    Adjust quantity by ±1
+Shift+Up/Down     Adjust quantity by ±10
+Ctrl+Up/Down      Adjust quantity by ±100
+Alt+Up            Set to maximum sell amount
+Alt+Down          Set to maximum buy amount
+Enter             Exit adjustment mode and return to list view
+Escape            Exit adjustment mode and return to list view
+
+Trade Confirmation Dialog:
+When you press A to accept a trade, a summary appears showing:
+- YOU GET: Items/silver you will receive
+- YOU LOSE: Items/silver you will spend
+
+Enter             Confirm and execute the trade
+Escape            Cancel and return to trading menu
+
+Features:
+- Three-category organization (Currency, Colony Items, Trader Items)
+- Real-time price calculations with negotiator skill bonuses
+- Support for all trader types (Pawns, Orbital Ships, Settlements)
+- Gift mode for friendly factions (affects goodwill instead of trading)
+- Royal favor trading support (Royalty DLC)
+- Caravan trading with mass/capacity tracking
+- Comprehensive trade summary before execution
+- Validation for insufficient funds, trader inventory, ideology restrictions
+- Screen reader integration via clipboard announcements
+- Audio feedback using RimWorld's built-in sounds
+
+Information Announced:
+For each item: "(Position/Total) ItemName | Colony: X Sell: Y silver | Trader: Z Buy: W silver | Current: Action N for M silver"
+
+Example:
+"(5/42) Steel | Colony: 500 Sell: 2.1 silver | Trader: 200 Buy: 3.0 silver | Current: Selling 50 for 105 silver"
+
+Trade Confirmation Example:
+"Proposed Trade:
+
+YOU GET:
+  + 20 pemmican
+  + 1 herbal medicine
+  + 1 steel knife (good)
+
+YOU LOSE:
+  - 149 silver
+
+Press Enter to confirm trade, Escape to cancel and return to trading"
+
+
 OTHER SHORTCUTS
 ---------------
 Delete        Delete selected save file (in save/load menu)
