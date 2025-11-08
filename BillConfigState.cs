@@ -18,7 +18,6 @@ namespace RimWorldAccess
         private static List<MenuItem> menuItems = null;
         private static int selectedIndex = 0;
         private static bool isActive = false;
-        private static string editBuffer = "";
         private static bool isEditing = false;
 
         private enum MenuItemType
@@ -73,7 +72,6 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = true;
             isEditing = false;
-            editBuffer = "";
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -91,7 +89,6 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             isEditing = false;
-            editBuffer = "";
         }
 
         private static void BuildMenuItems()

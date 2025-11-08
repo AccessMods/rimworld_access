@@ -30,15 +30,12 @@ namespace RimWorldAccess
                 // Note: MSBuild uses lowercase assembly name for embedded resources
                 string resourceName = $"rimworld_access.Sounds.{resourcePath.Replace('/', '.').Replace('\\', '.')}";
 
-                ModLogger.Msg($"Looking for embedded resource: {resourceName}");
-
                 // Get the embedded resource stream
                 using (Stream stream = assembly.GetManifestResourceStream(resourceName))
                 {
                     if (stream == null)
                     {
                         ModLogger.Error($"Embedded audio resource not found: {resourceName}");
-                        ModLogger.Msg($"Available resources: {string.Join(", ", assembly.GetManifestResourceNames())}");
                         return null;
                     }
 
@@ -105,8 +102,6 @@ namespace RimWorldAccess
             int channels = BitConverter.ToInt16(wavData, fmtChunkOffset + 10);
             int sampleRate = BitConverter.ToInt32(wavData, fmtChunkOffset + 12);
             int bitDepth = BitConverter.ToInt16(wavData, fmtChunkOffset + 22);
-
-            ModLogger.Msg($"WAV {name}: {channels}ch, {sampleRate}Hz, {bitDepth}bit");
 
             if (bitDepth != 16)
             {
@@ -208,16 +203,12 @@ namespace RimWorldAccess
         /// <param name="volume">Volume level 0-1</param>
         public static void PlayEmbeddedSound(string resourcePath, float volume = 1f)
         {
-            ModLogger.Msg($"PlayEmbeddedSound called: {resourcePath}");
-
             AudioClip clip = LoadEmbeddedAudio(resourcePath);
             if (clip == null)
             {
                 ModLogger.Warning($"AudioClip is null for: {resourcePath}");
                 return;
             }
-
-            ModLogger.Msg($"AudioClip loaded successfully: {clip.name}, length: {clip.length}s");
 
             try
             {
@@ -229,18 +220,13 @@ namespace RimWorldAccess
                     return;
                 }
 
-                ModLogger.Msg($"Camera found: {mainCamera.name}");
-
                 AudioSource audioSource = mainCamera.GetComponent<AudioSource>();
                 if (audioSource == null)
                 {
-                    ModLogger.Msg("Creating new AudioSource component");
                     audioSource = mainCamera.gameObject.AddComponent<AudioSource>();
                 }
 
-                ModLogger.Msg($"Playing audio with volume: {volume}");
                 audioSource.PlayOneShot(clip, volume);
-                ModLogger.Msg("PlayOneShot called successfully");
             }
             catch (Exception ex)
             {

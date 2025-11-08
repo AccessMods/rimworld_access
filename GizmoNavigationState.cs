@@ -146,11 +146,9 @@ namespace RimWorldAccess
         /// </summary>
         public static void Close()
         {
-            ModLogger.Msg($"GizmoNavigationState.Close() called, was active: {isActive}");
             isActive = false;
             selectedGizmoIndex = 0;
             availableGizmos.Clear();
-            ModLogger.Msg($"GizmoNavigationState.Close() finished, now active: {isActive}");
         }
 
         /// <summary>
@@ -209,8 +207,6 @@ namespace RimWorldAccess
             // 1. Designator (like Reinstall, Copy) - enters placement mode
             if (selectedGizmo is Designator designator)
             {
-                ModLogger.Msg($"Executing Designator: {GetGizmoLabel(selectedGizmo)}");
-
                 // For Designators opened via cursor objects (not selected pawns),
                 // we need to ensure the objects at cursor are actually selected
                 // so the Designator has proper context (e.g., Designator_Install needs to know what to reinstall)
@@ -218,8 +214,6 @@ namespace RimWorldAccess
                 {
                     IntVec3 cursorPos = MapNavigationState.CurrentCursorPosition;
                     List<Thing> thingsAtCursor = cursorPos.GetThingList(Find.CurrentMap);
-
-                    ModLogger.Msg($"Selecting {thingsAtCursor?.Count ?? 0} things at cursor before executing Designator");
 
                     if (thingsAtCursor != null && thingsAtCursor.Count > 0 && Find.Selector != null)
                     {
@@ -238,17 +232,14 @@ namespace RimWorldAccess
                 {
                     // Call ProcessInput to let the Designator do its preparation work
                     // (Designator_Install does setup like canceling existing blueprints)
-                    ModLogger.Msg($"About to call ProcessInput on Designator");
                     selectedGizmo.ProcessInput(fakeEvent);
-                    ModLogger.Msg($"ProcessInput completed successfully");
 
                     // Announce placement mode
                     ClipboardHelper.CopyToClipboard($"{GetGizmoLabel(selectedGizmo)} - Use arrow keys to position, R to rotate, Enter to place, Escape to cancel");
                 }
                 catch (System.Exception ex)
                 {
-                    ModLogger.Msg($"Exception in Designator execution: {ex.Message}");
-                    ModLogger.Msg($"Stack trace: {ex.StackTrace}");
+                    ModLogger.Error($"Exception in Designator execution: {ex.Message}");
                     ClipboardHelper.CopyToClipboard($"Error executing {GetGizmoLabel(selectedGizmo)}: {ex.Message}");
                 }
 

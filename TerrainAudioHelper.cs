@@ -94,11 +94,9 @@ namespace RimWorldAccess
             }
 
             string audioFile = GetAudioForTerrain(terrain);
-            ModLogger.Msg($"Terrain: {terrain.label}, Audio file: {audioFile ?? "none"}");
 
             if (audioFile != null)
             {
-                ModLogger.Msg($"Playing audio: {audioFile}");
                 EmbeddedAudioHelper.PlayEmbeddedSound(audioFile, volume);
                 return true;
             }

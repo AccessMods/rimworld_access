@@ -224,7 +224,6 @@ namespace RimWorldAccess
                     __instance.JumpToCurrentMapLoc(newPosition);
 
                     // Play terrain audio feedback
-                    ModLogger.Msg($"Cursor moved to {newPosition}, attempting to play terrain audio");
                     TerrainDef terrain = newPosition.GetTerrain(Find.CurrentMap);
                     TerrainAudioHelper.PlayTerrainAudio(terrain, 0.5f);
 

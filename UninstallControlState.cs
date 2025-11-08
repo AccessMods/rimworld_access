@@ -28,7 +28,6 @@ namespace RimWorldAccess
             }
 
             if (!targetBuilding.def.Minifiable)
-            ModLogger.Msg(string.Format("Uninstall check: def.Minifiable={0}, building type={1}", targetBuilding.def.Minifiable, targetBuilding.GetType().Name));
             {
                 ClipboardHelper.CopyToClipboard("Building cannot be uninstalled");
                 return;
@@ -62,25 +61,19 @@ namespace RimWorldAccess
             if (building == null || building.Map == null)
                 return;
 
-            ModLogger.Msg(string.Format("ToggleUninstall called for {0}", building.LabelCap));
-
             var designation = building.Map.designationManager.DesignationOn(building, DesignationDefOf.Uninstall);
 
             if (designation != null)
             {
                 // Remove uninstall designation
                 building.Map.designationManager.RemoveDesignation(designation);
-                ModLogger.Msg("Removed existing uninstall designation");
                 ClipboardHelper.CopyToClipboard(string.Format("{0} - Uninstall designation removed", building.LabelCap));
             }
             else
             {
                 // Check if building can be instantly uninstalled (god mode or no work cost)
                 bool instantUninstall = UnityEngine.Debug.isDebugBuild || building.GetStatValue(StatDefOf.WorkToBuild) == 0f || building.def.IsFrame;
-                
-                ModLogger.Msg(string.Format("Adding uninstall designation. InstantUninstall: {0}, WorkToBuild: {1}", 
-                    instantUninstall, building.GetStatValue(StatDefOf.WorkToBuild)));
-                
+
                 if (instantUninstall)
                 {
                     // Instant uninstall like the game does in god mode
@@ -93,8 +86,6 @@ namespace RimWorldAccess
                     building.Map.designationManager.AddDesignation(new Designation(building, DesignationDefOf.Uninstall));
                     SoundDefOf.Click.PlayOneShotOnCamera();
                     ClipboardHelper.CopyToClipboard(string.Format("{0} - Designated for uninstall", building.LabelCap));
-                    
-                    ModLogger.Msg("Designation added successfully");
                 }
             }
         }

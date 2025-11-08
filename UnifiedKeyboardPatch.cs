@@ -236,7 +236,6 @@ namespace RimWorldAccess
             // ===== PRIORITY 3: Handle save/load menu if active =====
             if (WindowlessSaveMenuState.IsActive)
             {
-                Log.Message($"RimWorld Access: Save menu active, handling key {key}");
                 bool handled = false;
 
                 if (key == KeyCode.DownArrow)
@@ -275,30 +274,25 @@ namespace RimWorldAccess
             // ===== PRIORITY 4: Handle pause menu if active =====
             if (WindowlessPauseMenuState.IsActive)
             {
-                Log.Message($"RimWorld Access: Pause menu active, handling key {key}");
                 bool handled = false;
 
                 if (key == KeyCode.DownArrow)
                 {
-                    Log.Message("RimWorld Access: Down arrow in pause menu");
                     WindowlessPauseMenuState.SelectNext();
                     handled = true;
                 }
                 else if (key == KeyCode.UpArrow)
                 {
-                    Log.Message("RimWorld Access: Up arrow in pause menu");
                     WindowlessPauseMenuState.SelectPrevious();
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
-                    Log.Message("RimWorld Access: Enter in pause menu");
                     WindowlessPauseMenuState.ExecuteSelected();
                     handled = true;
                 }
                 else if (key == KeyCode.Escape)
                 {
-                    Log.Message("RimWorld Access: Escape in pause menu - closing");
                     WindowlessPauseMenuState.Close();
                     ClipboardHelper.CopyToClipboard("Menu closed");
                     handled = true;
@@ -307,7 +301,6 @@ namespace RimWorldAccess
                 if (handled)
                 {
                     Event.current.Use();
-                    Log.Message("RimWorld Access: Event consumed");
                     return;
                 }
             }
@@ -1304,7 +1297,6 @@ namespace RimWorldAccess
             // ===== PRIORITY 8: Open pause menu with Escape (if no menu is active and we're in-game) =====
             if (key == KeyCode.Escape)
             {
-                Log.Message("RimWorld Access: Escape key pressed");
                 // Only open pause menu if:
                 // 1. We're in gameplay (not at main menu)
                 // 2. No windows are preventing camera motion (means a dialog is open)
@@ -1314,13 +1306,11 @@ namespace RimWorldAccess
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
                     !ZoneCreationState.IsInCreationMode)
                 {
-                    Log.Message("RimWorld Access: Opening pause menu");
                     // Prevent the default escape behavior (opening game's pause menu)
                     Event.current.Use();
 
                     // Open our windowless pause menu
                     WindowlessPauseMenuState.Open();
-                    Log.Message($"RimWorld Access: Pause menu opened, IsActive = {WindowlessPauseMenuState.IsActive}");
                     return;
                 }
             }

@@ -13,13 +13,10 @@ namespace RimWorldAccess
         private static bool initialized = false;
         private static List<ListableOption> cachedColumn0 = new List<ListableOption>();
         private static List<ListableOption> cachedColumn1 = new List<ListableOption>();
-        private static bool isInMainMenu = false;
 
         [HarmonyPrefix]
         public static void Prefix(Rect rect, bool anyMapFiles)
         {
-            isInMainMenu = true;
-
             // Rebuild menu structure manually (since we can't intercept the original lists)
             cachedColumn0.Clear();
             cachedColumn1.Clear();
@@ -165,15 +162,11 @@ namespace RimWorldAccess
                 };
                 Find.WindowStack.Add(new FloatMenu(options));
             }));
-
-            Log.Message($"RimWorld Access: Built menu - Column 0: {cachedColumn0.Count} items, Column 1: {cachedColumn1.Count} items");
         }
 
         [HarmonyPostfix]
         public static void Postfix(Rect rect, bool anyMapFiles)
         {
-            isInMainMenu = false;
-
             // Initialize menu navigation state with our rebuilt lists
             if (cachedColumn0.Count > 0 && cachedColumn1.Count > 0)
             {
@@ -234,7 +227,6 @@ namespace RimWorldAccess
             ListableOption selected = MenuNavigationState.GetCurrentSelection();
             if (selected != null && selected.action != null)
             {
-                Log.Message($"RimWorld Access: Executing menu item - {selected.label}");
                 selected.action();
             }
         }
