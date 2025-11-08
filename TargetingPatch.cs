@@ -3,6 +3,7 @@ using UnityEngine;
 using Verse;
 using Verse.AI;
 using RimWorld;
+using System;
 using System.Linq;
 
 namespace RimWorldAccess
@@ -50,53 +51,101 @@ namespace RimWorldAccess
                     return false;
                 }
 
-                // Get the targeting source to access targeting parameters
+                // Check if this is verb-based targeting (Command_VerbTarget) or action-based (Command_Target)
                 var targetingSourceField = AccessTools.Field(typeof(Targeter), "targetingSource");
                 var targetingSource = targetingSourceField?.GetValue(__instance) as ITargetingSource;
 
-                if (targetingSource == null)
+                if (targetingSource != null)
                 {
-                    ClipboardHelper.CopyToClipboard("No targeting source");
+                    // VERB-BASED TARGETING (Command_VerbTarget - weapon attacks, abilities)
+                    // Get the best target at the cursor position (prioritized: pawns > things > cell)
+                    Vector3 clickPos = cursorPosition.ToVector3Shifted();
+                    var targets = GenUI.TargetsAt(clickPos, targetingSource.targetParams, thingsOnly: false, targetingSource);
+                    LocalTargetInfo target = targets.FirstOrFallback(LocalTargetInfo.Invalid);
+
+                    // Validate the target is valid
+                    if (!target.IsValid)
+                    {
+                        ClipboardHelper.CopyToClipboard("No valid target at cursor position");
+                        Event.current.Use();
+                        return false;
+                    }
+
+                    // Validate the target can be attacked/used
+                    if (!targetingSource.ValidateTarget(target, showMessages: true))
+                    {
+                        // Invalid target, ValidateTarget already showed a message
+                        Event.current.Use();
+                        return false;
+                    }
+
+                    // Valid target! Use the standard OrderForceTarget method
+                    targetingSource.OrderForceTarget(target);
+
+                    // Stop targeting mode
+                    __instance.StopTargeting();
+
+                    // Announce success
+                    string targetLabel = target.HasThing ? target.Thing.LabelShort : target.Cell.ToString();
+                    ClipboardHelper.CopyToClipboard($"Targeting: {targetLabel}");
+
+                    // Consume the event
                     Event.current.Use();
                     return false;
                 }
-
-                // Get the best target at the cursor position (prioritized: pawns > things > cell)
-                // This is the correct way - gets the actual Thing at the position, not just the cell
-                Vector3 clickPos = cursorPosition.ToVector3Shifted();
-                var targets = GenUI.TargetsAt(clickPos, targetingSource.targetParams, thingsOnly: false, targetingSource);
-                LocalTargetInfo target = targets.FirstOrFallback(LocalTargetInfo.Invalid);
-
-                // Validate the target is valid
-                if (!target.IsValid)
+                else
                 {
-                    ClipboardHelper.CopyToClipboard("No valid target at cursor position");
+                    // ACTION-BASED TARGETING (Command_Target - copy, reinstall, etc.)
+                    // Get the action callback and targeting parameters via reflection
+                    var actionField = AccessTools.Field(typeof(Targeter), "action");
+                    var action = actionField?.GetValue(__instance) as Action<LocalTargetInfo>;
+
+                    var targetParamsField = AccessTools.Field(typeof(Targeter), "targetParams");
+                    var targetParams = targetParamsField?.GetValue(__instance) as TargetingParameters;
+
+                    if (action == null)
+                    {
+                        ClipboardHelper.CopyToClipboard("No targeting action available");
+                        Event.current.Use();
+                        return false;
+                    }
+
+                    // Get the best target at the cursor position
+                    Vector3 clickPos = cursorPosition.ToVector3Shifted();
+                    var targets = GenUI.TargetsAt(clickPos, targetParams, thingsOnly: false, null);
+                    LocalTargetInfo target = targets.FirstOrFallback(LocalTargetInfo.Invalid);
+
+                    // If no specific thing found, use the cell position itself
+                    if (!target.IsValid)
+                    {
+                        target = new LocalTargetInfo(cursorPosition);
+                    }
+
+                    // Check if there's a validator
+                    var validatorField = AccessTools.Field(typeof(Targeter), "targetValidator");
+                    var validator = validatorField?.GetValue(__instance) as Func<LocalTargetInfo, bool>;
+
+                    if (validator != null && !validator(target))
+                    {
+                        ClipboardHelper.CopyToClipboard("Invalid target");
+                        Event.current.Use();
+                        return false;
+                    }
+
+                    // Execute the action callback
+                    action(target);
+
+                    // Stop targeting mode
+                    __instance.StopTargeting();
+
+                    // Announce success
+                    string targetLabel = target.HasThing ? target.Thing.LabelShort : target.Cell.ToString();
+                    ClipboardHelper.CopyToClipboard($"Target selected: {targetLabel}");
+
+                    // Consume the event
                     Event.current.Use();
                     return false;
                 }
-
-                // Validate the target can be attacked/used
-                if (!targetingSource.ValidateTarget(target, showMessages: true))
-                {
-                    // Invalid target, ValidateTarget already showed a message
-                    Event.current.Use();
-                    return false;
-                }
-
-                // Valid target! Use the standard OrderForceTarget method
-                // This creates JobDefOf.AttackStatic for weapons, which continues attacking
-                targetingSource.OrderForceTarget(target);
-
-                // Stop targeting mode
-                __instance.StopTargeting();
-
-                // Announce success
-                string targetLabel = target.HasThing ? target.Thing.LabelShort : target.Cell.ToString();
-                ClipboardHelper.CopyToClipboard($"Targeting: {targetLabel}");
-
-                // Consume the event
-                Event.current.Use();
-                return false;
             }
 
             // Let other keys pass through

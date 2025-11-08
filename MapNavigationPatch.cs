@@ -214,6 +214,9 @@ namespace RimWorldAccess
 
                 if (positionChanged)
                 {
+                    // Clear the "pawn just selected" flag since user is now navigating the map
+                    GizmoNavigationState.PawnJustSelected = false;
+
                     // Get the new cursor position
                     IntVec3 newPosition = MapNavigationState.CurrentCursorPosition;
 
@@ -278,6 +281,9 @@ namespace RimWorldAccess
                 Find.Selector.ClearSelection();
                 Find.Selector.Select(selectedPawn);
             }
+
+            // Set flag indicating pawn was just selected (for gizmo navigation)
+            GizmoNavigationState.PawnJustSelected = true;
 
             // Get current task for the pawn
             string currentTask = selectedPawn.GetJobReport();

@@ -1145,9 +1145,20 @@ namespace RimWorldAccess
                     // Prevent the default G key behavior
                     Event.current.Use();
 
-                    // Open the gizmo navigation menu
-                    // This will collect gizmos from all selected objects
-                    GizmoNavigationState.Open();
+                    // Decide whether to open gizmos for selected objects or for objects at cursor
+                    // Use selected pawn gizmos ONLY if a pawn was just selected with , or .
+                    // Otherwise, use objects at the cursor position
+                    if (GizmoNavigationState.PawnJustSelected && Find.Selector != null && Find.Selector.NumSelected > 0)
+                    {
+                        // Open gizmos for the pawn that was just selected with , or .
+                        GizmoNavigationState.Open();
+                    }
+                    else
+                    {
+                        // Open gizmos for objects at the cursor position
+                        IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
+                        GizmoNavigationState.OpenAtCursor(cursorPosition, Find.CurrentMap);
+                    }
                     return;
                 }
             }

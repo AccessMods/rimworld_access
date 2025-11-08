@@ -24,8 +24,17 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.Normal)]
         public static void Prefix()
         {
-            // Only active when in architect placement mode
-            if (!ArchitectState.IsInPlacementMode)
+            // Only active during gameplay (not in main menu)
+            if (Current.ProgramState != ProgramState.Playing)
+                return;
+
+            // Check if we're in placement mode (either via ArchitectState or directly via DesignatorManager)
+            bool inArchitectMode = ArchitectState.IsInPlacementMode;
+            bool hasActiveDesignator = Find.DesignatorManager != null &&
+                                      Find.DesignatorManager.SelectedDesignator != null;
+
+            // Only active when in architect placement mode OR when a designator is selected (e.g., from gizmos)
+            if (!inArchitectMode && !hasActiveDesignator)
                 return;
 
             // Only process keyboard events
@@ -35,17 +44,43 @@ namespace RimWorldAccess
             // Check we have a valid map
             if (Find.CurrentMap == null)
             {
-                ArchitectState.Cancel();
+                if (inArchitectMode)
+                    ArchitectState.Cancel();
+                else if (hasActiveDesignator)
+                    Find.DesignatorManager.Deselect();
                 return;
             }
 
             KeyCode key = Event.current.keyCode;
             bool handled = false;
 
+            // Get the active designator (from either source)
+            Designator activeDesignator = inArchitectMode ?
+                ArchitectState.SelectedDesignator :
+                Find.DesignatorManager.SelectedDesignator;
+
+            if (activeDesignator == null)
+                return;
+
             // R key - rotate building
             if (key == KeyCode.R)
             {
-                ArchitectState.RotateBuilding();
+                if (inArchitectMode)
+                {
+                    ArchitectState.RotateBuilding();
+                }
+                else if (activeDesignator is Designator_Place designatorPlace)
+                {
+                    // Use reflection to access private placingRot field
+                    var rotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
+                    if (rotField != null)
+                    {
+                        Rot4 currentRot = (Rot4)rotField.GetValue(designatorPlace);
+                        currentRot.Rotate(RotationDirection.Clockwise);
+                        rotField.SetValue(designatorPlace, currentRot);
+                        ClipboardHelper.CopyToClipboard($"Rotated to {currentRot}");
+                    }
+                }
                 handled = true;
             }
             // Space key - toggle selection of current cell
@@ -59,25 +94,32 @@ namespace RimWorldAccess
 
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
-                // For build designators, we typically place immediately rather than selecting multiple cells
-                if (ArchitectState.SelectedDesignator is Designator_Build)
+                // For build/place designators (including Designator_Install), place immediately
+                if (activeDesignator is Designator_Place)
                 {
                     // Single placement - check if valid and place immediately
-                    AcceptanceReport report = ArchitectState.SelectedDesignator.CanDesignateCell(currentPosition);
+                    AcceptanceReport report = activeDesignator.CanDesignateCell(currentPosition);
 
                     if (report.Accepted)
                     {
                         try
                         {
-                            ArchitectState.SelectedDesignator.DesignateSingleCell(currentPosition);
-                            ArchitectState.SelectedDesignator.Finalize(true);
+                            activeDesignator.DesignateSingleCell(currentPosition);
+                            activeDesignator.Finalize(true);
 
-                            string label = ArchitectState.SelectedDesignator.Label;
+                            string label = activeDesignator.Label;
                             ClipboardHelper.CopyToClipboard($"{label} placed at {currentPosition.x}, {currentPosition.z}");
 
-                            // Stay in placement mode for buildings - user can place more or press Escape
-                            // Clear selected cells for next placement
-                            ArchitectState.SelectedCells.Clear();
+                            // If in ArchitectState mode, clear selected cells for next placement
+                            if (inArchitectMode)
+                            {
+                                ArchitectState.SelectedCells.Clear();
+                            }
+                            else
+                            {
+                                // For gizmo-activated placement (like Reinstall), exit after placement
+                                Find.DesignatorManager.Deselect();
+                            }
                         }
                         catch (System.Exception ex)
                         {
@@ -94,7 +136,10 @@ namespace RimWorldAccess
                 else
                 {
                     // Multi-cell selection (for mining, plant cutting, etc.)
-                    ArchitectState.ToggleCell(currentPosition);
+                    if (inArchitectMode)
+                    {
+                        ArchitectState.ToggleCell(currentPosition);
+                    }
                 }
 
                 handled = true;
@@ -102,15 +147,18 @@ namespace RimWorldAccess
             // Enter key - confirm and execute designation (for multi-cell designators)
             else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
-                // For build designators, Enter exits placement mode
-                if (ArchitectState.SelectedDesignator is Designator_Build)
+                // For place designators (build, reinstall), Enter exits placement mode
+                if (activeDesignator is Designator_Place)
                 {
                     ClipboardHelper.CopyToClipboard("Placement completed");
-                    ArchitectState.Reset();
+                    if (inArchitectMode)
+                        ArchitectState.Reset();
+                    else
+                        Find.DesignatorManager.Deselect();
                 }
-                else
+                else if (inArchitectMode)
                 {
-                    // For multi-cell designators, execute the placement
+                    // For multi-cell designators in architect mode, execute the placement
                     ArchitectState.ExecutePlacement(Find.CurrentMap);
                 }
 
@@ -119,7 +167,11 @@ namespace RimWorldAccess
             // Escape key - cancel placement
             else if (key == KeyCode.Escape)
             {
-                ArchitectState.Cancel();
+                ClipboardHelper.CopyToClipboard("Placement cancelled");
+                if (inArchitectMode)
+                    ArchitectState.Cancel();
+                else
+                    Find.DesignatorManager.Deselect();
                 handled = true;
             }
 

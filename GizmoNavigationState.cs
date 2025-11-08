@@ -15,11 +15,22 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static int selectedGizmoIndex = 0;
         private static List<Gizmo> availableGizmos = new List<Gizmo>();
+        private static bool pawnJustSelected = false;
 
         /// <summary>
         /// Gets whether gizmo navigation is currently active.
         /// </summary>
         public static bool IsActive => isActive;
+
+        /// <summary>
+        /// Gets or sets whether a pawn was just selected via , or . keys.
+        /// This flag is cleared when the user navigates the map with arrow keys.
+        /// </summary>
+        public static bool PawnJustSelected
+        {
+            get => pawnJustSelected;
+            set => pawnJustSelected = value;
+        }
 
         /// <summary>
         /// Gets the currently selected gizmo index.
@@ -70,13 +81,76 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Opens the gizmo navigation menu by collecting gizmos from objects at the cursor position.
+        /// </summary>
+        public static void OpenAtCursor(IntVec3 cursorPosition, Map map)
+        {
+            if (map == null)
+                return;
+
+            // Validate cursor position
+            if (!cursorPosition.IsValid || !cursorPosition.InBounds(map))
+            {
+                ClipboardHelper.CopyToClipboard("Invalid cursor position");
+                return;
+            }
+
+            // Get all things at the cursor position
+            availableGizmos.Clear();
+            List<Thing> thingsAtPosition = cursorPosition.GetThingList(map);
+
+            if (thingsAtPosition == null || thingsAtPosition.Count == 0)
+            {
+                ClipboardHelper.CopyToClipboard("No objects at cursor position");
+                return;
+            }
+
+            // Collect gizmos from all things at this position
+            foreach (Thing thing in thingsAtPosition)
+            {
+                if (thing is ISelectable selectable)
+                {
+                    availableGizmos.AddRange(selectable.GetGizmos());
+                }
+            }
+
+            // Sort by Order property (lower values appear first)
+            availableGizmos = availableGizmos
+                .Where(g => g != null && g.Visible)
+                .OrderBy(g => g.Order)
+                .ToList();
+
+            if (availableGizmos.Count == 0)
+            {
+                ClipboardHelper.CopyToClipboard("No commands available for objects at cursor");
+                return;
+            }
+
+            // Start at the first gizmo
+            selectedGizmoIndex = 0;
+            isActive = true;
+
+            // Announce what we're looking at and the first gizmo
+            string objectNames = string.Join(", ", thingsAtPosition.Select(t => t.LabelShort).Take(3));
+            if (thingsAtPosition.Count > 3)
+                objectNames += $" and {thingsAtPosition.Count - 3} more";
+
+            ClipboardHelper.CopyToClipboard($"Gizmos for: {objectNames}");
+
+            // Announce the first gizmo
+            AnnounceCurrentGizmo();
+        }
+
+        /// <summary>
         /// Closes the gizmo navigation menu.
         /// </summary>
         public static void Close()
         {
+            ModLogger.Msg($"GizmoNavigationState.Close() called, was active: {isActive}");
             isActive = false;
             selectedGizmoIndex = 0;
             availableGizmos.Clear();
+            ModLogger.Msg($"GizmoNavigationState.Close() finished, now active: {isActive}");
         }
 
         /// <summary>
@@ -130,15 +204,68 @@ namespace RimWorldAccess
             Event fakeEvent = new Event();
             fakeEvent.type = EventType.Used;
 
-            // Special handling for Command_Toggle to announce new state
+            // Special handling for different gizmo types
+
+            // 1. Designator (like Reinstall, Copy) - enters placement mode
+            if (selectedGizmo is Designator designator)
+            {
+                ModLogger.Msg($"Executing Designator: {GetGizmoLabel(selectedGizmo)}");
+
+                // For Designators opened via cursor objects (not selected pawns),
+                // we need to ensure the objects at cursor are actually selected
+                // so the Designator has proper context (e.g., Designator_Install needs to know what to reinstall)
+                if (!PawnJustSelected && MapNavigationState.IsInitialized)
+                {
+                    IntVec3 cursorPos = MapNavigationState.CurrentCursorPosition;
+                    List<Thing> thingsAtCursor = cursorPos.GetThingList(Find.CurrentMap);
+
+                    ModLogger.Msg($"Selecting {thingsAtCursor?.Count ?? 0} things at cursor before executing Designator");
+
+                    if (thingsAtCursor != null && thingsAtCursor.Count > 0 && Find.Selector != null)
+                    {
+                        Find.Selector.ClearSelection();
+                        foreach (Thing thing in thingsAtCursor)
+                        {
+                            if (thing is ISelectable)
+                            {
+                                Find.Selector.Select(thing, playSound: false, forceDesignatorDeselect: false);
+                            }
+                        }
+                    }
+                }
+
+                try
+                {
+                    // Call ProcessInput to let the Designator do its preparation work
+                    // (Designator_Install does setup like canceling existing blueprints)
+                    ModLogger.Msg($"About to call ProcessInput on Designator");
+                    selectedGizmo.ProcessInput(fakeEvent);
+                    ModLogger.Msg($"ProcessInput completed successfully");
+
+                    // Announce placement mode
+                    ClipboardHelper.CopyToClipboard($"{GetGizmoLabel(selectedGizmo)} - Use arrow keys to position, R to rotate, Enter to place, Escape to cancel");
+                }
+                catch (System.Exception ex)
+                {
+                    ModLogger.Msg($"Exception in Designator execution: {ex.Message}");
+                    ModLogger.Msg($"Stack trace: {ex.StackTrace}");
+                    ClipboardHelper.CopyToClipboard($"Error executing {GetGizmoLabel(selectedGizmo)}: {ex.Message}");
+                }
+
+                // Close the gizmo menu AFTER announcing
+                Close();
+                return;
+            }
+
+            // 2. Command_Toggle - toggle and announce state
             if (selectedGizmo is Command_Toggle toggle)
             {
                 // Execute the toggle
                 selectedGizmo.ProcessInput(fakeEvent);
 
                 // Announce the new state
-                bool isActive = toggle.isActive?.Invoke() ?? false;
-                string state = isActive ? "ON" : "OFF";
+                bool toggleActive = toggle.isActive?.Invoke() ?? false;
+                string state = toggleActive ? "ON" : "OFF";
                 string label = GetGizmoLabel(toggle);
                 ClipboardHelper.CopyToClipboard($"{label}: {state}");
             }
@@ -147,14 +274,14 @@ namespace RimWorldAccess
                 // Execute the command
                 selectedGizmo.ProcessInput(fakeEvent);
 
-                // For Command_VerbTarget (weapon attacks), announce targeting mode
+                // 3. Command_VerbTarget (weapon attacks) - announce targeting mode
                 if (selectedGizmo is Command_VerbTarget verbTarget)
                 {
                     string weaponName = verbTarget.ownerThing?.LabelCap ?? "weapon";
                     string verbLabel = verbTarget.verb?.ReportLabel ?? "attack";
                     ClipboardHelper.CopyToClipboard($"{weaponName} {verbLabel} - Use map navigation to select target, then press Enter");
                 }
-                // For Command_Target, announce that targeting mode is active
+                // 4. Command_Target - announce targeting mode
                 else if (selectedGizmo is Command_Target)
                 {
                     ClipboardHelper.CopyToClipboard($"{GetGizmoLabel(selectedGizmo)} - Use map navigation to select target, then press Enter");
