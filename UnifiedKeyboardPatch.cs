@@ -10,7 +10,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Unified Harmony patch for UIRoot.UIRootOnGUI to handle all keyboard accessibility features.
-    /// Handles: Escape key for pause menu, Enter key for building inspection/beds, ] key for colonist orders, I key for inspection menu, J key for jump menu, L key for notification menu, F7 key for quest menu, Alt+M for mood info, Alt+H for health info, Alt+N for needs info, F2 for schedule, F3 for assign, F6 for research, and all windowless menu navigation.
+    /// Handles: Escape key for pause menu, Enter key for building inspection/beds, ] key for colonist orders, I key for inspection menu, J key for jump menu, L key for notification menu, F7 key for quest menu, Alt+M for mood info, Alt+H for health info, Alt+N for needs info, Alt+F for unforbid all items, F2 for schedule, F3 for assign, F6 for research, and all windowless menu navigation.
     /// Note: Dialog navigation (including research completion dialogs) is handled by DialogAccessibilityPatch.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
@@ -1010,6 +1010,27 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.53: Unforbid all items on the map with Alt+F =====
+            if (key == KeyCode.F && Event.current.alt)
+            {
+                // Only unforbid if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode)
+                {
+                    // Unforbid all items on the map
+                    UnforbidAllItems();
+
+                    // Prevent the default F key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 6.55: Announce time, date, and season with T key =====
             if (key == KeyCode.T)
             {
@@ -1508,6 +1529,55 @@ namespace RimWorldAccess
                 return WindowlessScheduleState.SelectedAssignment.label;
             }
             return "Unknown";
+        }
+
+        /// <summary>
+        /// Unforbids all forbidden items on the current map.
+        /// </summary>
+        private static void UnforbidAllItems()
+        {
+            Map map = Find.CurrentMap;
+            if (map == null)
+            {
+                TolkHelper.Speak("No map available");
+                return;
+            }
+
+            // Get all things on the map
+            List<Thing> allThings = map.listerThings.AllThings;
+            int unforbiddenCount = 0;
+
+            // Iterate through all things and unforbid items
+            foreach (Thing thing in allThings)
+            {
+                // Check if the thing can be forbidden (has CompForbiddable component)
+                CompForbiddable forbiddable = thing.TryGetComp<CompForbiddable>();
+
+                // If it has the component and is currently forbidden, unforbid it
+                if (forbiddable != null && forbiddable.Forbidden)
+                {
+                    thing.SetForbidden(false, warnOnFail: false);
+                    unforbiddenCount++;
+                }
+            }
+
+            // Announce result to user
+            if (unforbiddenCount == 0)
+            {
+                TolkHelper.Speak("No forbidden items found on the map");
+            }
+            else if (unforbiddenCount == 1)
+            {
+                TolkHelper.Speak("1 item unforbidden");
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+            else
+            {
+                TolkHelper.Speak($"{unforbiddenCount} items unforbidden");
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+
+            MelonLoader.MelonLogger.Msg($"Unforbid all: {unforbiddenCount} items unforbidden");
         }
 
 }

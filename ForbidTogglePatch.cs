@@ -9,6 +9,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Harmony patch to add F key for toggling forbidden status on items at the current cursor position.
+    /// Note: Alt+F is handled separately by UnifiedKeyboardPatch for unforbidding all items on the map.
     /// </summary>
     [HarmonyPatch(typeof(CameraDriver))]
     [HarmonyPatch("Update")]
@@ -36,8 +37,8 @@ namespace RimWorldAccess
             if (WindowlessFloatMenuState.IsActive)
                 return;
 
-            // Check for F key press
-            if (Input.GetKeyDown(KeyCode.F))
+            // Check for F key press (but not Alt+F, which is handled by UnifiedKeyboardPatch)
+            if (Input.GetKeyDown(KeyCode.F) && !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt))
             {
                 // Cooldown to prevent accidental double-presses
                 if (Time.time - lastForbidToggleTime < ForbidToggleCooldown)

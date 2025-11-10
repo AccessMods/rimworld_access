@@ -224,6 +224,7 @@ R             Toggle draft mode for selected colonist
 Alt+M         Display mood information and thoughts
 Alt+N         Display needs
 Alt+H         Display health
+Alt+F         Unforbid all forbidden items on the map
 F1            Open work menu (see Work Menu section below)
 F2            Open schedule menu (manage colonist timetables)
 F3            Open assign menu (manage outfits, food, drugs, areas, reading)
