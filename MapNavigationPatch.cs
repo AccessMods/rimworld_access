@@ -25,6 +25,7 @@ namespace RimWorldAccess
             // Suppress map navigation if ANY menu that uses arrow keys is active
             // Note: Scanner is NOT included here because it doesn't suppress map navigation
             MapNavigationState.SuppressMapNavigation =
+                WorldNavigationState.IsActive ||
                 WindowlessFloatMenuState.IsActive ||
                 WindowlessPauseMenuState.IsActive ||
                 NotificationMenuState.IsActive ||

@@ -48,6 +48,8 @@ namespace RimWorldAccess
 
         public static void NextItem()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -66,6 +68,8 @@ namespace RimWorldAccess
 
         public static void PreviousItem()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -84,6 +88,8 @@ namespace RimWorldAccess
 
         public static void NextBulkItem()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -101,6 +107,8 @@ namespace RimWorldAccess
 
         public static void PreviousBulkItem()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -118,6 +126,8 @@ namespace RimWorldAccess
 
         public static void NextCategory()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -140,6 +150,8 @@ namespace RimWorldAccess
 
         public static void PreviousCategory()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -162,6 +174,8 @@ namespace RimWorldAccess
 
         public static void NextSubcategory()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -192,6 +206,8 @@ namespace RimWorldAccess
 
         public static void PreviousSubcategory()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -222,6 +238,8 @@ namespace RimWorldAccess
 
         public static void JumpToCurrent()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 
@@ -250,6 +268,8 @@ namespace RimWorldAccess
 
         public static void ReadDistanceAndDirection()
         {
+            if (WorldNavigationState.IsActive) return;
+
             RefreshItems();
             if (categories.Count == 0) return;
 

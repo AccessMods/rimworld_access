@@ -33,6 +33,39 @@ namespace RimWorldAccess
             if (key == KeyCode.None)
                 return;
 
+            // ===== PRIORITY 0: Handle settlement browser in world view (must be before key blocking) =====
+            if (SettlementBrowserState.IsActive)
+            {
+                if (SettlementBrowserState.HandleInput(key))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== EARLY BLOCK: If in world view, block most map-specific keys =====
+            if (WorldNavigationState.IsActive)
+            {
+                // Block all map-specific keys (settlement browser is handled in WorldNavigationPatch with High priority)
+                if (key == KeyCode.I || key == KeyCode.A || key == KeyCode.Z ||
+                    key == KeyCode.G || key == KeyCode.L || key == KeyCode.Q ||
+                    key == KeyCode.Return || key == KeyCode.KeypadEnter ||
+                    key == KeyCode.RightBracket || key == KeyCode.P ||
+                    key == KeyCode.F2 || key == KeyCode.F3 || key == KeyCode.F6 || key == KeyCode.F7 ||
+                    key == KeyCode.PageUp || key == KeyCode.PageDown ||
+                    key == KeyCode.R || key == KeyCode.T || key == KeyCode.Tab ||
+                    (key == KeyCode.M && Event.current.alt) ||
+                    (key == KeyCode.H && Event.current.alt) ||
+                    (key == KeyCode.N && Event.current.alt) ||
+                    (key == KeyCode.F && Event.current.alt))
+                {
+                    // These keys should not work in world view - they're map-specific
+                    // World navigation keys (arrows, home, end, S, I for tile info, Tab in settlement browser)
+                    // are all handled by WorldNavigationPatch which runs with High priority before this patch
+                    return;
+                }
+            }
+
             // Log if area painting is active
             if (AreaPaintingState.IsActive)
             {
