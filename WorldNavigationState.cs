@@ -439,5 +439,124 @@ namespace RimWorldAccess
             string detailedInfo = WorldInfoHelper.GetDetailedTileInfo(currentSelectedTile);
             TolkHelper.Speak(detailedInfo);
         }
+
+        /// <summary>
+        /// Forms a caravan at the currently selected settlement (C key).
+        /// </summary>
+        public static void FormCaravanAtSelectedSettlement()
+        {
+            if (!isInitialized || !currentSelectedTile.Valid)
+            {
+                TolkHelper.Speak("No tile selected", SpeechPriority.Normal);
+                return;
+            }
+
+            Settlement settlement = Find.WorldObjects?.SettlementAt(currentSelectedTile);
+
+            if (settlement == null)
+            {
+                TolkHelper.Speak("No settlement at current tile", SpeechPriority.Normal);
+                return;
+            }
+
+            if (settlement.Faction != Faction.OfPlayer)
+            {
+                TolkHelper.Speak("Can only form caravans from player settlements", SpeechPriority.Normal);
+                return;
+            }
+
+            if (!settlement.HasMap)
+            {
+                TolkHelper.Speak("Settlement has no map", SpeechPriority.Normal);
+                return;
+            }
+
+            // Open caravan formation dialog
+            Dialog_FormCaravan dialog = new Dialog_FormCaravan(settlement.Map);
+            Find.WindowStack.Add(dialog);
+
+            TolkHelper.Speak("Opening caravan formation dialog");
+        }
+
+        /// <summary>
+        /// Shows detailed stats for the currently selected caravan (I key when caravan selected).
+        /// </summary>
+        public static void ShowCaravanStats()
+        {
+            Caravan caravan = GetSelectedCaravan();
+            if (caravan == null)
+            {
+                TolkHelper.Speak("No caravan selected", SpeechPriority.Normal);
+                return;
+            }
+
+            CaravanStatsState.Open(caravan);
+        }
+
+        /// <summary>
+        /// Opens the order menu for the currently selected caravan (] key).
+        /// </summary>
+        public static void GiveCaravanOrders()
+        {
+            if (!isInitialized || !currentSelectedTile.Valid)
+            {
+                TolkHelper.Speak("No tile selected", SpeechPriority.Normal);
+                return;
+            }
+
+            Caravan caravan = GetSelectedCaravan();
+            if (caravan == null)
+            {
+                TolkHelper.Speak("No caravan selected", SpeechPriority.Normal);
+                return;
+            }
+
+            // Get available orders for this caravan at the current tile
+            List<FloatMenuOption> orders = FloatMenuMakerWorld.ChoicesAtFor(currentSelectedTile, caravan);
+
+            if (orders == null || orders.Count == 0)
+            {
+                TolkHelper.Speak("No orders available at this location", SpeechPriority.Normal);
+                return;
+            }
+
+            // Filter to enabled options only
+            var enabledOrders = orders.Where(o => !o.Disabled).ToList();
+
+            if (enabledOrders.Count == 0)
+            {
+                TolkHelper.Speak("No valid orders available at this location", SpeechPriority.Normal);
+                return;
+            }
+
+            // Open windowless float menu with caravan orders
+            WindowlessFloatMenuState.Open(enabledOrders, colonistOrders: false);
+            TolkHelper.Speak($"Caravan orders: {enabledOrders.Count} options available");
+        }
+
+        /// <summary>
+        /// Gets the currently selected caravan (if any).
+        /// </summary>
+        public static Caravan GetSelectedCaravan()
+        {
+            if (!isInitialized || !currentSelectedTile.Valid)
+                return null;
+
+            // Check if there's a caravan at the current tile
+            var worldObjects = Find.WorldObjects?.ObjectsAt(currentSelectedTile);
+            if (worldObjects == null)
+                return null;
+
+            // Find a player-controlled caravan
+            foreach (WorldObject obj in worldObjects)
+            {
+                if (obj is Caravan caravan && caravan.Faction == Faction.OfPlayer)
+                {
+                    return caravan;
+                }
+            }
+
+            return null;
+        }
     }
 }

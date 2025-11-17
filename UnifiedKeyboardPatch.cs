@@ -43,8 +43,50 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 0.25: Handle caravan destination selection if active =====
+            if (CaravanFormationState.IsChoosingDestination)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Handle Enter key to set destination
+                if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt)
+                {
+                    CaravanFormationState.SetDestination(WorldNavigationState.CurrentSelectedTile);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle Escape key to cancel destination selection
+                if (key == KeyCode.Escape)
+                {
+                    CaravanFormationState.CancelDestinationSelection();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Let arrow keys pass through for world navigation
+            }
+
+            // ===== PRIORITY 0.3: Handle caravan formation dialog if active =====
+            if (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (CaravanFormationState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0.5: Handle world navigation special keys (Home/End/PageUp/PageDown) =====
-            if (WorldNavigationState.IsActive && !SettlementBrowserState.IsActive)
+            // Allow these keys when choosing destination, but not when in the formation dialog itself
+            if (WorldNavigationState.IsActive && !SettlementBrowserState.IsActive &&
+                (!CaravanFormationState.IsActive || CaravanFormationState.IsChoosingDestination))
             {
                 bool handled = false;
 
@@ -77,7 +119,8 @@ namespace RimWorldAccess
             }
 
             // ===== EARLY BLOCK: If in world view, block most map-specific keys =====
-            if (WorldNavigationState.IsActive)
+            // Don't block when choosing destination (allow map interaction)
+            if (WorldNavigationState.IsActive && !CaravanFormationState.IsActive)
             {
                 // Block all map-specific keys (settlement browser is handled in WorldNavigationPatch with High priority)
                 if (key == KeyCode.I || key == KeyCode.A || key == KeyCode.Z ||

@@ -48,6 +48,12 @@ namespace RimWorldAccess
             if (!isWorldView || !WorldNavigationState.IsActive)
                 return;
 
+            // Skip world navigation input if caravan formation dialog is active
+            // (the dialog handles its own input via CaravanFormationPatch)
+            // BUT allow navigation when choosing destination
+            if (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination)
+                return;
+
             // Only process keyboard events
             if (Event.current.type != EventType.KeyDown)
                 return;
@@ -63,7 +69,17 @@ namespace RimWorldAccess
             bool ctrl = Event.current.control;
             bool alt = Event.current.alt;
 
-            // Handle settlement browser input first if it's active
+            // Handle caravan stats viewer input first if it's active
+            if (CaravanStatsState.IsActive)
+            {
+                if (CaravanStatsState.HandleInput(key))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // Handle settlement browser input if it's active
             if (SettlementBrowserState.IsActive)
             {
                 if (SettlementBrowserState.HandleInput(key))
@@ -106,18 +122,65 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle I key - read detailed tile information
+            // Handle I key - show caravan stats (if caravan selected) or read detailed tile information
             if (key == KeyCode.I && !shift && !ctrl && !alt)
             {
-                WorldNavigationState.ReadDetailedTileInfo();
+                Caravan selectedCaravan = WorldNavigationState.GetSelectedCaravan();
+                if (selectedCaravan != null)
+                {
+                    WorldNavigationState.ShowCaravanStats();
+                }
+                else
+                {
+                    WorldNavigationState.ReadDetailedTileInfo();
+                }
                 Event.current.Use();
                 return;
             }
 
-            // Handle Escape key - close settlement browser if open, otherwise let RimWorld handle it
+            // Handle C key - form caravan at selected settlement
+            if (key == KeyCode.C && !shift && !ctrl && !alt)
+            {
+                WorldNavigationState.FormCaravanAtSelectedSettlement();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle ] key - give orders to selected caravan
+            if (key == KeyCode.RightBracket && !shift && !ctrl && !alt)
+            {
+                WorldNavigationState.GiveCaravanOrders();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Enter key - set caravan destination if in destination selection mode
+            if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt)
+            {
+                if (CaravanFormationState.IsChoosingDestination)
+                {
+                    CaravanFormationState.SetDestination(WorldNavigationState.CurrentSelectedTile);
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // Handle Escape key - close caravan stats, settlement browser, cancel destination selection, or let RimWorld handle it
             if (key == KeyCode.Escape)
             {
-                if (SettlementBrowserState.IsActive)
+                if (CaravanFormationState.IsChoosingDestination)
+                {
+                    CaravanFormationState.CancelDestinationSelection();
+                    Event.current.Use();
+                    return;
+                }
+                else if (CaravanStatsState.IsActive)
+                {
+                    CaravanStatsState.Close();
+                    Event.current.Use();
+                    return;
+                }
+                else if (SettlementBrowserState.IsActive)
                 {
                     SettlementBrowserState.Close();
                     Event.current.Use();
@@ -183,7 +246,7 @@ namespace RimWorldAccess
 
             // Get tile info
             string tileInfo = WorldInfoHelper.GetTileSummary(tile);
-            string instructions = "Arrows: Navigate | Home: Home Base | End: Caravan | S: Settlements | I: Details";
+            string instructions = "Arrows: Navigate | Home: Home Base | End: Caravan | S: Settlements | I: Details | C: Form Caravan | ]: Orders";
 
             Rect infoRect = new Rect(overlayX, overlayY + 15f, overlayWidth, 30f);
             Rect instructionsRect = new Rect(overlayX, overlayY + 45f, overlayWidth, 25f);
