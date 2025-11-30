@@ -148,6 +148,13 @@ namespace RimWorldAccess
         /// </summary>
         private static void OnDesignatorSelected(Designator designator)
         {
+            // Check if this is a zone designator - show mode selection menu
+            if (IsZoneDesignator(designator))
+            {
+                ShowZoneModeSelectionMenu(designator);
+                return;
+            }
+
             // Check if this is a build designator that needs material selection
             if (designator is Designator_Build buildDesignator)
             {
@@ -203,6 +210,78 @@ namespace RimWorldAccess
 
             // Enter placement mode
             ArchitectState.EnterPlacementMode(designator, material);
+        }
+
+        /// <summary>
+        /// Checks if a designator is a zone/area/cell-based designator.
+        /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
+        /// Uses reflection to check the type hierarchy since we can't directly reference RimWorld types.
+        /// </summary>
+        private static bool IsZoneDesignator(Designator designator)
+        {
+            if (designator == null)
+                return false;
+
+            // Check if this designator's type hierarchy includes "Designator_Cells"
+            // This covers all multi-cell designators: zones, areas, roofs, etc.
+            System.Type type = designator.GetType();
+            while (type != null)
+            {
+                if (type.Name == "Designator_Cells")
+                    return true;
+                type = type.BaseType;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Shows the mode selection menu for zone creation (Manual, Borders, Corners).
+        /// Stores the designator for later use.
+        /// </summary>
+        private static void ShowZoneModeSelectionMenu(Designator designator)
+        {
+            List<FloatMenuOption> options = new List<FloatMenuOption>();
+
+            // Manual selection mode
+            options.Add(new FloatMenuOption("Manual selection", () =>
+            {
+                OnZoneModeSelected(designator, ZoneCreationMode.Manual);
+            }));
+
+            // Borders mode
+            options.Add(new FloatMenuOption("Borders mode", () =>
+            {
+                OnZoneModeSelected(designator, ZoneCreationMode.Borders);
+            }));
+
+            // Corners mode
+            options.Add(new FloatMenuOption("Corners mode", () =>
+            {
+                OnZoneModeSelected(designator, ZoneCreationMode.Corners);
+            }));
+
+            // Open the windowless menu
+            WindowlessFloatMenuState.Open(options, false);
+
+            string zoneName = designator.Label ?? "zone";
+            TolkHelper.Speak($"Select creation mode for {zoneName}");
+            MelonLoader.MelonLogger.Msg($"Opened zone mode selection menu for {zoneName}");
+        }
+
+        /// <summary>
+        /// Called when a zone creation mode is selected.
+        /// Enters placement mode with the designator and sets up ZoneCreationState.
+        /// </summary>
+        private static void OnZoneModeSelected(Designator designator, ZoneCreationMode mode)
+        {
+            // Enter architect placement mode with the zone designator
+            ArchitectState.EnterPlacementMode(designator);
+
+            // Also set the zone creation mode in ArchitectState for use during placement
+            ArchitectState.SetZoneCreationMode(mode);
+
+            MelonLoader.MelonLogger.Msg($"Zone creation mode selected: {mode} for designator {designator.Label}");
         }
     }
 }

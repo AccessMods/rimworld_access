@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using Verse;
@@ -53,6 +54,7 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
             bool handled = false;
+            bool shiftHeld = Event.current.shift;
 
             // Get the active designator (from either source)
             Designator activeDesignator = inArchitectMode ?
@@ -61,6 +63,9 @@ namespace RimWorldAccess
 
             if (activeDesignator == null)
                 return;
+
+            // Check if this is a zone designator
+            bool isZoneDesignator = IsZoneDesignator(activeDesignator);
 
             // R key - rotate building
             if (key == KeyCode.R)
@@ -83,6 +88,28 @@ namespace RimWorldAccess
                 }
                 handled = true;
             }
+            // Shift+Arrow keys - auto-select to wall (only for zone designators in Manual mode)
+            else if (shiftHeld && isZoneDesignator && ArchitectState.ZoneCreationMode == ZoneCreationMode.Manual)
+            {
+                IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
+                Map map = Find.CurrentMap;
+                Rot4 direction = Rot4.Invalid;
+
+                if (key == KeyCode.UpArrow)
+                    direction = Rot4.North;
+                else if (key == KeyCode.DownArrow)
+                    direction = Rot4.South;
+                else if (key == KeyCode.LeftArrow)
+                    direction = Rot4.West;
+                else if (key == KeyCode.RightArrow)
+                    direction = Rot4.East;
+
+                if (direction != Rot4.Invalid)
+                {
+                    AutoSelectToWall(currentPosition, direction, map, activeDesignator);
+                    handled = true;
+                }
+            }
             // Space key - toggle selection of current cell
             else if (key == KeyCode.Space)
             {
@@ -94,8 +121,16 @@ namespace RimWorldAccess
 
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
+                // For zone designators, use multi-cell selection with mode support
+                if (isZoneDesignator)
+                {
+                    if (inArchitectMode)
+                    {
+                        ArchitectState.ToggleCell(currentPosition);
+                    }
+                }
                 // For build/place designators (including Designator_Install), place immediately
-                if (activeDesignator is Designator_Place)
+                else if (activeDesignator is Designator_Place)
                 {
                     // Single placement - check if valid and place immediately
                     AcceptanceReport report = activeDesignator.CanDesignateCell(currentPosition);
@@ -147,22 +182,48 @@ namespace RimWorldAccess
             // Enter key - confirm and execute designation (for multi-cell designators)
             else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
+                // For zone designators, handle according to mode
+                if (isZoneDesignator && inArchitectMode)
+                {
+                    ZoneCreationMode mode = ArchitectState.ZoneCreationMode;
+                    Map map = Find.CurrentMap;
+
+                    switch (mode)
+                    {
+                        case ZoneCreationMode.Manual:
+                            // Manual mode: execute placement immediately
+                            ExecuteZonePlacement(activeDesignator, map);
+                            break;
+
+                        case ZoneCreationMode.Borders:
+                            // Borders mode: auto-fill interior
+                            BordersModeAutoFill(activeDesignator, map);
+                            break;
+
+                        case ZoneCreationMode.Corners:
+                            // Corners mode: fill rectangle
+                            CornersModeAutoFill(activeDesignator, map);
+                            break;
+                    }
+
+                    handled = true;
+                }
                 // For place designators (build, reinstall), Enter exits placement mode
-                if (activeDesignator is Designator_Place)
+                else if (activeDesignator is Designator_Place)
                 {
                     TolkHelper.Speak("Placement completed");
                     if (inArchitectMode)
                         ArchitectState.Reset();
                     else
                         Find.DesignatorManager.Deselect();
+                    handled = true;
                 }
                 else if (inArchitectMode)
                 {
                     // For multi-cell designators in architect mode, execute the placement
                     ArchitectState.ExecutePlacement(Find.CurrentMap);
+                    handled = true;
                 }
-
-                handled = true;
             }
             // Escape key - cancel placement
             else if (key == KeyCode.Escape)
@@ -178,6 +239,256 @@ namespace RimWorldAccess
             if (handled)
             {
                 Event.current.Use();
+            }
+        }
+
+        /// <summary>
+        /// Checks if a designator is a zone/area/cell-based designator.
+        /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
+        /// </summary>
+        private static bool IsZoneDesignator(Designator designator)
+        {
+            if (designator == null)
+                return false;
+
+            // Check if this designator's type hierarchy includes "Designator_Cells"
+            // This covers all multi-cell designators: zones, areas, roofs, etc.
+            System.Type type = designator.GetType();
+            while (type != null)
+            {
+                if (type.Name == "Designator_Cells")
+                    return true;
+                type = type.BaseType;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Auto-selects cells in a direction until hitting a wall or impassable terrain.
+        /// </summary>
+        private static void AutoSelectToWall(IntVec3 startPosition, Rot4 direction, Map map, Designator designator)
+        {
+            try
+            {
+                List<IntVec3> lineCells = new List<IntVec3>();
+                IntVec3 currentCell = startPosition + direction.FacingCell;
+
+                // Move in the direction until we hit a wall or go out of bounds
+                while (currentCell.InBounds(map) && designator.CanDesignateCell(currentCell).Accepted)
+                {
+                    lineCells.Add(currentCell);
+                    currentCell += direction.FacingCell;
+                }
+
+                // Add all cells to selection
+                int addedCount = 0;
+                foreach (IntVec3 cell in lineCells)
+                {
+                    if (!ArchitectState.SelectedCells.Contains(cell))
+                    {
+                        ArchitectState.SelectedCells.Add(cell);
+                        addedCount++;
+                    }
+                }
+
+                string directionName = direction.ToStringHuman();
+                TolkHelper.Speak($"Selected {addedCount} cells to {directionName}. Total: {ArchitectState.SelectedCells.Count}");
+                MelonLoader.MelonLogger.Msg($"Auto-select to wall: {addedCount} cells in direction {directionName}");
+            }
+            catch (System.Exception ex)
+            {
+                TolkHelper.Speak($"Error auto-selecting: {ex.Message}", SpeechPriority.High);
+                MelonLoader.MelonLogger.Error($"AutoSelectToWall error: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Executes zone placement in Manual mode.
+        /// </summary>
+        private static void ExecuteZonePlacement(Designator designator, Map map)
+        {
+            if (ArchitectState.SelectedCells.Count == 0)
+            {
+                TolkHelper.Speak("No cells selected");
+                ArchitectState.Reset();
+                return;
+            }
+
+            try
+            {
+                // Use the designator's DesignateMultiCell method
+                designator.DesignateMultiCell(ArchitectState.SelectedCells);
+
+                string label = designator.Label ?? "Zone";
+                TolkHelper.Speak($"{label} created with {ArchitectState.SelectedCells.Count} cells");
+                MelonLoader.MelonLogger.Msg($"Zone placement executed: {label} with {ArchitectState.SelectedCells.Count} cells");
+            }
+            catch (System.Exception ex)
+            {
+                TolkHelper.Speak($"Error creating zone: {ex.Message}", SpeechPriority.High);
+                MelonLoader.MelonLogger.Error($"ExecuteZonePlacement error: {ex}");
+            }
+            finally
+            {
+                ArchitectState.Reset();
+            }
+        }
+
+        /// <summary>
+        /// Auto-fills the interior of a zone from border cells using flood fill (Borders mode).
+        /// </summary>
+        private static void BordersModeAutoFill(Designator designator, Map map)
+        {
+            if (ArchitectState.SelectedCells.Count == 0)
+            {
+                TolkHelper.Speak("No border cells selected. Select border tiles first", SpeechPriority.High);
+                return;
+            }
+
+            try
+            {
+                // Find the center point of the selected border cells
+                int sumX = 0, sumZ = 0;
+                foreach (IntVec3 cell in ArchitectState.SelectedCells)
+                {
+                    sumX += cell.x;
+                    sumZ += cell.z;
+                }
+                IntVec3 centerPoint = new IntVec3(sumX / ArchitectState.SelectedCells.Count, 0, sumZ / ArchitectState.SelectedCells.Count);
+
+                // Ensure center point is valid and not in the border
+                if (!centerPoint.InBounds(map))
+                {
+                    TolkHelper.Speak("Invalid border selection. Cannot find interior point", SpeechPriority.High);
+                    return;
+                }
+
+                // If center is in the border, try to find a nearby non-border cell
+                if (ArchitectState.SelectedCells.Contains(centerPoint))
+                {
+                    // Try adjacent cells
+                    bool foundStart = false;
+                    foreach (IntVec3 adjacent in GenAdj.CardinalDirections)
+                    {
+                        IntVec3 testCell = centerPoint + adjacent;
+                        if (testCell.InBounds(map) && !ArchitectState.SelectedCells.Contains(testCell) && designator.CanDesignateCell(testCell).Accepted)
+                        {
+                            centerPoint = testCell;
+                            foundStart = true;
+                            break;
+                        }
+                    }
+
+                    if (!foundStart)
+                    {
+                        TolkHelper.Speak("Cannot find interior starting point. Border may be invalid", SpeechPriority.High);
+                        return;
+                    }
+                }
+
+                // Use flood fill to find all interior cells
+                List<IntVec3> interiorCells = new List<IntVec3>();
+                HashSet<IntVec3> borderSet = new HashSet<IntVec3>(ArchitectState.SelectedCells);
+
+                map.floodFiller.FloodFill(centerPoint, (IntVec3 c) =>
+                {
+                    // Can traverse if: in bounds, not a border, and designator can place here
+                    return c.InBounds(map) && !borderSet.Contains(c) && designator.CanDesignateCell(c).Accepted;
+                }, (IntVec3 c) =>
+                {
+                    // Add to interior cells
+                    if (!borderSet.Contains(c))
+                    {
+                        interiorCells.Add(c);
+                    }
+                });
+
+                // Add all interior cells to selection
+                int addedCount = 0;
+                foreach (IntVec3 cell in interiorCells)
+                {
+                    if (!ArchitectState.SelectedCells.Contains(cell))
+                    {
+                        ArchitectState.SelectedCells.Add(cell);
+                        addedCount++;
+                    }
+                }
+
+                TolkHelper.Speak($"Filled interior with {addedCount} cells. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
+                MelonLoader.MelonLogger.Msg($"Borders mode auto-fill: added {addedCount} interior cells, total {ArchitectState.SelectedCells.Count}");
+
+                // Now execute the placement
+                ExecuteZonePlacement(designator, map);
+            }
+            catch (System.Exception ex)
+            {
+                TolkHelper.Speak($"Error filling interior: {ex.Message}", SpeechPriority.High);
+                MelonLoader.MelonLogger.Error($"BordersModeAutoFill error: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Auto-fills a rectangular zone from 4 corner cells (Corners mode).
+        /// </summary>
+        private static void CornersModeAutoFill(Designator designator, Map map)
+        {
+            if (ArchitectState.SelectedCells.Count != 4)
+            {
+                TolkHelper.Speak($"Must select exactly 4 corners. Currently selected: {ArchitectState.SelectedCells.Count}", SpeechPriority.High);
+                return;
+            }
+
+            try
+            {
+                // Find min and max X and Z coordinates
+                int minX = int.MaxValue, maxX = int.MinValue;
+                int minZ = int.MaxValue, maxZ = int.MinValue;
+
+                foreach (IntVec3 corner in ArchitectState.SelectedCells)
+                {
+                    if (corner.x < minX) minX = corner.x;
+                    if (corner.x > maxX) maxX = corner.x;
+                    if (corner.z < minZ) minZ = corner.z;
+                    if (corner.z > maxZ) maxZ = corner.z;
+                }
+
+                // Validate rectangle size
+                if (minX >= maxX || minZ >= maxZ)
+                {
+                    TolkHelper.Speak("Invalid corner selection. Corners must form a rectangle", SpeechPriority.High);
+                    return;
+                }
+
+                // Fill all cells in the bounding rectangle
+                List<IntVec3> rectangleCells = new List<IntVec3>();
+                for (int x = minX; x <= maxX; x++)
+                {
+                    for (int z = minZ; z <= maxZ; z++)
+                    {
+                        IntVec3 cell = new IntVec3(x, 0, z);
+                        if (cell.InBounds(map) && !ArchitectState.SelectedCells.Contains(cell))
+                        {
+                            rectangleCells.Add(cell);
+                        }
+                    }
+                }
+
+                // Add all rectangle cells to selection
+                ArchitectState.SelectedCells.AddRange(rectangleCells);
+
+                int width = maxX - minX + 1;
+                int height = maxZ - minZ + 1;
+                TolkHelper.Speak($"Filled {width} by {height} rectangle. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
+                MelonLoader.MelonLogger.Msg($"Corners mode auto-fill: {width}x{height} rectangle, total {ArchitectState.SelectedCells.Count} cells");
+
+                // Now execute the placement
+                ExecuteZonePlacement(designator, map);
+            }
+            catch (System.Exception ex)
+            {
+                TolkHelper.Speak($"Error filling rectangle: {ex.Message}", SpeechPriority.High);
+                MelonLoader.MelonLogger.Error($"CornersModeAutoFill error: {ex}");
             }
         }
     }

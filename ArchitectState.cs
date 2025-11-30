@@ -31,6 +31,7 @@ namespace RimWorldAccess
         private static ThingDef selectedMaterial = null;
         private static List<IntVec3> selectedCells = new List<IntVec3>();
         private static Rot4 currentRotation = Rot4.North;
+        private static ZoneCreationMode zoneCreationMode = ZoneCreationMode.Manual;
 
         // Reflection field info for accessing protected placingRot field
         private static FieldInfo placingRotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
@@ -83,6 +84,11 @@ namespace RimWorldAccess
         /// Whether we're currently in placement mode on the map.
         /// </summary>
         public static bool IsInPlacementMode => currentMode == ArchitectMode.PlacementMode;
+
+        /// <summary>
+        /// Gets the current zone creation mode (only relevant when placing zone designators).
+        /// </summary>
+        public static ZoneCreationMode ZoneCreationMode => zoneCreationMode;
 
         /// <summary>
         /// Enters category selection mode.
@@ -450,6 +456,38 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Sets the zone creation mode for the current placement.
+        /// Should be called before entering placement mode with a zone designator.
+        /// </summary>
+        public static void SetZoneCreationMode(ZoneCreationMode mode)
+        {
+            zoneCreationMode = mode;
+            MelonLoader.MelonLogger.Msg($"Zone creation mode set to: {mode}");
+        }
+
+        /// <summary>
+        /// Checks if the current designator is a zone/area/cell-based designator.
+        /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
+        /// </summary>
+        public static bool IsZoneDesignator()
+        {
+            if (selectedDesignator == null)
+                return false;
+
+            // Check if this designator's type hierarchy includes "Designator_Cells"
+            // This covers all multi-cell designators: zones, areas, roofs, etc.
+            System.Type type = selectedDesignator.GetType();
+            while (type != null)
+            {
+                if (type.Name == "Designator_Cells")
+                    return true;
+                type = type.BaseType;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Resets the architect state completely.
         /// </summary>
         public static void Reset()
@@ -461,6 +499,7 @@ namespace RimWorldAccess
             selectedMaterial = null;
             selectedCells.Clear();
             currentRotation = Rot4.North;
+            zoneCreationMode = ZoneCreationMode.Manual;
 
             // Deselect any active designator in the game
             if (Find.DesignatorManager != null)
