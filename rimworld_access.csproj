@@ -106,10 +106,10 @@
       DestinationFolder="$(ReleaseFolderPath)"
     />
 
-    <!-- Copy readme.txt to release folder -->
-    <Message Text="--- Copying readme.txt to release folder ---" Importance="high" />
+    <!-- Copy readme.html to release folder -->
+    <Message Text="--- Copying readme.html to release folder ---" Importance="high" />
     <Copy
-      SourceFiles="$(ProjectDir)readme.txt"
+      SourceFiles="$(ProjectDir)readme.html"
       DestinationFolder="$(ReleaseFolderPath)"
     />
 
