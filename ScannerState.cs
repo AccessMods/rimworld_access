@@ -12,6 +12,49 @@ namespace RimWorldAccess
         private static int currentSubcategoryIndex = 0;
         private static int currentItemIndex = 0;
         private static int currentBulkIndex = 0; // Index within a bulk group
+        private static bool autoJumpMode = false; // Auto-jump to items when navigating
+
+        /// <summary>
+        /// Toggles auto-jump mode on/off (Alt+Home).
+        /// When enabled, cursor automatically jumps to items as you navigate.
+        /// </summary>
+        public static void ToggleAutoJumpMode()
+        {
+            autoJumpMode = !autoJumpMode;
+            string status = autoJumpMode ? "enabled" : "disabled";
+            TolkHelper.Speak($"Auto-jump mode {status}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Recalculates distances for all items from the current cursor position.
+        /// Does NOT re-sort items or refresh the list from the map.
+        /// </summary>
+        private static void RecalculateDistances()
+        {
+            if (!MapNavigationState.IsInitialized)
+                return;
+
+            var cursorPos = MapNavigationState.CurrentCursorPosition;
+
+            foreach (var category in categories)
+            {
+                foreach (var subcat in category.Subcategories)
+                {
+                    foreach (var item in subcat.Items)
+                    {
+                        // Recalculate distance for the primary position
+                        if (item.IsTerrain)
+                        {
+                            item.Distance = (item.Position - cursorPos).LengthHorizontal;
+                        }
+                        else if (item.Thing != null)
+                        {
+                            item.Distance = (item.Thing.Position - cursorPos).LengthHorizontal;
+                        }
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Refreshes the scanner item list based on current cursor position.
@@ -68,7 +111,19 @@ namespace RimWorldAccess
             }
 
             currentBulkIndex = 0; // Reset bulk index when changing items
-            AnnounceCurrentItem();
+
+            // Recalculate distances from current cursor position
+            RecalculateDistances();
+
+            // Auto-jump if enabled
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentItem();
+            }
         }
 
         public static void PreviousItem()
@@ -93,7 +148,19 @@ namespace RimWorldAccess
             }
 
             currentBulkIndex = 0; // Reset bulk index when changing items
-            AnnounceCurrentItem();
+
+            // Recalculate distances from current cursor position
+            RecalculateDistances();
+
+            // Auto-jump if enabled
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentItem();
+            }
         }
 
         public static void NextBulkItem()
@@ -117,7 +184,18 @@ namespace RimWorldAccess
                 currentBulkIndex = 0; // Wrap to first bulk item
             }
 
-            AnnounceCurrentBulkItem();
+            // Recalculate distances from current cursor position
+            RecalculateDistances();
+
+            // Auto-jump if enabled
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentBulkItem();
+            }
         }
 
         public static void PreviousBulkItem()
@@ -141,7 +219,18 @@ namespace RimWorldAccess
                 currentBulkIndex = currentItem.BulkCount - 1; // Wrap to last bulk item
             }
 
-            AnnounceCurrentBulkItem();
+            // Recalculate distances from current cursor position
+            RecalculateDistances();
+
+            // Auto-jump if enabled
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentBulkItem();
+            }
         }
 
         public static void NextCategory()
@@ -306,7 +395,24 @@ namespace RimWorldAccess
             // Jump camera to position
             Find.CameraDriver.JumpToCurrentMapLoc(targetPosition);
 
-            TolkHelper.Speak($"Jumped to {currentItem.Label}", SpeechPriority.Normal);
+            // Announce the item being jumped to
+            if (autoJumpMode)
+            {
+                // In auto-jump mode, announce item details
+                if (currentItem.IsBulkGroup)
+                {
+                    AnnounceCurrentBulkItem();
+                }
+                else
+                {
+                    AnnounceCurrentItem();
+                }
+            }
+            else
+            {
+                // Manual jump (Home key) - just announce the jump
+                TolkHelper.Speak($"Jumped to {currentItem.Label}", SpeechPriority.Normal);
+            }
         }
 
         public static void ReadDistanceAndDirection()
@@ -327,6 +433,9 @@ namespace RimWorldAccess
                 TolkHelper.Speak("No item selected", SpeechPriority.High);
                 return;
             }
+
+            // Recalculate distances from current cursor position
+            RecalculateDistances();
 
             IntVec3 targetPos;
 
