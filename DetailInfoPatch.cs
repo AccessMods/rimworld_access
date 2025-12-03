@@ -6,7 +6,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Harmony patch to add hotkeys for specific tile information categories.
-    // Keys 1-6: 1=Items/Pawns, 2=Flooring, 3=Plants, 4=Brightness/Temp, 5=Room Stats, 6=Power
+    // Keys 1-7: 1=Items/Pawns, 2=Flooring, 3=Plants, 4=Brightness/Temp, 5=Room Stats, 6=Power, 7=Areas
     /// </summary>
     [HarmonyPatch(typeof(CameraDriver))]
     [HarmonyPatch("Update")]
@@ -38,7 +38,7 @@ namespace RimWorldAccess
             if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 return;
 
-            // Check for tile info hotkeys (1-6 keys, both alpha and keypad)
+            // Check for tile info hotkeys (1-7 keys, both alpha and keypad)
             KeyCode? pressedKey = null;
             if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1))
                 pressedKey = KeyCode.Alpha1;
@@ -52,6 +52,8 @@ namespace RimWorldAccess
                 pressedKey = KeyCode.Alpha5;
             else if (Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6))
                 pressedKey = KeyCode.Alpha6;
+            else if (Input.GetKeyDown(KeyCode.Alpha7) || Input.GetKeyDown(KeyCode.Keypad7))
+                pressedKey = KeyCode.Alpha7;
 
             if (pressedKey.HasValue)
             {
@@ -110,6 +112,8 @@ namespace RimWorldAccess
                     return TileInfoHelper.GetRoomStatsInfo(position, map);
                 case KeyCode.Alpha6:
                     return TileInfoHelper.GetPowerInfo(position, map);
+                case KeyCode.Alpha7:
+                    return TileInfoHelper.GetAreasInfo(position, map);
                 default:
                     return "Unknown key";
             }

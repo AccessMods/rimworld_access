@@ -126,10 +126,32 @@ namespace RimWorldAccess
                 ShowModeSelectionMenu(ZoneType.GrowingZone);
             }));
 
+            // Allowed area option (at the end)
+            options.Add(new FloatMenuOption("Allowed area", () =>
+            {
+                ShowAllowedAreaNameInputMenu();
+            }));
+
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false); // false = doesn't give colonist orders
 
             MelonLoader.MelonLogger.Msg("Opened zone creation menu");
+        }
+
+        /// <summary>
+        /// Shows a name input dialog for creating an allowed area.
+        /// </summary>
+        private static void ShowAllowedAreaNameInputMenu()
+        {
+            Dialog_NameAllowedArea nameDialog = new Dialog_NameAllowedArea((string name) =>
+            {
+                // After name is entered, show mode selection
+                ZoneCreationState.SetPendingAllowedAreaName(name);
+                ShowModeSelectionMenu(ZoneType.AllowedArea);
+            });
+
+            Find.WindowStack.Add(nameDialog);
+            MelonLoader.MelonLogger.Msg("Opened allowed area name input dialog");
         }
 
         /// <summary>

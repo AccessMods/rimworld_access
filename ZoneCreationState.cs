@@ -11,7 +11,8 @@ namespace RimWorldAccess
     {
         Stockpile,
         DumpingStockpile,
-        GrowingZone
+        GrowingZone,
+        AllowedArea
     }
 
     /// <summary>
@@ -35,6 +36,7 @@ namespace RimWorldAccess
         private static ZoneCreationMode currentMode = ZoneCreationMode.Manual;
         private static List<IntVec3> selectedCells = new List<IntVec3>();
         private static Zone expandingZone = null; // Track zone being expanded
+        private static string pendingAllowedAreaName = null; // Store name for allowed area creation
 
         /// <summary>
         /// Whether zone creation mode is currently active.
@@ -67,6 +69,15 @@ namespace RimWorldAccess
         /// List of cells that have been selected for the zone.
         /// </summary>
         public static List<IntVec3> SelectedCells => selectedCells;
+
+        /// <summary>
+        /// Sets the pending name for an allowed area that will be created.
+        /// </summary>
+        public static void SetPendingAllowedAreaName(string name)
+        {
+            pendingAllowedAreaName = name;
+            MelonLoader.MelonLogger.Msg($"Set pending allowed area name: {name}");
+        }
 
         /// <summary>
         /// Enters zone creation mode with the specified zone type and mode.
@@ -186,7 +197,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Normal zone creation
+            // Normal zone/area creation
             if (selectedCells.Count == 0)
             {
                 TolkHelper.Speak("No cells selected. Zone not created.");
@@ -194,7 +205,6 @@ namespace RimWorldAccess
                 return;
             }
 
-            Zone newZone = null;
             string zoneName = "";
 
             try
@@ -202,46 +212,85 @@ namespace RimWorldAccess
                 switch (selectedZoneType)
                 {
                     case ZoneType.Stockpile:
-                        Zone_Stockpile stockpile = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
-                        newZone = stockpile;
-                        zoneName = "Stockpile zone";
+                        {
+                            Zone_Stockpile stockpile = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
+                            map.zoneManager.RegisterZone(stockpile);
+                            foreach (IntVec3 cell in selectedCells)
+                            {
+                                if (cell.InBounds(map))
+                                {
+                                    stockpile.AddCell(cell);
+                                }
+                            }
+                            zoneName = "Stockpile zone";
+                        }
                         break;
 
                     case ZoneType.DumpingStockpile:
-                        Zone_Stockpile dumpingStockpile = new Zone_Stockpile(StorageSettingsPreset.DumpingStockpile, map.zoneManager);
-                        newZone = dumpingStockpile;
-                        zoneName = "Dumping stockpile zone";
+                        {
+                            Zone_Stockpile dumpingStockpile = new Zone_Stockpile(StorageSettingsPreset.DumpingStockpile, map.zoneManager);
+                            map.zoneManager.RegisterZone(dumpingStockpile);
+                            foreach (IntVec3 cell in selectedCells)
+                            {
+                                if (cell.InBounds(map))
+                                {
+                                    dumpingStockpile.AddCell(cell);
+                                }
+                            }
+                            zoneName = "Dumping stockpile zone";
+                        }
                         break;
 
                     case ZoneType.GrowingZone:
-                        Zone_Growing growingZone = new Zone_Growing(map.zoneManager);
-                        newZone = growingZone;
-                        zoneName = "Growing zone";
+                        {
+                            Zone_Growing growingZone = new Zone_Growing(map.zoneManager);
+                            map.zoneManager.RegisterZone(growingZone);
+                            foreach (IntVec3 cell in selectedCells)
+                            {
+                                if (cell.InBounds(map))
+                                {
+                                    growingZone.AddCell(cell);
+                                }
+                            }
+                            zoneName = "Growing zone";
+                        }
+                        break;
+
+                    case ZoneType.AllowedArea:
+                        {
+                            // Create allowed area using the area manager
+                            if (!map.areaManager.TryMakeNewAllowed(out Area_Allowed allowedArea))
+                            {
+                                TolkHelper.Speak("Cannot create more allowed areas. Maximum of 10 reached.", SpeechPriority.High);
+                                MelonLoader.MelonLogger.Warning("Failed to create allowed area: max limit reached");
+                                Reset();
+                                return;
+                            }
+
+                            // Set the custom name if provided
+                            string areaName = pendingAllowedAreaName;
+                            if (!string.IsNullOrWhiteSpace(areaName))
+                            {
+                                allowedArea.SetLabel(areaName);
+                            }
+
+                            // Add cells to the area
+                            foreach (IntVec3 cell in selectedCells)
+                            {
+                                if (cell.InBounds(map))
+                                {
+                                    allowedArea[cell] = true; // Areas use indexer syntax
+                                }
+                            }
+
+                            zoneName = $"Allowed area '{allowedArea.Label}'";
+                            pendingAllowedAreaName = null; // Clear the pending name
+                        }
                         break;
                 }
 
-                if (newZone != null)
-                {
-                    // Register the zone
-                    map.zoneManager.RegisterZone(newZone);
-
-                    // Add all selected cells
-                    foreach (IntVec3 cell in selectedCells)
-                    {
-                        if (cell.InBounds(map))
-                        {
-                            newZone.AddCell(cell);
-                        }
-                    }
-
-                    TolkHelper.Speak($"{zoneName} created with {selectedCells.Count} cells");
-                    MelonLoader.MelonLogger.Msg($"Created {zoneName} with {selectedCells.Count} cells");
-                }
-                else
-                {
-                    TolkHelper.Speak("Failed to create zone", SpeechPriority.High);
-                    MelonLoader.MelonLogger.Error("Failed to create zone: newZone was null");
-                }
+                TolkHelper.Speak($"{zoneName} created with {selectedCells.Count} cells");
+                MelonLoader.MelonLogger.Msg($"Created {zoneName} with {selectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {
@@ -574,6 +623,8 @@ namespace RimWorldAccess
                     return "dumping stockpile zone";
                 case ZoneType.GrowingZone:
                     return "growing zone";
+                case ZoneType.AllowedArea:
+                    return "allowed area";
                 default:
                     return "zone";
             }

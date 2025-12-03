@@ -691,5 +691,41 @@ namespace RimWorldAccess
 
             return null;
         }
+
+        /// <summary>
+        /// Gets information about areas at a tile (key 7).
+        /// Shows which allowed areas and special areas (home area) the tile is part of.
+        /// </summary>
+        public static string GetAreasInfo(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return "Out of bounds";
+
+            var sb = new StringBuilder();
+            var areaNames = new List<string>();
+
+            // Check all areas
+            foreach (Area area in map.areaManager.AllAreas)
+            {
+                // Check if this position is in the area
+                if (area[position])
+                {
+                    areaNames.Add(area.Label);
+                }
+            }
+
+            if (areaNames.Count == 0)
+                return "not in any area";
+
+            // Build the result string
+            for (int i = 0; i < areaNames.Count; i++)
+            {
+                if (i > 0)
+                    sb.Append(", ");
+                sb.Append(areaNames[i]);
+            }
+
+            return sb.ToString();
+        }
     }
 }
