@@ -78,25 +78,46 @@ namespace RimWorldAccess
                 return messageBox.text.ToString();
             }
 
-            // For Dialog_NodeTree
-            if (dialogType.Name == "Dialog_NodeTree")
+            // For Dialog_NodeTree and all subclasses
+            if (IsDialogNodeTreeOrSubclass(dialogType))
             {
                 FieldInfo curNodeField = dialogType.GetField("curNode", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (curNodeField == null)
+                {
+                    // Try looking in base type for subclasses
+                    curNodeField = dialogType.BaseType?.GetField("curNode", BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+
                 if (curNodeField != null)
                 {
                     object curNode = curNodeField.GetValue(dialog);
                     if (curNode != null)
                     {
-                        FieldInfo textField = curNode.GetType().GetField("text", BindingFlags.Public | BindingFlags.Instance);
+                        // Try both public and private text field
+                        FieldInfo textField = curNode.GetType().GetField("text", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (textField != null)
                         {
                             object text = textField.GetValue(curNode);
                             if (text != null)
                             {
-                                return text.ToString();
+                                string textStr = text.ToString();
+                                Log.Message($"RimWorld Access: Extracted Dialog_NodeTree text: {textStr.Substring(0, Math.Min(100, textStr.Length))}");
+                                return textStr;
                             }
                         }
+                        else
+                        {
+                            Log.Warning($"RimWorld Access: Dialog_NodeTree curNode has no 'text' field. Node type: {curNode.GetType().Name}");
+                        }
                     }
+                    else
+                    {
+                        Log.Warning($"RimWorld Access: Dialog_NodeTree curNode is null for dialog type: {dialogType.Name}");
+                    }
+                }
+                else
+                {
+                    Log.Warning($"RimWorld Access: Dialog_NodeTree has no 'curNode' field for dialog type: {dialogType.Name}");
                 }
             }
 
@@ -306,10 +327,16 @@ namespace RimWorldAccess
                     elements.Add(buttonC);
                 }
             }
-            // For Dialog_NodeTree
-            else if (dialogType.Name == "Dialog_NodeTree")
+            // For Dialog_NodeTree and all subclasses
+            else if (IsDialogNodeTreeOrSubclass(dialogType))
             {
                 FieldInfo curNodeField = dialogType.GetField("curNode", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (curNodeField == null)
+                {
+                    // Try looking in base type for subclasses
+                    curNodeField = dialogType.BaseType?.GetField("curNode", BindingFlags.NonPublic | BindingFlags.Instance);
+                }
+
                 if (curNodeField != null)
                 {
                     object curNode = curNodeField.GetValue(dialog);
@@ -317,17 +344,19 @@ namespace RimWorldAccess
                     {
                         // Get options list
                         Type diaNodeType = curNode.GetType();
-                        FieldInfo optionsField = diaNodeType.GetField("options", BindingFlags.Public | BindingFlags.Instance);
+                        FieldInfo optionsField = diaNodeType.GetField("options", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (optionsField != null)
                         {
                             var options = optionsField.GetValue(curNode) as System.Collections.IList;
-                            if (options != null)
+                            if (options != null && options.Count > 0)
                             {
+                                Log.Message($"RimWorld Access: Found {options.Count} options in Dialog_NodeTree");
+
                                 foreach (var option in options)
                                 {
                                     // Extract option text
                                     Type optionType = option.GetType();
-                                    FieldInfo textField = optionType.GetField("text", BindingFlags.NonPublic | BindingFlags.Instance);
+                                    FieldInfo textField = optionType.GetField("text", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
                                     FieldInfo disabledField = optionType.GetField("disabled", BindingFlags.Public | BindingFlags.Instance);
                                     FieldInfo disabledReasonField = optionType.GetField("disabledReason", BindingFlags.Public | BindingFlags.Instance);
 
@@ -336,6 +365,8 @@ namespace RimWorldAccess
                                         string optionText = textField.GetValue(option) as string;
                                         bool disabled = disabledField != null && (bool)disabledField.GetValue(option);
                                         string disabledReason = disabledReasonField != null ? disabledReasonField.GetValue(option) as string : null;
+
+                                        Log.Message($"RimWorld Access: Dialog option: '{optionText}' (disabled: {disabled})");
 
                                         ButtonElement button = new ButtonElement
                                         {
@@ -350,7 +381,7 @@ namespace RimWorldAccess
                                                 }
 
                                                 // Call Activate method
-                                                MethodInfo activateMethod = optionType.GetMethod("Activate", BindingFlags.NonPublic | BindingFlags.Instance);
+                                                MethodInfo activateMethod = optionType.GetMethod("Activate", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
                                                 if (activateMethod != null)
                                                 {
                                                     activateMethod.Invoke(option, null);
@@ -363,10 +394,30 @@ namespace RimWorldAccess
 
                                         elements.Add(button);
                                     }
+                                    else
+                                    {
+                                        Log.Warning($"RimWorld Access: Dialog option has no 'text' field. Option type: {optionType.Name}");
+                                    }
                                 }
                             }
+                            else
+                            {
+                                Log.Warning($"RimWorld Access: Dialog_NodeTree options list is null or empty for dialog type: {dialogType.Name}");
+                            }
+                        }
+                        else
+                        {
+                            Log.Warning($"RimWorld Access: Dialog_NodeTree curNode has no 'options' field. Node type: {diaNodeType.Name}");
                         }
                     }
+                    else
+                    {
+                        Log.Warning($"RimWorld Access: Dialog_NodeTree curNode is null in ExtractButtons for dialog type: {dialogType.Name}");
+                    }
+                }
+                else
+                {
+                    Log.Warning($"RimWorld Access: Dialog_NodeTree has no 'curNode' field in ExtractButtons for dialog type: {dialogType.Name}");
                 }
             }
             // For Dialog_Rename and Dialog_GiveName - extract OK button
@@ -579,6 +630,31 @@ namespace RimWorldAccess
 
             // Close the windowless dialog
             WindowlessDialogState.Close();
+        }
+
+        /// <summary>
+        /// Checks if the given type is Dialog_NodeTree or a subclass of it.
+        /// Walks up the entire type hierarchy to catch indirect subclasses.
+        /// </summary>
+        private static bool IsDialogNodeTreeOrSubclass(Type type)
+        {
+            if (type == null)
+                return false;
+
+            // Check current type name
+            if (type.Name == "Dialog_NodeTree")
+                return true;
+
+            // Walk up the inheritance chain
+            Type currentType = type.BaseType;
+            while (currentType != null)
+            {
+                if (currentType.Name == "Dialog_NodeTree")
+                    return true;
+                currentType = currentType.BaseType;
+            }
+
+            return false;
         }
     }
 }
