@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using RimWorld;
 using Verse;
@@ -31,19 +32,25 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Check if there's a selection
-            if (Find.Selector == null || Find.Selector.NumSelected == 0)
+            // Try pawn at cursor first
+            Pawn selectedPawn = null;
+            if (MapNavigationState.IsInitialized)
             {
-                TolkHelper.Speak("No pawn selected");
-                return;
+                IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
+                if (cursorPosition.IsValid && cursorPosition.InBounds(Find.CurrentMap))
+                {
+                    selectedPawn = Find.CurrentMap.thingGrid.ThingsListAt(cursorPosition)
+                        .OfType<Pawn>().FirstOrDefault();
+                }
             }
 
-            // Get the first selected pawn
-            Pawn selectedPawn = Find.Selector.FirstSelectedObject as Pawn;
+            // Fall back to selected pawn
+            if (selectedPawn == null)
+                selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
 
             if (selectedPawn == null)
             {
-                TolkHelper.Speak("Selected object is not a pawn");
+                TolkHelper.Speak("No pawn selected");
                 return;
             }
 
