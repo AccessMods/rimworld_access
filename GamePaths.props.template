@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Set this to your RimWorld installation directory -->
+    <RimWorldDir>D:\SteamLibrary\steamapps\common\RimWorld</RimWorldDir>
+  </PropertyGroup>
+</Project>

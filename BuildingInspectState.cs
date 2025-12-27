@@ -172,6 +172,15 @@ namespace RimWorldAccess
                 }
             }
 
+            // Check if building is a plant grower (hydroponics basin, etc.)
+            if (selectedBuilding is IPlantToGrowSettable plantGrower)
+            {
+                // Close building inspect and open plant selection menu
+                Close();
+                PlantSelectionMenuState.Open(plantGrower);
+                return;
+            }
+
             // If no recognized settings, announce
             TolkHelper.Speak($"{selectedBuilding.LabelCap} has no keyboard-accessible settings");
         }

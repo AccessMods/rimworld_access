@@ -234,6 +234,7 @@ namespace RimWorldAccess
                        (category == "Bed Assignment" && building is Building_Bed) ||
                        (category == "Temperature" && building.TryGetComp<CompTempControl>() != null) ||
                        (category == "Storage" && building is IStoreSettingsParent) ||
+                       (category == "Plant Selection" && building is IPlantToGrowSettable) ||
                        BuildingComponentsHelper.GetDiscoverableComponents(building).Any(c => c.CategoryName == category && !c.IsReadOnly);
             }
 
@@ -300,6 +301,10 @@ namespace RimWorldAccess
                 {
                     StorageSettingsMenuState.Open(settings);
                 }
+            }
+            else if (category == "Plant Selection" && building is IPlantToGrowSettable plantGrower)
+            {
+                PlantSelectionMenuState.Open(plantGrower);
             }
             else
             {
