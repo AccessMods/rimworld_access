@@ -176,6 +176,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds the hierarchical category tree structure.
         /// Organization: Tab → Status Group → Individual Projects
+        /// When only one tab exists, skips the tab wrapper and shows status groups directly.
         /// </summary>
         private static List<ResearchMenuNode> BuildCategoryTree()
         {
@@ -185,22 +186,13 @@ namespace RimWorldAccess
             var allProjects = DefDatabase<ResearchProjectDef>.AllDefsListForReading;
 
             // Group by research tab (Main, Anomaly, etc.)
-            var projectsByTab = allProjects.GroupBy(p => p.tab ?? ResearchTabDefOf.Main);
+            var projectsByTab = allProjects.GroupBy(p => p.tab ?? ResearchTabDefOf.Main).ToList();
+            bool singleTab = projectsByTab.Count == 1;
 
             foreach (var tabGroup in projectsByTab.OrderBy(g => g.Key.defName))
             {
                 var tab = tabGroup.Key;
                 var tabProjects = tabGroup.ToList();
-
-                // Create tab category node
-                var tabNode = new ResearchMenuNode
-                {
-                    Id = $"Tab_{tab.defName}",
-                    Type = ResearchMenuNodeType.Category,
-                    Label = tab.LabelCap.ToString(),
-                    Level = 0,
-                    Children = new List<ResearchMenuNode>()
-                };
 
                 // Group projects by status within this tab
                 var inProgress = GetInProgressProjects(tabProjects);
@@ -208,36 +200,73 @@ namespace RimWorldAccess
                 var available = tabProjects.Where(p => !p.IsFinished && p.CanStartNow).ToList();
                 var locked = tabProjects.Where(p => !p.IsFinished && !p.CanStartNow).ToList();
 
-                // Add status group nodes (only if they have projects)
-                if (inProgress.Count > 0)
+                // When only one tab exists, skip the tab wrapper and add status groups directly
+                if (singleTab)
                 {
-                    var node = CreateStatusGroupNode("InProgress", "In Progress", inProgress, 1);
-                    node.Parent = tabNode;
-                    tabNode.Children.Add(node);
-                }
+                    // Add status groups directly to tree root (Level 0)
+                    if (inProgress.Count > 0)
+                    {
+                        tree.Add(CreateStatusGroupNode($"Tab_{tab.defName}_InProgress", "In Progress", inProgress, 0));
+                    }
 
-                if (available.Count > 0)
+                    if (available.Count > 0)
+                    {
+                        tree.Add(CreateStatusGroupNode($"Tab_{tab.defName}_Available", "Available", available, 0));
+                    }
+
+                    if (completed.Count > 0)
+                    {
+                        tree.Add(CreateStatusGroupNode($"Tab_{tab.defName}_Completed", "Completed", completed, 0));
+                    }
+
+                    if (locked.Count > 0)
+                    {
+                        tree.Add(CreateStatusGroupNode($"Tab_{tab.defName}_Locked", "Locked", locked, 0));
+                    }
+                }
+                else
                 {
-                    var node = CreateStatusGroupNode("Available", "Available", available, 1);
-                    node.Parent = tabNode;
-                    tabNode.Children.Add(node);
-                }
+                    // Multiple tabs - keep the tab wrapper structure
+                    var tabNode = new ResearchMenuNode
+                    {
+                        Id = $"Tab_{tab.defName}",
+                        Type = ResearchMenuNodeType.Category,
+                        Label = tab.LabelCap.ToString(),
+                        Level = 0,
+                        Children = new List<ResearchMenuNode>()
+                    };
 
-                if (completed.Count > 0)
-                {
-                    var node = CreateStatusGroupNode("Completed", "Completed", completed, 1);
-                    node.Parent = tabNode;
-                    tabNode.Children.Add(node);
-                }
+                    // Add status group nodes (only if they have projects)
+                    if (inProgress.Count > 0)
+                    {
+                        var node = CreateStatusGroupNode("InProgress", "In Progress", inProgress, 1);
+                        node.Parent = tabNode;
+                        tabNode.Children.Add(node);
+                    }
 
-                if (locked.Count > 0)
-                {
-                    var node = CreateStatusGroupNode("Locked", "Locked", locked, 1);
-                    node.Parent = tabNode;
-                    tabNode.Children.Add(node);
-                }
+                    if (available.Count > 0)
+                    {
+                        var node = CreateStatusGroupNode("Available", "Available", available, 1);
+                        node.Parent = tabNode;
+                        tabNode.Children.Add(node);
+                    }
 
-                tree.Add(tabNode);
+                    if (completed.Count > 0)
+                    {
+                        var node = CreateStatusGroupNode("Completed", "Completed", completed, 1);
+                        node.Parent = tabNode;
+                        tabNode.Children.Add(node);
+                    }
+
+                    if (locked.Count > 0)
+                    {
+                        var node = CreateStatusGroupNode("Locked", "Locked", locked, 1);
+                        node.Parent = tabNode;
+                        tabNode.Children.Add(node);
+                    }
+
+                    tree.Add(tabNode);
+                }
             }
 
             return tree;
