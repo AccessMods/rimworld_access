@@ -15,7 +15,9 @@ RimWorld Access is a MelonLoader mod for RimWorld that adds comprehensive keyboa
 dotnet build
 ```
 
-The build process automatically copies the compiled DLL and required dependencies to `C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\` via a post-build target.
+The build process automatically copies the compiled DLL and required
+dependencies to a `Mods` directory inside the game's installation directory via a
+post-build target.
 
 **Deployed files:**
 - `rimworld_access.dll` - The mod
@@ -465,8 +467,7 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 
 ## Dependencies
 
-All references use absolute paths to the RimWorld installation at:
-`C:\Program Files (x86)\Steam\steamapps\common\RimWorld\`
+All references use absolute paths to the RimWorld installation.
 
 - **MelonLoader** - Mod loading framework (`MelonLoader\net6\MelonLoader.dll`)
 - **0Harmony** - Runtime patching library (`MelonLoader\net6\0Harmony.dll`)

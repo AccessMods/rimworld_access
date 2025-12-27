@@ -20,6 +20,15 @@ dotnet build
 
 This will compile the mod and automatically copy the DLL and dependencies to your RimWorld Mods folder via a post-build script.
 
+**Custom RimWorld Install Location:**
+
+The project defaults to the standard Steam install path (`C:\Program Files (x86)\Steam\steamapps\common\RimWorld`). If your RimWorld is installed elsewhere:
+
+1. Copy `GamePaths.props.template` to `GamePaths.props`
+2. Edit `GamePaths.props` and set `RimWorldDir` to your install path
+
+The `GamePaths.props` file is gitignored, so your local configuration won't affect the repository.
+
 ### Building a Release Package
 
 To create a release package:

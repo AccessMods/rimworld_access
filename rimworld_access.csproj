@@ -1,7 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Import local path overrides if they exist -->
+  <Import Project="GamePaths.props" Condition="Exists('GamePaths.props')" />
+
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
+    <!-- Default RimWorld install path (override in GamePaths.props for custom locations) -->
+    <RimWorldDir Condition="'$(RimWorldDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\RimWorld</RimWorldDir>
   </PropertyGroup>
 
   <!-- Embed audio files as resources -->
@@ -24,30 +29,30 @@
 <ItemGroup>
   <!-- MelonLoader References -->
   <Reference Include="MelonLoader">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\MelonLoader\net6\MelonLoader.dll</HintPath>
+    <HintPath>$(RimWorldDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
   </Reference>
   <Reference Include="0Harmony">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\MelonLoader\net6\0Harmony.dll</HintPath>
+    <HintPath>$(RimWorldDir)\MelonLoader\net6\0Harmony.dll</HintPath>
   </Reference>
 
   <!-- Game and Unity Engine References (from the game's Managed folder) -->
   <Reference Include="Assembly-CSharp">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\Assembly-CSharp.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\Assembly-CSharp.dll</HintPath>
   </Reference>
   <Reference Include="UnityEngine.CoreModule">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
   </Reference>
   <Reference Include="UnityEngine.IMGUIModule">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
   </Reference>
   <Reference Include="UnityEngine.TextRenderingModule">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
   </Reference>
   <Reference Include="UnityEngine.InputLegacyModule">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
   </Reference>
   <Reference Include="UnityEngine.AudioModule">
-    <HintPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld\RimWorldWin64_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
+    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
   </Reference>
 </ItemGroup>
 
@@ -59,19 +64,19 @@
     <!-- Copy the mod DLL -->
     <Copy
       SourceFiles="$(TargetPath)"
-      DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\"
+      DestinationFolder="$(RimWorldDir)\Mods\"
     />
 
     <!-- Copy Tolk.dll -->
     <Copy
       SourceFiles="$(ProjectDir)Tolk.dll"
-      DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\"
+      DestinationFolder="$(RimWorldDir)\Mods\"
     />
 
     <!-- Copy nvdaControllerClient64.dll -->
     <Copy
       SourceFiles="$(ProjectDir)nvdaControllerClient64.dll"
-      DestinationFolder="C:\Program Files (x86)\Steam\steamapps\common\RimWorld\Mods\"
+      DestinationFolder="$(RimWorldDir)\Mods\"
     />
   </Target>
 
