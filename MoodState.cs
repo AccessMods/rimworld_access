@@ -33,46 +33,46 @@ namespace RimWorldAccess
             }
 
             // Try pawn at cursor first
-            Pawn selectedPawn = null;
+            Pawn pawnAtCursor = null;
             if (MapNavigationState.IsInitialized)
             {
                 IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
                 if (cursorPosition.IsValid && cursorPosition.InBounds(Find.CurrentMap))
                 {
-                    selectedPawn = Find.CurrentMap.thingGrid.ThingsListAt(cursorPosition)
+                    pawnAtCursor = Find.CurrentMap.thingGrid.ThingsListAt(cursorPosition)
                         .OfType<Pawn>().FirstOrDefault();
                 }
             }
 
             // Fall back to selected pawn
-            if (selectedPawn == null)
-                selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
+            if (pawnAtCursor == null)
+                pawnAtCursor = Find.Selector?.FirstSelectedObject as Pawn;
 
-            if (selectedPawn == null)
+            if (pawnAtCursor == null)
             {
                 TolkHelper.Speak("No pawn selected");
                 return;
             }
 
             // Check if pawn has needs
-            if (selectedPawn.needs == null)
+            if (pawnAtCursor.needs == null)
             {
-                TolkHelper.Speak($"{selectedPawn.LabelShort} has no needs");
+                TolkHelper.Speak($"{pawnAtCursor.LabelShort} has no needs");
                 return;
             }
 
             // Check if pawn has mood need
-            if (selectedPawn.needs.mood == null)
+            if (pawnAtCursor.needs.mood == null)
             {
-                TolkHelper.Speak($"{selectedPawn.LabelShort} has no mood");
+                TolkHelper.Speak($"{pawnAtCursor.LabelShort} has no mood");
                 return;
             }
 
             // Build mood information
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"=== {selectedPawn.LabelShort} Mood ===");
+            sb.AppendLine($"=== {pawnAtCursor.LabelShort} Mood ===");
 
-            Need_Mood mood = selectedPawn.needs.mood;
+            Need_Mood mood = pawnAtCursor.needs.mood;
 
             // Current mood level and description
             float moodPercentage = mood.CurLevelPercentage * 100f;
@@ -80,13 +80,13 @@ namespace RimWorldAccess
             sb.AppendLine($"Mood: {moodPercentage:F0}% ({moodDescription})");
 
             // Mental break thresholds (only if pawn can have mental breaks)
-            if (selectedPawn.mindState?.mentalBreaker != null &&
-                selectedPawn.mindState.mentalBreaker.CanDoRandomMentalBreaks)
+            if (pawnAtCursor.mindState?.mentalBreaker != null &&
+                pawnAtCursor.mindState.mentalBreaker.CanDoRandomMentalBreaks)
             {
                 sb.AppendLine($"\nBreak Thresholds:");
-                sb.AppendLine($"  Minor: {selectedPawn.mindState.mentalBreaker.BreakThresholdMinor:P0}");
-                sb.AppendLine($"  Major: {selectedPawn.mindState.mentalBreaker.BreakThresholdMajor:P0}");
-                sb.AppendLine($"  Extreme: {selectedPawn.mindState.mentalBreaker.BreakThresholdExtreme:P0}");
+                sb.AppendLine($"  Minor: {pawnAtCursor.mindState.mentalBreaker.BreakThresholdMinor:P0}");
+                sb.AppendLine($"  Major: {pawnAtCursor.mindState.mentalBreaker.BreakThresholdMajor:P0}");
+                sb.AppendLine($"  Extreme: {pawnAtCursor.mindState.mentalBreaker.BreakThresholdExtreme:P0}");
             }
 
             // Get thoughts affecting mood
