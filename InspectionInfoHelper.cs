@@ -115,6 +115,10 @@ namespace RimWorldAccess
                 if (building is IStoreSettingsParent || building is Building_Storage)
                     categories.Add("Storage");
 
+                // Check for plant grower (hydroponics basin, growing zones, etc.)
+                if (building is IPlantToGrowSettable)
+                    categories.Add("Plant Selection");
+
                 // Check for power
                 var powerComp = building.TryGetComp<CompPowerTrader>();
                 if (powerComp != null)
