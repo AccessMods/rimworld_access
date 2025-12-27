@@ -383,14 +383,15 @@ namespace RimWorldAccess
 
             if (current.CanExpand && current.IsExpanded)
             {
+                // Collapse the current expanded item
                 current.IsExpanded = false;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Collapsed: {current.Label}");
+                AnnounceCurrentSelection();
             }
             else if (current.Parent != null)
             {
-                // Collapse parent instead
+                // Collapse parent and move focus to it
                 current.Parent.IsExpanded = false;
                 RebuildFlattenedList();
 
@@ -399,11 +400,11 @@ namespace RimWorldAccess
                 if (selectedIndex < 0) selectedIndex = 0;
 
                 SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Collapsed parent: {current.Parent.Label}");
+                AnnounceCurrentSelection();
             }
             else
             {
-                TolkHelper.Speak("Cannot collapse this item.", SpeechPriority.High);
+                TolkHelper.Speak("Already at top level.", SpeechPriority.High);
             }
         }
 

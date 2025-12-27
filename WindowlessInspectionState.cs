@@ -247,6 +247,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Collapses the selected item (Left arrow).
+        /// If on an expanded item, collapses it.
+        /// If on a child item, collapses the parent and moves focus to it.
         /// </summary>
         public static void Collapse()
         {
@@ -255,26 +257,52 @@ namespace RimWorldAccess
 
             var item = visibleItems[selectedIndex];
 
-            if (!item.IsExpandable)
+            // Case 1: Item is expandable and expanded - collapse it directly
+            if (item.IsExpandable && item.IsExpanded)
             {
-                SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                TolkHelper.Speak("This item cannot be collapsed.", SpeechPriority.High);
+                item.IsExpanded = false;
+                RebuildVisibleList();
+
+                // Adjust selection if it's now out of range
+                if (selectedIndex >= visibleItems.Count)
+                    selectedIndex = Math.Max(0, visibleItems.Count - 1);
+
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentSelection();
                 return;
             }
 
-            if (!item.IsExpanded)
+            // Case 2: Item is not expanded (or not expandable) - find parent and collapse it
+            var parent = item.Parent;
+
+            // Skip non-expandable parents (like root) to find an expandable ancestor
+            while (parent != null && !parent.IsExpandable)
             {
+                parent = parent.Parent;
+            }
+
+            if (parent == null || !parent.IsExpanded)
+            {
+                // No expandable parent to collapse - we're at the top level
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                TolkHelper.Speak("Already collapsed.");
+                TolkHelper.Speak("Already at top level.", SpeechPriority.High);
                 return;
             }
 
-            item.IsExpanded = false;
+            // Collapse the parent
+            parent.IsExpanded = false;
             RebuildVisibleList();
 
-            // Adjust selection if it's now out of range
-            if (selectedIndex >= visibleItems.Count)
+            // Move selection to the parent
+            int parentIndex = visibleItems.IndexOf(parent);
+            if (parentIndex >= 0)
+            {
+                selectedIndex = parentIndex;
+            }
+            else if (selectedIndex >= visibleItems.Count)
+            {
                 selectedIndex = Math.Max(0, visibleItems.Count - 1);
+            }
 
             SoundDefOf.Click.PlayOneShotOnCamera();
             AnnounceCurrentSelection();

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
 using Verse;
+using Verse.Sound;
 
 namespace RimWorldAccess
 {
@@ -90,6 +91,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Collapses the currently selected category (left arrow).
+        /// If on an expanded category, collapses it.
+        /// If on a child item, collapses the parent and moves focus to it.
         /// </summary>
         public static void CollapseCategory()
         {
@@ -97,13 +100,52 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
+            // Case 1: Current is an expanded category - collapse it directly
             if (current.Type == ResearchMenuNodeType.Category && current.IsExpanded)
             {
                 current.IsExpanded = false;
                 expandedNodes.Remove(current.Id);
                 flatNavigationList = BuildFlatNavigationList();
+                SoundDefOf.Click.PlayOneShotOnCamera();
                 AnnounceCurrentSelection();
+                return;
             }
+
+            // Case 2: Find parent and collapse it
+            var parent = current.Parent;
+
+            // Skip to find an expandable parent (categories only)
+            while (parent != null && parent.Type != ResearchMenuNodeType.Category)
+            {
+                parent = parent.Parent;
+            }
+
+            if (parent == null || !parent.IsExpanded)
+            {
+                // No expandable parent to collapse - we're at the top level
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Already at top level.", SpeechPriority.High);
+                return;
+            }
+
+            // Collapse the parent
+            parent.IsExpanded = false;
+            expandedNodes.Remove(parent.Id);
+            flatNavigationList = BuildFlatNavigationList();
+
+            // Move selection to the parent
+            int parentIndex = flatNavigationList.IndexOf(parent);
+            if (parentIndex >= 0)
+            {
+                currentIndex = parentIndex;
+            }
+            else if (currentIndex >= flatNavigationList.Count)
+            {
+                currentIndex = Math.Max(0, flatNavigationList.Count - 1);
+            }
+
+            SoundDefOf.Click.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -168,16 +210,32 @@ namespace RimWorldAccess
 
                 // Add status group nodes (only if they have projects)
                 if (inProgress.Count > 0)
-                    tabNode.Children.Add(CreateStatusGroupNode("InProgress", "In Progress", inProgress, 1));
+                {
+                    var node = CreateStatusGroupNode("InProgress", "In Progress", inProgress, 1);
+                    node.Parent = tabNode;
+                    tabNode.Children.Add(node);
+                }
 
                 if (available.Count > 0)
-                    tabNode.Children.Add(CreateStatusGroupNode("Available", "Available", available, 1));
+                {
+                    var node = CreateStatusGroupNode("Available", "Available", available, 1);
+                    node.Parent = tabNode;
+                    tabNode.Children.Add(node);
+                }
 
                 if (completed.Count > 0)
-                    tabNode.Children.Add(CreateStatusGroupNode("Completed", "Completed", completed, 1));
+                {
+                    var node = CreateStatusGroupNode("Completed", "Completed", completed, 1);
+                    node.Parent = tabNode;
+                    tabNode.Children.Add(node);
+                }
 
                 if (locked.Count > 0)
-                    tabNode.Children.Add(CreateStatusGroupNode("Locked", "Locked", locked, 1));
+                {
+                    var node = CreateStatusGroupNode("Locked", "Locked", locked, 1);
+                    node.Parent = tabNode;
+                    tabNode.Children.Add(node);
+                }
 
                 tree.Add(tabNode);
             }
@@ -234,15 +292,17 @@ namespace RimWorldAccess
             // Add individual project nodes
             foreach (var project in projects.OrderBy(p => p.LabelCap.ToString()))
             {
-                statusNode.Children.Add(new ResearchMenuNode
+                var projectNode = new ResearchMenuNode
                 {
                     Id = $"Project_{project.defName}",
                     Type = ResearchMenuNodeType.Project,
                     Label = FormatProjectLabel(project),
                     Level = level + 1,
                     Project = project,
-                    Children = new List<ResearchMenuNode>()
-                });
+                    Children = new List<ResearchMenuNode>(),
+                    Parent = statusNode
+                };
+                statusNode.Children.Add(projectNode);
             }
 
             return statusNode;
@@ -372,6 +432,7 @@ namespace RimWorldAccess
         public bool IsExpanded { get; set; }
         public ResearchProjectDef Project { get; set; }
         public List<ResearchMenuNode> Children { get; set; }
+        public ResearchMenuNode Parent { get; set; }  // Reference to parent node for upward navigation
     }
 
     /// <summary>
