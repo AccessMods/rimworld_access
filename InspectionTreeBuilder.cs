@@ -244,7 +244,8 @@ namespace RimWorldAccess
                    category == "Mood" ||
                    category == "Social" ||
                    category == "Training" ||
-                   category == "Character";
+                   category == "Character" ||
+                   category == "Log";
         }
 
         /// <summary>
@@ -378,6 +379,10 @@ namespace RimWorldAccess
             else if (category == "Character")
             {
                 BuildDetailedInfoChildren(categoryItem, obj, category);
+            }
+            else if (category == "Log")
+            {
+                BuildLogChildren(categoryItem, pawn);
             }
         }
 
@@ -1341,6 +1346,177 @@ namespace RimWorldAccess
                 };
 
                 categoryItem.Children.Add(detailItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Log category - creates Combat Log and Social Log subcategories.
+        /// </summary>
+        private static void BuildLogChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            // Add Combat Log as expandable subcategory
+            var combatLogItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.SubCategory,
+                Label = "Combat Log",
+                Data = pawn,
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = true,
+                IsExpanded = false
+            };
+            combatLogItem.OnActivate = () => BuildCombatLogEntries(combatLogItem, pawn);
+            parentItem.Children.Add(combatLogItem);
+
+            // Add Social Log as expandable subcategory
+            var socialLogItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.SubCategory,
+                Label = "Social Log",
+                Data = pawn,
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = true,
+                IsExpanded = false
+            };
+            socialLogItem.OnActivate = () => BuildSocialLogEntries(socialLogItem, pawn);
+            parentItem.Children.Add(socialLogItem);
+        }
+
+        /// <summary>
+        /// Builds combat log entries for a pawn.
+        /// </summary>
+        private static void BuildCombatLogEntries(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            var entries = new List<(int ageTicks, string text, LogEntry entry)>();
+
+            if (Find.BattleLog != null)
+            {
+                foreach (Battle battle in Find.BattleLog.Battles)
+                {
+                    if (!battle.Concerns(pawn))
+                        continue;
+
+                    foreach (LogEntry entry in battle.Entries)
+                    {
+                        if (!entry.Concerns(pawn))
+                            continue;
+
+                        string entryText = entry.ToGameStringFromPOV(pawn).StripTags();
+                        string timestamp = entry.Age.ToStringTicksToPeriod();
+                        string displayText = $"{timestamp} ago - {entryText}";
+
+                        entries.Add((entry.Age, displayText, entry));
+                    }
+                }
+            }
+
+            // Sort by age (most recent first)
+            entries.Sort((a, b) => a.ageTicks.CompareTo(b.ageTicks));
+
+            if (entries.Count == 0)
+            {
+                var noEntriesItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No combat entries found",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noEntriesItem);
+                return;
+            }
+
+            foreach (var (ageTicks, displayText, entry) in entries)
+            {
+                var logItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = displayText,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false,
+                    Data = new { Pawn = pawn, Entry = entry }
+                };
+
+                if (entry.CanBeClickedFromPOV(pawn))
+                {
+                    logItem.OnActivate = () =>
+                    {
+                        entry.ClickedFromPOV(pawn);
+                        TolkHelper.Speak("Jumped to target");
+                    };
+                }
+
+                parentItem.Children.Add(logItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds social log entries for a pawn.
+        /// </summary>
+        private static void BuildSocialLogEntries(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            var entries = new List<(int ageTicks, string text, LogEntry entry)>();
+
+            if (Find.PlayLog != null)
+            {
+                foreach (LogEntry entry in Find.PlayLog.AllEntries)
+                {
+                    if (!entry.Concerns(pawn))
+                        continue;
+
+                    string entryText = entry.ToGameStringFromPOV(pawn).StripTags();
+                    string timestamp = entry.Age.ToStringTicksToPeriod();
+                    string displayText = $"{timestamp} ago - {entryText}";
+
+                    entries.Add((entry.Age, displayText, entry));
+                }
+            }
+
+            // Sort by age (most recent first)
+            entries.Sort((a, b) => a.ageTicks.CompareTo(b.ageTicks));
+
+            if (entries.Count == 0)
+            {
+                var noEntriesItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No social entries found",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(noEntriesItem);
+                return;
+            }
+
+            foreach (var (ageTicks, displayText, entry) in entries)
+            {
+                var logItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = displayText,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false,
+                    Data = new { Pawn = pawn, Entry = entry }
+                };
+
+                if (entry.CanBeClickedFromPOV(pawn))
+                {
+                    logItem.OnActivate = () =>
+                    {
+                        entry.ClickedFromPOV(pawn);
+                        TolkHelper.Speak("Jumped to target");
+                    };
+                }
+
+                parentItem.Children.Add(logItem);
             }
         }
     }
