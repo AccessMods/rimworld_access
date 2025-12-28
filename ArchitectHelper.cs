@@ -51,11 +51,11 @@ namespace RimWorldAccess
 
                 if (allDesignators == null || allDesignators.Count == 0)
                 {
-                    MelonLoader.MelonLogger.Warning($"No resolved designators found for category: {category.defName}");
+                    Log.Warning($"No resolved designators found for category: {category.defName}");
                     return designators;
                 }
 
-                MelonLoader.MelonLogger.Msg($"Found {allDesignators.Count} designators in category: {category.defName}");
+                Log.Message($"Found {allDesignators.Count} designators in category: {category.defName}");
 
                 // Get allowed designators (filters by game rules and research)
                 foreach (Designator designator in category.ResolvedAllowedDesignators)
@@ -86,7 +86,7 @@ namespace RimWorldAccess
                     }
                 }
 
-                MelonLoader.MelonLogger.Msg($"After filtering: {designators.Count} designators available");
+                Log.Message($"After filtering: {designators.Count} designators available");
 
                 // Add missing designators for Orders category
                 if (category.defName == "Orders")
@@ -96,7 +96,7 @@ namespace RimWorldAccess
                     if (!hasUninstall)
                     {
                         designators.Add(new Designator_Uninstall());
-                        MelonLoader.MelonLogger.Msg("Added Designator_Uninstall to Orders category");
+                        Log.Message("Added Designator_Uninstall to Orders category");
                     }
 
                     // Add Open designator if not already present
@@ -104,13 +104,13 @@ namespace RimWorldAccess
                     if (!hasOpen)
                     {
                         designators.Add(new Designator_Open());
-                        MelonLoader.MelonLogger.Msg("Added Designator_Open to Orders category");
+                        Log.Message("Added Designator_Open to Orders category");
                     }
                 }
             }
             catch (System.Exception ex)
             {
-                MelonLoader.MelonLogger.Error($"Error getting designators for category {category.defName}: {ex}");
+                Log.Error($"Error getting designators for category {category.defName}: {ex}");
             }
 
             return designators;

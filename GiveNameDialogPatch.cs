@@ -28,7 +28,7 @@ namespace RimWorldAccess
 
             if (nameMessageKeyField == null || useSecondNameField == null || suggestingPawnField == null)
             {
-                MelonLoader.MelonLogger.Msg("Failed to get required fields from Dialog_GiveName");
+                Log.Message("Failed to get required fields from Dialog_GiveName");
                 return;
             }
 
@@ -54,7 +54,7 @@ namespace RimWorldAccess
                 announcement += ". Use Tab to navigate between fields. Press Enter to confirm.";
                 TolkHelper.Speak(announcement);
                 GiveNameDialogState.MarkAsAnnounced();
-                MelonLoader.MelonLogger.Msg($"Dialog announced: {announcement.Substring(0, Mathf.Min(100, announcement.Length))}...");
+                Log.Message($"Dialog announced: {announcement.Substring(0, Mathf.Min(100, announcement.Length))}...");
             }
 
             // Handle keyboard navigation
@@ -117,7 +117,7 @@ namespace RimWorldAccess
                 {
                     case 0:
                         // Text field - do nothing, let native text input handle it
-                        MelonLoader.MelonLogger.Msg("Enter pressed on text field (no action)");
+                        Log.Message("Enter pressed on text field (no action)");
                         break;
                     case 1:
                         if (hasNameGenerator)
@@ -129,7 +129,7 @@ namespace RimWorldAccess
                                 string newName = generator();
                                 curNameField.SetValue(dialog, newName);
                                 TolkHelper.Speak($"Randomized: {newName}");
-                                MelonLoader.MelonLogger.Msg($"Randomized name to: {newName}");
+                                Log.Message($"Randomized name to: {newName}");
                             }
                         }
                         else
@@ -152,7 +152,7 @@ namespace RimWorldAccess
                     case 0:
                     case 2:
                         // Text fields - do nothing, let native text input handle it
-                        MelonLoader.MelonLogger.Msg("Enter pressed on text field (no action)");
+                        Log.Message("Enter pressed on text field (no action)");
                         break;
                     case 1:
                         // First randomize button
@@ -162,7 +162,7 @@ namespace RimWorldAccess
                             string newName = generator1();
                             curNameField.SetValue(dialog, newName);
                             TolkHelper.Speak($"Randomized first name: {newName}");
-                            MelonLoader.MelonLogger.Msg($"Randomized first name to: {newName}");
+                            Log.Message($"Randomized first name to: {newName}");
                         }
                         break;
                     case 3:
@@ -173,7 +173,7 @@ namespace RimWorldAccess
                             string newName = generator2();
                             curSecondNameField.SetValue(dialog, newName);
                             TolkHelper.Speak($"Randomized second name: {newName}");
-                            MelonLoader.MelonLogger.Msg($"Randomized second name to: {newName}");
+                            Log.Message($"Randomized second name to: {newName}");
                         }
                         break;
                     case 4:
@@ -224,14 +224,14 @@ namespace RimWorldAccess
                 }
 
                 Find.WindowStack.TryRemove(dialog);
-                MelonLoader.MelonLogger.Msg("Dialog submitted successfully");
+                Log.Message("Dialog submitted successfully");
             }
             else
             {
                 string invalidNameMessageKey = (string)invalidNameMessageKeyField.GetValue(dialog);
                 Messages.Message(invalidNameMessageKey.Translate(), MessageTypeDefOf.RejectInput, historical: false);
                 TolkHelper.Speak("Invalid name");
-                MelonLoader.MelonLogger.Msg("Dialog submission rejected: invalid name");
+                Log.Message("Dialog submission rejected: invalid name");
             }
         }
 
@@ -294,7 +294,7 @@ namespace RimWorldAccess
             }
 
             TolkHelper.Speak(announcement);
-            MelonLoader.MelonLogger.Msg($"Focus changed to: {announcement}");
+            Log.Message($"Focus changed to: {announcement}");
         }
 
         private static void DrawFocusHighlight(Dialog_GiveName dialog, Rect rect, bool useSecondName, bool hasNameGenerator, bool hasSecondNameGenerator)
@@ -399,7 +399,7 @@ namespace RimWorldAccess
             if (__instance is Dialog_GiveName)
             {
                 GiveNameDialogState.Reset();
-                MelonLoader.MelonLogger.Msg("Dialog_GiveName closed, state reset");
+                Log.Message("Dialog_GiveName closed, state reset");
             }
         }
     }

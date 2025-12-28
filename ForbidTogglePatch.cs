@@ -107,7 +107,7 @@ namespace RimWorldAccess
                 }
 
                 TolkHelper.Speak(announcement);
-                MelonLoader.MelonLogger.Msg($"Forbid toggle: {announcement}");
+                Log.Message($"Forbid toggle: {announcement}");
             }
         }
     }

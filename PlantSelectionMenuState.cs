@@ -127,7 +127,7 @@ namespace RimWorldAccess
         {
             if (settable == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open plant selection menu: settable is null");
+                Log.Error("Cannot open plant selection menu: settable is null");
                 return;
             }
 
@@ -182,7 +182,7 @@ namespace RimWorldAccess
             // Announce first/current plant
             AnnounceCurrentSelection();
 
-            MelonLoader.MelonLogger.Msg($"Opened plant selection menu with {availablePlants.Count} plants. Current: {currentPlantName}");
+            Log.Message($"Opened plant selection menu with {availablePlants.Count} plants. Current: {currentPlantName}");
         }
 
         /// <summary>
@@ -247,7 +247,7 @@ namespace RimWorldAccess
             CheckAndWarnAboutPlant(plantDef);
 
             TolkHelper.Speak($"Selected: {selected.displayText}");
-            MelonLoader.MelonLogger.Msg($"Set plant to: {plantDef.label}");
+            Log.Message($"Set plant to: {plantDef.label}");
 
             Close();
         }

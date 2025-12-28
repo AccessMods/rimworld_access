@@ -265,21 +265,21 @@ namespace RimWorldAccess
         /// </summary>
         private static void ExpandArea()
         {
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: ExpandArea called, selectedArea = {selectedArea?.Label ?? "null"}");
+            Log.Message($"RimWorld Access: ExpandArea called, selectedArea = {selectedArea?.Label ?? "null"}");
 
             if (selectedArea != null)
             {
                 // Save reference before Close() clears it
                 Area areaToExpand = selectedArea;
 
-                MelonLoader.MelonLogger.Msg("RimWorld Access: Closing area manager");
+                Log.Message("RimWorld Access: Closing area manager");
                 Close();
-                MelonLoader.MelonLogger.Msg($"RimWorld Access: Calling EnterExpandMode with {areaToExpand.Label}");
+                Log.Message($"RimWorld Access: Calling EnterExpandMode with {areaToExpand.Label}");
                 AreaPaintingState.EnterExpandMode(areaToExpand);
             }
             else
             {
-                MelonLoader.MelonLogger.Msg("RimWorld Access: selectedArea is null, cannot expand");
+                Log.Message("RimWorld Access: selectedArea is null, cannot expand");
             }
         }
 

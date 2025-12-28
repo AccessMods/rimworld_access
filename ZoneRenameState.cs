@@ -24,7 +24,7 @@ namespace RimWorldAccess
         {
             if (zone == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open rename dialog: zone is null");
+                Log.Error("Cannot open rename dialog: zone is null");
                 return;
             }
 
@@ -34,7 +34,7 @@ namespace RimWorldAccess
             isActive = true;
 
             TolkHelper.Speak($"Renaming {originalName}. Current name: {currentText}. Type new name and press Enter to confirm, Escape to cancel.");
-            MelonLoader.MelonLogger.Msg($"Opened rename dialog for zone: {originalName}");
+            Log.Message($"Opened rename dialog for zone: {originalName}");
         }
 
         /// <summary>
@@ -118,12 +118,12 @@ namespace RimWorldAccess
                 // Set the new name
                 currentZone.label = currentText;
                 TolkHelper.Speak($"Renamed to {currentText}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Msg($"Renamed zone from '{originalName}' to '{currentText}'");
+                Log.Message($"Renamed zone from '{originalName}' to '{currentText}'");
             }
             catch (Exception ex)
             {
                 TolkHelper.Speak($"Error renaming zone: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"Error renaming zone: {ex}");
+                Log.Error($"Error renaming zone: {ex}");
             }
             finally
             {
@@ -140,7 +140,7 @@ namespace RimWorldAccess
                 return;
 
             TolkHelper.Speak("Cancelled rename");
-            MelonLoader.MelonLogger.Msg("Cancelled zone rename");
+            Log.Message("Cancelled zone rename");
             Close();
         }
     }

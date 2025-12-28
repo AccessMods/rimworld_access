@@ -1,24 +1,21 @@
-using MelonLoader;
 using HarmonyLib;
-
-[assembly: MelonInfo(typeof(RimWorldAccess.RimWorldAccessMod), "RimWorld Access", "1.0.0", "Your Name")]
-[assembly: MelonGame("Ludeon Studios", "RimWorld by Ludeon Studios")]
+using UnityEngine;
+using Verse;
 
 namespace RimWorldAccess
 {
-    public class RimWorldAccessMod : MelonMod
+    [StaticConstructorOnStartup]
+    public static class RimWorldAccessMod
     {
-        public override void OnInitializeMelon()
-        {
-            // Initialize the static logger so other classes can use it
-            ModLogger.Initialize(LoggerInstance);
+        public static readonly string HarmonyId = "com.rimworldaccess.mainmenukeyboard";
 
-            LoggerInstance.Msg("RimWorld Access Mod - Initializing accessibility features...");
+        static RimWorldAccessMod()
+        {
+            Log.Message("[RimWorld Access] Initializing accessibility features...");
 
             // Initialize Tolk screen reader integration
             try
             {
-                TolkHelper.SetLogger(LoggerInstance);
                 TolkHelper.Initialize();
 
                 if (TolkHelper.IsActive())
@@ -28,15 +25,15 @@ namespace RimWorldAccess
             }
             catch (System.Exception ex)
             {
-                LoggerInstance.Error($"Failed to initialize Tolk screen reader integration: {ex.Message}");
-                LoggerInstance.Error("The mod will not function without Tolk.dll");
+                Log.Error($"[RimWorld Access] Failed to initialize Tolk screen reader integration: {ex.Message}");
+                Log.Error("[RimWorld Access] The mod will not function without Tolk.dll");
                 return;
             }
 
             // Apply Harmony patches
-            var harmony = new HarmonyLib.Harmony("com.rimworldaccess.mainmenukeyboard");
+            var harmony = new Harmony(HarmonyId);
 
-            LoggerInstance.Msg("Applying Harmony patches...");
+            Log.Message("[RimWorld Access] Applying Harmony patches...");
             harmony.PatchAll();
 
             // Log which patches were applied
@@ -45,17 +42,20 @@ namespace RimWorldAccess
             foreach (var method in patchedMethods)
             {
                 patchCount++;
-                LoggerInstance.Msg($"Patched: {method.DeclaringType?.Name}.{method.Name}");
+                Log.Message($"[RimWorld Access] Patched: {method.DeclaringType?.Name}.{method.Name}");
             }
-            LoggerInstance.Msg($"Total patches applied: {patchCount}");
+            Log.Message($"[RimWorld Access] Total patches applied: {patchCount}");
 
-            LoggerInstance.Msg("RimWorld Access Mod - Main menu keyboard navigation enabled!");
-            LoggerInstance.Msg("Use Arrow keys to navigate, Enter to select.");
+            Log.Message("[RimWorld Access] Main menu keyboard navigation enabled!");
+            Log.Message("[RimWorld Access] Use Arrow keys to navigate, Enter to select.");
+
+            // Register shutdown handler
+            Application.quitting += OnApplicationQuit;
         }
 
-        public override void OnDeinitializeMelon()
+        private static void OnApplicationQuit()
         {
-            LoggerInstance.Msg("RimWorld Access Mod - Shutting down...");
+            Log.Message("[RimWorld Access] Shutting down...");
             TolkHelper.Shutdown();
         }
     }

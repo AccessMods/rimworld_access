@@ -97,7 +97,7 @@ namespace RimWorldAccess
         {
             // Open unified zone settings menu for all zone types
             ZoneSettingsMenuState.Open(zone);
-            MelonLoader.MelonLogger.Msg($"Opened zone settings menu for: {zone.label}");
+            Log.Message($"Opened zone settings menu for: {zone.label}");
         }
 
         /// <summary>
@@ -147,7 +147,7 @@ namespace RimWorldAccess
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false); // false = doesn't give colonist orders
 
-            MelonLoader.MelonLogger.Msg("Opened zone creation menu");
+            Log.Message("Opened zone creation menu");
         }
 
         /// <summary>
@@ -163,7 +163,7 @@ namespace RimWorldAccess
             });
 
             Find.WindowStack.Add(nameDialog);
-            MelonLoader.MelonLogger.Msg("Opened allowed area name input dialog");
+            Log.Message("Opened allowed area name input dialog");
         }
 
         /// <summary>
@@ -194,7 +194,7 @@ namespace RimWorldAccess
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false);
 
-            MelonLoader.MelonLogger.Msg($"Opened mode selection menu for {zoneType}");
+            Log.Message($"Opened mode selection menu for {zoneType}");
         }
 
         /// <summary>
@@ -206,7 +206,7 @@ namespace RimWorldAccess
             if (map == null)
             {
                 TolkHelper.Speak("No map found", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error("ClearHomeZone: No current map");
+                Log.Error("ClearHomeZone: No current map");
                 return;
             }
 
@@ -214,7 +214,7 @@ namespace RimWorldAccess
             if (homeArea == null)
             {
                 TolkHelper.Speak("Error: Home area not found", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error("ClearHomeZone: Home area not found in area manager");
+                Log.Error("ClearHomeZone: Home area not found in area manager");
                 return;
             }
 
@@ -222,7 +222,7 @@ namespace RimWorldAccess
             homeArea.Clear();
 
             TolkHelper.Speak($"Home zone cleared. {previousCount} cells removed");
-            MelonLoader.MelonLogger.Msg($"Home zone cleared: {previousCount} cells removed");
+            Log.Message($"Home zone cleared: {previousCount} cells removed");
         }
     }
 

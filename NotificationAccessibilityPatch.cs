@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using HarmonyLib;
-using MelonLoader;
 using RimWorld;
 using Verse;
 
@@ -30,7 +29,7 @@ namespace RimWorldAccess
                 // Announce the message to screen reader via clipboard
                 string announcement = $"Message: {msg.text}";
                 TolkHelper.Speak(announcement);
-                MelonLogger.Msg($"[Notification] {announcement}");
+                Log.Message($"[Notification] {announcement}");
             }
         }
 
@@ -48,7 +47,7 @@ namespace RimWorldAccess
                 // Announce the letter to screen reader via clipboard
                 string announcement = $"Letter: {let.Label}";
                 TolkHelper.Speak(announcement);
-                MelonLogger.Msg($"[Notification] {announcement}");
+                Log.Message($"[Notification] {announcement}");
             }
         }
 
@@ -83,7 +82,7 @@ namespace RimWorldAccess
                         {
                             string announcement = $"Alert: {label}";
                             TolkHelper.Speak(announcement);
-                            MelonLogger.Msg($"[Notification] {announcement}");
+                            Log.Message($"[Notification] {announcement}");
                         }
                     }
                 }

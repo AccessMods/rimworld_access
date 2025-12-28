@@ -25,7 +25,7 @@ namespace RimWorldAccess
         {
             if (zone == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open zone settings menu: zone is null");
+                Log.Error("Cannot open zone settings menu: zone is null");
                 return;
             }
 
@@ -38,7 +38,7 @@ namespace RimWorldAccess
             TolkHelper.Speak($"Zone settings for {zone.label}");
             AnnounceCurrentOption();
 
-            MelonLoader.MelonLogger.Msg($"Opened zone settings menu for: {zone.label}");
+            Log.Message($"Opened zone settings menu for: {zone.label}");
         }
 
         /// <summary>
@@ -250,12 +250,12 @@ namespace RimWorldAccess
                     {
                         zoneToDelete.Delete(playSound: true); // RimWorld handles all cleanup
                         TolkHelper.Speak($"Deleted {zoneName}", SpeechPriority.High);
-                        MelonLoader.MelonLogger.Msg($"Deleted zone: {zoneName}");
+                        Log.Message($"Deleted zone: {zoneName}");
                     }
                     catch (Exception ex)
                     {
                         TolkHelper.Speak($"Error deleting zone: {ex.Message}", SpeechPriority.High);
-                        MelonLoader.MelonLogger.Error($"Error deleting zone: {ex}");
+                        Log.Error($"Error deleting zone: {ex}");
                     }
                 }
             );

@@ -168,7 +168,7 @@ namespace RimWorldAccess
                         catch (System.Exception ex)
                         {
                             TolkHelper.Speak($"Error placing: {ex.Message}", SpeechPriority.High);
-                            MelonLoader.MelonLogger.Error($"Error in single cell designation: {ex}");
+                            Log.Error($"Error in single cell designation: {ex}");
                         }
                     }
                     else
@@ -339,12 +339,12 @@ namespace RimWorldAccess
 
                 string directionName = direction.ToStringHuman();
                 TolkHelper.Speak($"Selected {addedCount} cells to {directionName}. Total: {ArchitectState.SelectedCells.Count}");
-                MelonLoader.MelonLogger.Msg($"Auto-select to wall: {addedCount} cells in direction {directionName}");
+                Log.Message($"Auto-select to wall: {addedCount} cells in direction {directionName}");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error auto-selecting: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"AutoSelectToWall error: {ex}");
+                Log.Error($"AutoSelectToWall error: {ex}");
             }
         }
 
@@ -367,12 +367,12 @@ namespace RimWorldAccess
 
                 string label = designator.Label ?? "Zone";
                 TolkHelper.Speak($"{label} created with {ArchitectState.SelectedCells.Count} cells");
-                MelonLoader.MelonLogger.Msg($"Zone placement executed: {label} with {ArchitectState.SelectedCells.Count} cells");
+                Log.Message($"Zone placement executed: {label} with {ArchitectState.SelectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error creating zone: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"ExecuteZonePlacement error: {ex}");
+                Log.Error($"ExecuteZonePlacement error: {ex}");
             }
             finally
             {
@@ -461,7 +461,7 @@ namespace RimWorldAccess
                 }
 
                 TolkHelper.Speak($"Filled interior with {addedCount} cells. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
-                MelonLoader.MelonLogger.Msg($"Borders mode auto-fill: added {addedCount} interior cells, total {ArchitectState.SelectedCells.Count}");
+                Log.Message($"Borders mode auto-fill: added {addedCount} interior cells, total {ArchitectState.SelectedCells.Count}");
 
                 // Now execute the placement
                 ExecuteZonePlacement(designator, map);
@@ -469,7 +469,7 @@ namespace RimWorldAccess
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error filling interior: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"BordersModeAutoFill error: {ex}");
+                Log.Error($"BordersModeAutoFill error: {ex}");
             }
         }
 
@@ -525,7 +525,7 @@ namespace RimWorldAccess
                 int width = maxX - minX + 1;
                 int height = maxZ - minZ + 1;
                 TolkHelper.Speak($"Filled {width} by {height} rectangle. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
-                MelonLoader.MelonLogger.Msg($"Corners mode auto-fill: {width}x{height} rectangle, total {ArchitectState.SelectedCells.Count} cells");
+                Log.Message($"Corners mode auto-fill: {width}x{height} rectangle, total {ArchitectState.SelectedCells.Count} cells");
 
                 // Now execute the placement
                 ExecuteZonePlacement(designator, map);
@@ -533,7 +533,7 @@ namespace RimWorldAccess
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error filling rectangle: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"CornersModeAutoFill error: {ex}");
+                Log.Error($"CornersModeAutoFill error: {ex}");
             }
         }
     }
@@ -637,7 +637,7 @@ namespace RimWorldAccess
                 Event.current.Use();
 
                 // Log for debugging
-                MelonLoader.MelonLogger.Msg("Space key intercepted during architect placement mode");
+                Log.Message("Space key intercepted during architect placement mode");
 
                 // Don't let TimeControls process this event
                 return false;

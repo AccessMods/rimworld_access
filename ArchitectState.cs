@@ -103,7 +103,7 @@ namespace RimWorldAccess
             selectedCells.Clear();
 
             TolkHelper.Speak("Architect menu opened. Select a category");
-            MelonLoader.MelonLogger.Msg("Entered architect category selection");
+            Log.Message("Entered architect category selection");
         }
 
         /// <summary>
@@ -119,7 +119,7 @@ namespace RimWorldAccess
             selectedCells.Clear();
 
             TolkHelper.Speak($"{category.LabelCap} category selected. Choose a tool");
-            MelonLoader.MelonLogger.Msg($"Entered tool selection for category: {category.defName}");
+            Log.Message($"Entered tool selection for category: {category.defName}");
         }
 
         /// <summary>
@@ -134,7 +134,7 @@ namespace RimWorldAccess
             selectedCells.Clear();
 
             TolkHelper.Speak($"Select material for {buildable.label}");
-            MelonLoader.MelonLogger.Msg($"Entered material selection for: {buildable.defName}");
+            Log.Message($"Entered material selection for: {buildable.defName}");
         }
 
         /// <summary>
@@ -168,7 +168,7 @@ namespace RimWorldAccess
             string toolName = designator.Label;
             string announcement = GetPlacementAnnouncement(designator);
             TolkHelper.Speak(announcement);
-            MelonLoader.MelonLogger.Msg($"Entered placement mode with designator: {toolName}");
+            Log.Message($"Entered placement mode with designator: {toolName}");
         }
 
         /// <summary>
@@ -191,7 +191,7 @@ namespace RimWorldAccess
             // Announce new rotation and spatial info
             string announcement = GetRotationAnnouncement(buildDesignator);
             TolkHelper.Speak(announcement);
-            MelonLoader.MelonLogger.Msg($"Rotated building to: {currentRotation}");
+            Log.Message($"Rotated building to: {currentRotation}");
         }
 
         /// <summary>
@@ -431,12 +431,12 @@ namespace RimWorldAccess
 
                 string toolName = selectedDesignator.Label;
                 TolkHelper.Speak($"{toolName} placed on {selectedCells.Count} tiles");
-                MelonLoader.MelonLogger.Msg($"Executed placement: {toolName} on {selectedCells.Count} tiles");
+                Log.Message($"Executed placement: {toolName} on {selectedCells.Count} tiles");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error placing designation: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"Error in ExecutePlacement: {ex}");
+                Log.Error($"Error in ExecutePlacement: {ex}");
             }
             finally
             {
@@ -462,7 +462,7 @@ namespace RimWorldAccess
         public static void SetZoneCreationMode(ZoneCreationMode mode)
         {
             zoneCreationMode = mode;
-            MelonLoader.MelonLogger.Msg($"Zone creation mode set to: {mode}");
+            Log.Message($"Zone creation mode set to: {mode}");
         }
 
         /// <summary>
@@ -507,7 +507,7 @@ namespace RimWorldAccess
                 Find.DesignatorManager.Deselect();
             }
 
-            MelonLoader.MelonLogger.Msg("Architect state reset");
+            Log.Message("Architect state reset");
         }
     }
 }

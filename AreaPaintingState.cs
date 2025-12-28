@@ -40,24 +40,24 @@ namespace RimWorldAccess
         /// </summary>
         public static void EnterExpandMode(Area area)
         {
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: EnterExpandMode called for area: {area?.Label ?? "null"}");
+            Log.Message($"RimWorld Access: EnterExpandMode called for area: {area?.Label ?? "null"}");
 
             isActive = true;
             targetArea = area;
             isExpanding = true;
             stagedCells.Clear();
 
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
+            Log.Message($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
 
             // Ensure map navigation is initialized
             if (!MapNavigationState.IsInitialized && area.Map != null)
             {
                 MapNavigationState.Initialize(area.Map);
-                MelonLoader.MelonLogger.Msg("RimWorld Access: Initialized map navigation");
+                Log.Message("RimWorld Access: Initialized map navigation");
             }
 
             TolkHelper.Speak($"Expanding area: {area.Label}. Press Space to select cells, Enter to confirm, Escape to cancel.");
-            MelonLoader.MelonLogger.Msg("RimWorld Access: Area painting mode entered");
+            Log.Message("RimWorld Access: Area painting mode entered");
         }
 
         /// <summary>
@@ -84,21 +84,21 @@ namespace RimWorldAccess
         /// </summary>
         public static void ToggleStageCell()
         {
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: ToggleStageCell called, isActive={isActive}, targetArea={targetArea?.Label ?? "null"}");
+            Log.Message($"RimWorld Access: ToggleStageCell called, isActive={isActive}, targetArea={targetArea?.Label ?? "null"}");
 
             if (!isActive || targetArea == null)
             {
-                MelonLoader.MelonLogger.Msg("RimWorld Access: Not active or no target area");
+                Log.Message("RimWorld Access: Not active or no target area");
                 return;
             }
 
             IntVec3 currentPos = MapNavigationState.CurrentCursorPosition;
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: Current position: {currentPos}");
+            Log.Message($"RimWorld Access: Current position: {currentPos}");
 
             if (!currentPos.InBounds(targetArea.Map))
             {
                 TolkHelper.Speak("Position out of bounds");
-                MelonLoader.MelonLogger.Msg("RimWorld Access: Position out of bounds");
+                Log.Message("RimWorld Access: Position out of bounds");
                 return;
             }
 
@@ -107,13 +107,13 @@ namespace RimWorldAccess
             {
                 stagedCells.Remove(currentPos);
                 TolkHelper.Speak($"Deselected, {currentPos.x}, {currentPos.z}");
-                MelonLoader.MelonLogger.Msg($"RimWorld Access: Deselected cell at {currentPos}");
+                Log.Message($"RimWorld Access: Deselected cell at {currentPos}");
             }
             else
             {
                 stagedCells.Add(currentPos);
                 TolkHelper.Speak($"Selected, {currentPos.x}, {currentPos.z}");
-                MelonLoader.MelonLogger.Msg($"RimWorld Access: Selected cell at {currentPos}");
+                Log.Message($"RimWorld Access: Selected cell at {currentPos}");
             }
         }
 
@@ -122,18 +122,18 @@ namespace RimWorldAccess
         /// </summary>
         public static void Confirm()
         {
-            MelonLoader.MelonLogger.Msg("RimWorld Access: Confirm() called");
+            Log.Message("RimWorld Access: Confirm() called");
 
             if (!isActive || targetArea == null)
             {
-                MelonLoader.MelonLogger.Msg("RimWorld Access: Not active or no target area");
+                Log.Message("RimWorld Access: Not active or no target area");
                 return;
             }
 
             if (stagedCells.Count == 0)
             {
                 TolkHelper.Speak("No cells selected. Area unchanged.");
-                MelonLoader.MelonLogger.Msg("RimWorld Access: No selected cells");
+                Log.Message("RimWorld Access: No selected cells");
                 Exit();
                 return;
             }
@@ -156,7 +156,7 @@ namespace RimWorldAccess
 
             string action = isExpanding ? "added to" : "removed from";
             TolkHelper.Speak($"{stagedCells.Count} cells {action} {targetArea.Label}. Total cells: {targetArea.TrueCount}");
-            MelonLoader.MelonLogger.Msg($"RimWorld Access: Applied {stagedCells.Count} changes");
+            Log.Message($"RimWorld Access: Applied {stagedCells.Count} changes");
 
             isActive = false;
             targetArea = null;
@@ -168,7 +168,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void Cancel()
         {
-            MelonLoader.MelonLogger.Msg("RimWorld Access: Cancel() called");
+            Log.Message("RimWorld Access: Cancel() called");
 
             if (targetArea != null)
             {
@@ -179,7 +179,7 @@ namespace RimWorldAccess
             targetArea = null;
             stagedCells.Clear();
 
-            MelonLoader.MelonLogger.Msg("RimWorld Access: Area painting cancelled");
+            Log.Message("RimWorld Access: Area painting cancelled");
         }
 
         /// <summary>
@@ -187,13 +187,13 @@ namespace RimWorldAccess
         /// </summary>
         private static void Exit()
         {
-            MelonLoader.MelonLogger.Msg("RimWorld Access: AreaPaintingState.Exit() called");
+            Log.Message("RimWorld Access: AreaPaintingState.Exit() called");
 
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
 
-            MelonLoader.MelonLogger.Msg("RimWorld Access: Area painting mode exited");
+            Log.Message("RimWorld Access: Area painting mode exited");
         }
 
     }

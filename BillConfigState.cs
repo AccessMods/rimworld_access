@@ -62,7 +62,7 @@ namespace RimWorldAccess
         {
             if (productionBill == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open bill config: bill is null");
+                Log.Error("Cannot open bill config: bill is null");
                 return;
             }
 
@@ -76,7 +76,7 @@ namespace RimWorldAccess
             BuildMenuItems();
             AnnounceCurrentSelection();
 
-            MelonLoader.MelonLogger.Msg($"Opened bill config for {bill.LabelCap}");
+            Log.Message($"Opened bill config for {bill.LabelCap}");
         }
 
         /// <summary>

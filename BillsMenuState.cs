@@ -50,7 +50,7 @@ namespace RimWorldAccess
         {
             if (giver == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open bills menu: giver is null");
+                Log.Error("Cannot open bills menu: giver is null");
                 return;
             }
 
@@ -63,7 +63,7 @@ namespace RimWorldAccess
             BuildMenuItems();
             AnnounceCurrentSelection();
 
-            MelonLoader.MelonLogger.Msg($"Opened bills menu with {menuItems.Count} items");
+            Log.Message($"Opened bills menu with {menuItems.Count} items");
         }
 
         /// <summary>

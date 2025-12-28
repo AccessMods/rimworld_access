@@ -1,6 +1,8 @@
 using System;
+using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
-using MelonLoader;
+using Verse;
 
 namespace RimWorldAccess
 {
@@ -22,53 +24,80 @@ namespace RimWorldAccess
     {
         #region P/Invoke Declarations
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern void Tolk_Load();
+        // Windows kernel32 functions for explicit DLL loading
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibraryW(string lpLibFileName);
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern void Tolk_Unload();
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FreeLibrary(IntPtr hLibModule);
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool Tolk_IsLoaded();
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        private static extern bool Tolk_Output([MarshalAs(UnmanagedType.LPWStr)] string str, bool interrupt);
+        // Tolk function delegates for manual binding
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void Tolk_LoadDelegate();
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        private static extern bool Tolk_Speak([MarshalAs(UnmanagedType.LPWStr)] string str, bool interrupt);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void Tolk_UnloadDelegate();
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        private static extern IntPtr Tolk_DetectScreenReader();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate bool Tolk_IsLoadedDelegate();
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool Tolk_HasSpeech();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        private delegate bool Tolk_OutputDelegate([MarshalAs(UnmanagedType.LPWStr)] string str, bool interrupt);
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern bool Tolk_HasBraille();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        private delegate IntPtr Tolk_DetectScreenReaderDelegate();
 
-        [DllImport("Tolk.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern void Tolk_TrySAPI(bool trySAPI);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate bool Tolk_HasSpeechDelegate();
 
-        // NVDA Controller Client functions for direct testing
-        [DllImport("nvdaControllerClient64.dll", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int nvdaController_testIfRunning();
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate bool Tolk_HasBrailleDelegate();
 
-        [DllImport("nvdaControllerClient64.dll", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-        private static extern int nvdaController_speakText([MarshalAs(UnmanagedType.LPWStr)] string text);
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void Tolk_TrySAPIDelegate(bool trySAPI);
+
+        // NVDA Controller Client delegates
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int nvdaController_testIfRunningDelegate();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        private delegate int nvdaController_speakTextDelegate([MarshalAs(UnmanagedType.LPWStr)] string text);
 
         #endregion
 
+        // Library handles
+        private static IntPtr tolkHandle = IntPtr.Zero;
+        private static IntPtr nvdaHandle = IntPtr.Zero;
+
+        // Function pointers
+        private static Tolk_LoadDelegate Tolk_Load;
+        private static Tolk_UnloadDelegate Tolk_Unload;
+        private static Tolk_IsLoadedDelegate Tolk_IsLoaded;
+        private static Tolk_OutputDelegate Tolk_Output;
+        private static Tolk_DetectScreenReaderDelegate Tolk_DetectScreenReader;
+        private static Tolk_HasSpeechDelegate Tolk_HasSpeech;
+        private static Tolk_HasBrailleDelegate Tolk_HasBraille;
+        private static Tolk_TrySAPIDelegate Tolk_TrySAPI;
+        private static nvdaController_testIfRunningDelegate nvdaController_testIfRunning;
+        private static nvdaController_speakTextDelegate nvdaController_speakText;
+
         private static bool isInitialized = false;
-        private static MelonLogger.Instance logger = null;
         private static bool useDirectNVDA = false;
 
         /// <summary>
-        /// Sets the logger instance for error reporting.
-        /// Should be called from rimworld_access.cs during initialization.
+        /// Gets a delegate for a function from a loaded library.
         /// </summary>
-        public static void SetLogger(MelonLogger.Instance loggerInstance)
+        private static T GetFunction<T>(IntPtr library, string functionName) where T : Delegate
         {
-            logger = loggerInstance;
+            IntPtr procAddress = GetProcAddress(library, functionName);
+            if (procAddress == IntPtr.Zero)
+            {
+                throw new Exception($"Could not find function '{functionName}' in library");
+            }
+            return Marshal.GetDelegateForFunctionPointer<T>(procAddress);
         }
 
         /// <summary>
@@ -84,17 +113,92 @@ namespace RimWorldAccess
 
             try
             {
+                // Get mod folder path
+                // The assembly is in: Mods/RimWorldAccess/Assemblies/rimworld_access.dll
+                // Native DLLs are in: Mods/RimWorldAccess/Tolk.dll
+                string modAssemblyPath = Assembly.GetExecutingAssembly().Location;
+                string assemblyFolder = Path.GetDirectoryName(modAssemblyPath);
+
+                // Go up from Assemblies to mod root (one level up)
+                string modRoot = Path.GetFullPath(Path.Combine(assemblyFolder, ".."));
+
+                string tolkPath = Path.Combine(modRoot, "Tolk.dll");
+                string nvdaPath = Path.Combine(modRoot, "nvdaControllerClient64.dll");
+
+                Log.Message($"[RimWorld Access] Loading native DLLs from: {modRoot}");
+
+                // Check if DLLs exist
+                if (!File.Exists(tolkPath))
+                {
+                    Log.Error($"[RimWorld Access] Tolk.dll not found at: {tolkPath}");
+                    throw new DllNotFoundException($"Tolk.dll not found at: {tolkPath}");
+                }
+
+                if (!File.Exists(nvdaPath))
+                {
+                    Log.Warning($"[RimWorld Access] nvdaControllerClient64.dll not found at: {nvdaPath}");
+                    // Continue without NVDA direct support
+                }
+
+                // Load NVDA controller first (Tolk may depend on it being available)
+                if (File.Exists(nvdaPath))
+                {
+                    nvdaHandle = LoadLibraryW(nvdaPath);
+                    if (nvdaHandle == IntPtr.Zero)
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        Log.Warning($"[RimWorld Access] Failed to load nvdaControllerClient64.dll (error {error})");
+                    }
+                    else
+                    {
+                        Log.Message("[RimWorld Access] Loaded nvdaControllerClient64.dll successfully");
+                        // Get NVDA function pointers
+                        try
+                        {
+                            nvdaController_testIfRunning = GetFunction<nvdaController_testIfRunningDelegate>(nvdaHandle, "nvdaController_testIfRunning");
+                            nvdaController_speakText = GetFunction<nvdaController_speakTextDelegate>(nvdaHandle, "nvdaController_speakText");
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warning($"[RimWorld Access] Failed to get NVDA function pointers: {ex.Message}");
+                        }
+                    }
+                }
+
+                // Load Tolk
+                tolkHandle = LoadLibraryW(tolkPath);
+                if (tolkHandle == IntPtr.Zero)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    throw new DllNotFoundException($"Failed to load Tolk.dll (error code: {error})");
+                }
+
+                Log.Message("[RimWorld Access] Loaded Tolk.dll successfully");
+
+                // Get Tolk function pointers
+                Tolk_Load = GetFunction<Tolk_LoadDelegate>(tolkHandle, "Tolk_Load");
+                Tolk_Unload = GetFunction<Tolk_UnloadDelegate>(tolkHandle, "Tolk_Unload");
+                Tolk_IsLoaded = GetFunction<Tolk_IsLoadedDelegate>(tolkHandle, "Tolk_IsLoaded");
+                Tolk_Output = GetFunction<Tolk_OutputDelegate>(tolkHandle, "Tolk_Output");
+                Tolk_DetectScreenReader = GetFunction<Tolk_DetectScreenReaderDelegate>(tolkHandle, "Tolk_DetectScreenReader");
+                Tolk_HasSpeech = GetFunction<Tolk_HasSpeechDelegate>(tolkHandle, "Tolk_HasSpeech");
+                Tolk_HasBraille = GetFunction<Tolk_HasBrailleDelegate>(tolkHandle, "Tolk_HasBraille");
+                Tolk_TrySAPI = GetFunction<Tolk_TrySAPIDelegate>(tolkHandle, "Tolk_TrySAPI");
+
                 // Test NVDA directly first
                 bool nvdaRunning = false;
-                try
+                if (nvdaController_testIfRunning != null)
                 {
-                    int nvdaResult = nvdaController_testIfRunning();
-                    nvdaRunning = (nvdaResult == 0);
-                    logger?.Msg($"Direct NVDA test: {(nvdaRunning ? "NVDA is running" : $"NVDA not detected (code: {nvdaResult})")}");
-                }
-                catch (Exception nvdaEx)
-                {
-                    logger?.Warning($"Could not test NVDA directly: {nvdaEx.Message}");
+                    try
+                    {
+                        int nvdaResult = nvdaController_testIfRunning();
+                        nvdaRunning = (nvdaResult == 0);
+                        Log.Message($"[RimWorld Access] Direct NVDA test: {(nvdaRunning ? "NVDA is running" : $"NVDA not detected (code: {nvdaResult})")}");
+                    }
+                    catch (Exception nvdaEx)
+                    {
+                        Log.Warning($"[RimWorld Access] Could not test NVDA directly: {nvdaEx.Message}");
+                    }
                 }
 
                 // Load Tolk - it will try screen readers first
@@ -116,34 +220,34 @@ namespace RimWorldAccess
                     bool hasSpeech = Tolk_HasSpeech();
                     bool hasBraille = Tolk_HasBraille();
 
-                    logger?.Msg($"Tolk screen reader integration initialized successfully.");
-                    logger?.Msg($"Detected screen reader: {screenReaderName}");
-                    logger?.Msg($"Speech support: {hasSpeech}");
-                    logger?.Msg($"Braille support: {hasBraille}");
+                    Log.Message("[RimWorld Access] Tolk screen reader integration initialized successfully.");
+                    Log.Message($"[RimWorld Access] Detected screen reader: {screenReaderName}");
+                    Log.Message($"[RimWorld Access] Speech support: {hasSpeech}");
+                    Log.Message($"[RimWorld Access] Braille support: {hasBraille}");
 
                     // If Tolk detected SAPI but we know NVDA is running, use direct NVDA communication
                     if (screenReaderName == "SAPI" && nvdaRunning)
                     {
-                        logger?.Warning("Tolk fell back to SAPI even though NVDA is running.");
-                        logger?.Msg("Switching to direct NVDA communication mode.");
+                        Log.Warning("[RimWorld Access] Tolk fell back to SAPI even though NVDA is running.");
+                        Log.Message("[RimWorld Access] Switching to direct NVDA communication mode.");
                         useDirectNVDA = true;
                     }
                 }
                 else
                 {
-                    logger?.Warning("Tolk initialized but no screen reader detected.");
-                    logger?.Warning("Make sure a screen reader (NVDA, JAWS, etc.) is running before starting RimWorld.");
+                    Log.Warning("[RimWorld Access] Tolk initialized but no screen reader detected.");
+                    Log.Warning("[RimWorld Access] Make sure a screen reader (NVDA, JAWS, etc.) is running before starting RimWorld.");
                 }
             }
             catch (DllNotFoundException ex)
             {
-                logger?.Error($"Failed to load Tolk.dll: {ex.Message}");
-                logger?.Error("Ensure Tolk.dll is in the same directory as rimworld_access.dll");
+                Log.Error($"[RimWorld Access] Failed to load native DLL: {ex.Message}");
+                Log.Error("[RimWorld Access] Ensure Tolk.dll is in the mod's root folder (Mods/RimWorldAccess/)");
                 throw;
             }
             catch (Exception ex)
             {
-                logger?.Error($"Failed to initialize Tolk: {ex.Message}");
+                Log.Error($"[RimWorld Access] Failed to initialize Tolk: {ex.Message}");
                 throw;
             }
         }
@@ -161,13 +265,39 @@ namespace RimWorldAccess
 
             try
             {
-                Tolk_Unload();
+                Tolk_Unload?.Invoke();
                 isInitialized = false;
-                logger?.Msg("Tolk screen reader integration shut down.");
+
+                // Free libraries
+                if (tolkHandle != IntPtr.Zero)
+                {
+                    FreeLibrary(tolkHandle);
+                    tolkHandle = IntPtr.Zero;
+                }
+
+                if (nvdaHandle != IntPtr.Zero)
+                {
+                    FreeLibrary(nvdaHandle);
+                    nvdaHandle = IntPtr.Zero;
+                }
+
+                // Clear function pointers
+                Tolk_Load = null;
+                Tolk_Unload = null;
+                Tolk_IsLoaded = null;
+                Tolk_Output = null;
+                Tolk_DetectScreenReader = null;
+                Tolk_HasSpeech = null;
+                Tolk_HasBraille = null;
+                Tolk_TrySAPI = null;
+                nvdaController_testIfRunning = null;
+                nvdaController_speakText = null;
+
+                Log.Message("[RimWorld Access] Tolk screen reader integration shut down.");
             }
             catch (Exception ex)
             {
-                logger?.Error($"Error shutting down Tolk: {ex.Message}");
+                Log.Error($"[RimWorld Access] Error shutting down Tolk: {ex.Message}");
             }
         }
 
@@ -176,7 +306,7 @@ namespace RimWorldAccess
         /// </summary>
         public static bool IsActive()
         {
-            if (!isInitialized)
+            if (!isInitialized || Tolk_IsLoaded == null)
             {
                 return false;
             }
@@ -187,7 +317,7 @@ namespace RimWorldAccess
             }
             catch (Exception ex)
             {
-                logger?.Error($"Error checking Tolk status: {ex.Message}");
+                Log.Error($"[RimWorld Access] Error checking Tolk status: {ex.Message}");
                 return false;
             }
         }
@@ -204,16 +334,16 @@ namespace RimWorldAccess
                 return;
             }
 
-            if (!isInitialized)
+            if (!isInitialized || Tolk_Output == null)
             {
-                logger?.Warning("Tolk.Speak called but Tolk is not initialized");
+                Log.Warning("[RimWorld Access] Tolk.Speak called but Tolk is not initialized");
                 return;
             }
 
             try
             {
                 // If we're in direct NVDA mode, bypass Tolk
-                if (useDirectNVDA)
+                if (useDirectNVDA && nvdaController_speakText != null)
                 {
                     try
                     {
@@ -222,7 +352,7 @@ namespace RimWorldAccess
                     }
                     catch (Exception nvdaEx)
                     {
-                        logger?.Warning($"Direct NVDA communication failed: {nvdaEx.Message}, falling back to Tolk");
+                        Log.Warning($"[RimWorld Access] Direct NVDA communication failed: {nvdaEx.Message}, falling back to Tolk");
                         useDirectNVDA = false; // Disable for future calls
                     }
                 }
@@ -235,7 +365,7 @@ namespace RimWorldAccess
             }
             catch (Exception ex)
             {
-                logger?.Error($"Error speaking text via Tolk: {ex.Message}");
+                Log.Error($"[RimWorld Access] Error speaking text via Tolk: {ex.Message}");
             }
         }
     }

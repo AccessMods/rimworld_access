@@ -62,7 +62,7 @@ namespace RimWorldAccess
         {
             if (settings == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open storage settings menu: settings is null");
+                Log.Error("Cannot open storage settings menu: settings is null");
                 return;
             }
 
@@ -74,7 +74,7 @@ namespace RimWorldAccess
             BuildMenuItems();
             AnnounceCurrentSelection();
 
-            MelonLoader.MelonLogger.Msg($"Opened storage settings menu with {menuItems.Count} items");
+            Log.Message($"Opened storage settings menu with {menuItems.Count} items");
         }
 
         /// <summary>

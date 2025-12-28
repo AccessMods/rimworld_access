@@ -110,7 +110,7 @@ namespace RimWorldAccess
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false); // false = doesn't give colonist orders
 
-            MelonLoader.MelonLogger.Msg("Opened architect category menu");
+            Log.Message("Opened architect category menu");
         }
 
         /// <summary>
@@ -140,7 +140,7 @@ namespace RimWorldAccess
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false);
 
-            MelonLoader.MelonLogger.Msg($"Opened tool menu for category: {category.defName}");
+            Log.Message($"Opened tool menu for category: {category.defName}");
         }
 
         /// <summary>
@@ -196,7 +196,7 @@ namespace RimWorldAccess
             // Open the windowless menu
             WindowlessFloatMenuState.Open(options, false);
 
-            MelonLoader.MelonLogger.Msg($"Opened material menu for: {buildable.defName}");
+            Log.Message($"Opened material menu for: {buildable.defName}");
         }
 
         /// <summary>
@@ -266,7 +266,7 @@ namespace RimWorldAccess
 
             string zoneName = designator.Label ?? "zone";
             TolkHelper.Speak($"Select creation mode for {zoneName}");
-            MelonLoader.MelonLogger.Msg($"Opened zone mode selection menu for {zoneName}");
+            Log.Message($"Opened zone mode selection menu for {zoneName}");
         }
 
         /// <summary>
@@ -281,7 +281,7 @@ namespace RimWorldAccess
             // Also set the zone creation mode in ArchitectState for use during placement
             ArchitectState.SetZoneCreationMode(mode);
 
-            MelonLoader.MelonLogger.Msg($"Zone creation mode selected: {mode} for designator {designator.Label}");
+            Log.Message($"Zone creation mode selected: {mode} for designator {designator.Label}");
         }
     }
 }

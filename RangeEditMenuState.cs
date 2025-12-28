@@ -36,7 +36,7 @@ namespace RimWorldAccess
             selectedOption = 0;
 
             AnnounceCurrentSelection();
-            MelonLoader.MelonLogger.Msg("Opened hit points range editor");
+            Log.Message("Opened hit points range editor");
         }
 
         /// <summary>
@@ -50,7 +50,7 @@ namespace RimWorldAccess
             selectedOption = 0;
 
             AnnounceCurrentSelection();
-            MelonLoader.MelonLogger.Msg("Opened quality range editor");
+            Log.Message("Opened quality range editor");
         }
 
         /// <summary>

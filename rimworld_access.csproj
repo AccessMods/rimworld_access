@@ -1,13 +1,22 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Import local path overrides if they exist -->
   <Import Project="GamePaths.props" Condition="Exists('GamePaths.props')" />
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
-    <!-- Default RimWorld install path (override in GamePaths.props for custom locations) -->
+    <!-- RimWorld install path - only used for deployment (override in GamePaths.props for custom locations) -->
     <RimWorldDir Condition="'$(RimWorldDir)'==''">C:\Program Files (x86)\Steam\steamapps\common\RimWorld</RimWorldDir>
+    <!-- Mod output folder -->
+    <ModOutputDir>$(RimWorldDir)\Mods\RimWorldAccess</ModOutputDir>
+    <!-- Disable default compile includes to avoid picking up decompiled game source -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <!-- Explicitly include only our source files -->
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
 
   <!-- Embed audio files as resources -->
   <ItemGroup>
@@ -16,106 +25,112 @@
     <EmbeddedResource Include="Sounds\**\*.mp3" />
   </ItemGroup>
 
-  <!-- Include Tolk.dll and dependencies for deployment -->
+  <!-- Include native DLLs for deployment (NOT as references) -->
   <ItemGroup>
-    <Content Include="Tolk.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="nvdaControllerClient64.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <None Include="Tolk.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+    <None Include="nvdaControllerClient64.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
-<ItemGroup>
-  <!-- MelonLoader References -->
-  <Reference Include="MelonLoader">
-    <HintPath>$(RimWorldDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
-  </Reference>
-  <Reference Include="0Harmony">
-    <HintPath>$(RimWorldDir)\MelonLoader\net6\0Harmony.dll</HintPath>
-  </Reference>
+  <!-- About folder content -->
+  <ItemGroup>
+    <None Include="About\About.xml">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
-  <!-- Game and Unity Engine References (from the game's Managed folder) -->
-  <Reference Include="Assembly-CSharp">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\Assembly-CSharp.dll</HintPath>
-  </Reference>
-  <Reference Include="UnityEngine.CoreModule">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
-  </Reference>
-  <Reference Include="UnityEngine.IMGUIModule">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
-  </Reference>
-  <Reference Include="UnityEngine.TextRenderingModule">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
-  </Reference>
-  <Reference Include="UnityEngine.InputLegacyModule">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
-  </Reference>
-  <Reference Include="UnityEngine.AudioModule">
-    <HintPath>$(RimWorldDir)\RimWorldWin64_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
-  </Reference>
-</ItemGroup>
+  <ItemGroup>
+    <!-- Harmony reference - reference-only package (runtime provided by Harmony mod) -->
+    <PackageReference Include="Lib.Harmony" Version="2.3.3">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
 
+    <!-- RimWorld reference assemblies (includes game and Unity references) -->
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4633" />
+  </ItemGroup>
 
-  <Target Name="CopyModAfterBuild" AfterTargets="Build">
-    <!-- Display a message in the build output -->
-    <Message Text="--- Copying $(ProjectName).dll, Tolk.dll, and nvdaControllerClient64.dll to game folder ---" Importance="high" />
+  <!-- Post-build: Copy mod files to RimWorld Mods folder -->
+  <Target Name="DeployMod" AfterTargets="Build">
+    <Message Text="--- Deploying RimWorld Access mod to $(ModOutputDir) ---" Importance="high" />
 
-    <!-- Copy the mod DLL -->
+    <!-- Create mod folder structure -->
+    <MakeDir Directories="$(ModOutputDir)\About" />
+    <MakeDir Directories="$(ModOutputDir)\Assemblies" />
+
+    <!-- Copy About.xml -->
+    <Copy
+      SourceFiles="$(ProjectDir)About\About.xml"
+      DestinationFolder="$(ModOutputDir)\About\"
+    />
+
+    <!-- Copy mod DLL to Assemblies folder -->
     <Copy
       SourceFiles="$(TargetPath)"
-      DestinationFolder="$(RimWorldDir)\Mods\"
+      DestinationFolder="$(ModOutputDir)\Assemblies\"
     />
 
-    <!-- Copy Tolk.dll -->
+    <!-- Copy native DLLs to mod root (for P/Invoke) -->
     <Copy
       SourceFiles="$(ProjectDir)Tolk.dll"
-      DestinationFolder="$(RimWorldDir)\Mods\"
+      DestinationFolder="$(ModOutputDir)\"
     />
-
-    <!-- Copy nvdaControllerClient64.dll -->
     <Copy
       SourceFiles="$(ProjectDir)nvdaControllerClient64.dll"
-      DestinationFolder="$(RimWorldDir)\Mods\"
+      DestinationFolder="$(ModOutputDir)\"
     />
+
+    <Message Text="--- Mod deployed successfully ---" Importance="high" />
   </Target>
 
+  <!-- Release target -->
   <Target Name="Release" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <!-- Display release build message -->
     <Message Text="--- Creating Release Package ---" Importance="high" />
 
-    <!-- Define release folder path -->
     <PropertyGroup>
-      <ReleaseFolderPath>$(ProjectDir)release\</ReleaseFolderPath>
+      <ReleaseFolderPath>$(ProjectDir)release\RimWorldAccess\</ReleaseFolderPath>
     </PropertyGroup>
 
-    <!-- Create release folder if it doesn't exist -->
-    <MakeDir Directories="$(ReleaseFolderPath)" />
+    <!-- Create release folder structure -->
+    <MakeDir Directories="$(ReleaseFolderPath)About" />
+    <MakeDir Directories="$(ReleaseFolderPath)Assemblies" />
 
-    <!-- Copy DLL to release folder -->
-    <Message Text="--- Copying DLL, Tolk.dll, and nvdaControllerClient64.dll to release folder ---" Importance="high" />
+    <!-- Copy About.xml -->
     <Copy
-      SourceFiles="$(TargetPath)"
-      DestinationFolder="$(ReleaseFolderPath)"
+      SourceFiles="$(ProjectDir)About\About.xml"
+      DestinationFolder="$(ReleaseFolderPath)About\"
     />
 
-    <!-- Copy Tolk.dll to release folder -->
+    <!-- Copy DLL -->
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFolder="$(ReleaseFolderPath)Assemblies\"
+    />
+
+    <!-- Copy native DLLs to mod root -->
     <Copy
       SourceFiles="$(ProjectDir)Tolk.dll"
       DestinationFolder="$(ReleaseFolderPath)"
     />
-
-    <!-- Copy nvdaControllerClient64.dll to release folder -->
     <Copy
       SourceFiles="$(ProjectDir)nvdaControllerClient64.dll"
       DestinationFolder="$(ReleaseFolderPath)"
     />
 
-    <!-- Copy readme.html to release folder -->
-    <Message Text="--- Copying readme.html to release folder ---" Importance="high" />
+    <!-- Copy README.md to release folder -->
     <Copy
-      SourceFiles="$(ProjectDir)readme.html"
+      SourceFiles="$(ProjectDir)README.md"
       DestinationFolder="$(ReleaseFolderPath)"
+      Condition="Exists('$(ProjectDir)README.md')"
+    />
+
+    <!-- Copy LICENSE to release folder -->
+    <Copy
+      SourceFiles="$(ProjectDir)LICENSE"
+      DestinationFolder="$(ReleaseFolderPath)"
+      Condition="Exists('$(ProjectDir)LICENSE')"
     />
 
     <Message Text="--- Release package created at $(ReleaseFolderPath) ---" Importance="high" />

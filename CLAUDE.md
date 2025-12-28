@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 There's a file modification bug in Claude Code. The workaround is: always use complete absolute Windows paths with drive letters and backslashes for ALL file operations. Apply this rule to all file opperations going forward. 
 ## Project Overview
 
-RimWorld Access is a MelonLoader mod for RimWorld that adds comprehensive keyboard accessibility features for visually impaired players. The mod uses Harmony patches to intercept UI rendering and input handling, providing direct screen reader support via the Tolk library and keyboard navigation throughout the game.
+RimWorld Access is a native RimWorld mod that adds comprehensive keyboard accessibility features for visually impaired players. The mod uses Harmony patches to intercept UI rendering and input handling, providing direct screen reader support via the Tolk library and keyboard navigation throughout the game.
 
 ## Build Commands
 
@@ -30,10 +30,12 @@ post-build target.
 
 ## Architecture
 
-### MelonLoader Integration
-- Entry point: `rimworld_access.cs` - defines the `RimWorldAccessMod` class that inherits from `MelonMod`
-- On initialization (OnInitializeMelon), creates a Harmony instance and applies all patches automatically via `harmony.PatchAll()`
+### Native Mod Integration
+- Entry point: `rimworld_access.cs` - defines the `RimWorldAccessMod` static class with `[StaticConstructorOnStartup]` attribute
+- On initialization (static constructor), creates a Harmony instance and applies all patches automatically via `harmony.PatchAll()`
 - Harmony ID: `com.rimworldaccess.mainmenukeyboard`
+- Requires Harmony mod as a dependency (declared in `About/About.xml`)
+- Uses `Application.quitting` event for cleanup (TolkHelper.Shutdown())
 
 ### Core Design Pattern: State + Patch
 
@@ -467,15 +469,12 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 
 ## Dependencies
 
-All references use absolute paths to the RimWorld installation.
+**Mod Dependencies (declared in About.xml):**
+- **Harmony** - Runtime patching library (Steam Workshop mod: brrainz.harmony)
 
-- **MelonLoader** - Mod loading framework (`MelonLoader\net6\MelonLoader.dll`)
-- **0Harmony** - Runtime patching library (`MelonLoader\net6\0Harmony.dll`)
-- **Assembly-CSharp** - RimWorld game code (`RimWorldWin64_Data\Managed\Assembly-CSharp.dll`)
-- **UnityEngine.CoreModule** - Unity core (`RimWorldWin64_Data\Managed\UnityEngine.CoreModule.dll`)
-- **UnityEngine.IMGUIModule** - Unity IMGUI system (`RimWorldWin64_Data\Managed\UnityEngine.IMGUIModule.dll`)
-- **UnityEngine.TextRenderingModule** - Text rendering (`RimWorldWin64_Data\Managed\UnityEngine.TextRenderingModule.dll`)
-- **UnityEngine.InputLegacyModule** - Input handling (`RimWorldWin64_Data\Managed\UnityEngine.InputLegacyModule.dll`)
+**NuGet Packages:**
+- **Krafs.Rimworld.Ref** - RimWorld reference assemblies (includes Assembly-CSharp and all Unity modules). This package provides stripped reference assemblies that contain only type signatures, making the project portable without distributing game code. Version mirrors RimWorld version (e.g., 1.6.4633 for RimWorld 1.6). See: https://github.com/krafs/RimRef
+- **Lib.Harmony** - Compile-time reference only (runtime provided by Harmony mod)
 
 ## Common Keyboard Shortcuts
 
@@ -620,19 +619,33 @@ Utility classes for common operations:
 - `ScannerHelper` - Scanner item collection and categorization
 
 ### Entry Point
-- `rimworld_access.cs` - MelonMod initialization
+- `rimworld_access.cs` - Static class with `[StaticConstructorOnStartup]` attribute for mod initialization
+
+### Mod Folder Structure
+```
+RimWorld/Mods/RimWorldAccess/
+├── About/
+│   └── About.xml              # Mod metadata and Harmony dependency
+├── Assemblies/
+│   └── rimworld_access.dll
+├── Tolk.dll                   # Native DLL in mod root
+└── nvdaControllerClient64.dll
+```
 
 ### Build Configuration
 - `rimworld_access.csproj` - Project file with:
-  - Dependencies (MelonLoader, Harmony, Unity, Assembly-CSharp)
-  - Native DLL deployment (Tolk.dll, nvdaControllerClient64.dll)
-  - Post-build target to copy all DLLs to RimWorld Mods folder
-  - Release target to package DLLs and readme into release folder
+  - Krafs.Rimworld.Ref NuGet package for RimWorld and Unity references (portable, no local game install required for compilation)
+  - Lib.Harmony NuGet package (compile-time only, runtime provided by Harmony mod)
+  - Native DLL deployment to mod root (for P/Invoke with explicit LoadLibraryW)
+  - Post-build target to deploy mod to RimWorld Mods folder
+  - Release target to package mod for distribution
   - Embedded resource configuration for `Sounds/**/*.wav`, `*.ogg`, `*.mp3` files
+  - `EnableDefaultCompileItems=false` to exclude decompiled game source in RimWorld subfolder
+  - `GamePaths.props` (optional) - Override `RimWorldDir` for custom game install paths (deployment only)
 
 ## Development Notes
 
-- The mod logs to MelonLoader console via `LoggerInstance.Msg()` and RimWorld's `Log.Message()`
+- The mod logs to RimWorld's log via `Log.Message()`, `Log.Warning()`, and `Log.Error()` (from Verse namespace)
 - All patches apply automatically via `harmony.PatchAll()` - no manual registration needed
 - State persists across UI redraws, but menus are reconstructed each frame
 - RimWorld uses Unity IMGUI (Immediate Mode GUI) - UI is redrawn every frame

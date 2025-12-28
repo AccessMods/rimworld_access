@@ -97,7 +97,7 @@ namespace RimWorldAccess
                         if (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
                             key == KeyCode.Return || key == KeyCode.KeypadEnter)
                         {
-                            MelonLoader.MelonLogger.Msg($"[UnifiedKeyboardPatch] Dialog_NodeTree open, letting key {key} pass through");
+                            Log.Message($"[UnifiedKeyboardPatch] Dialog_NodeTree open, letting key {key} pass through");
                             // Don't consume these keys - let DialogAccessibilityPatch handle them
                             return;
                         }
@@ -245,7 +245,7 @@ namespace RimWorldAccess
             // Log if area painting is active
             if (AreaPaintingState.IsActive)
             {
-                MelonLoader.MelonLogger.Msg($"RimWorld Access: UnifiedKeyboardPatch - Area painting is ACTIVE, key={key}");
+                Log.Message($"RimWorld Access: UnifiedKeyboardPatch - Area painting is ACTIVE, key={key}");
             }
 
             // ===== PRIORITY 1: Handle delete confirmation if active =====
@@ -303,24 +303,24 @@ namespace RimWorldAccess
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (AreaPaintingState.IsActive && !WindowlessDialogState.IsActive)
             {
-                MelonLoader.MelonLogger.Msg($"RimWorld Access: Area painting active, handling key {key}");
+                Log.Message($"RimWorld Access: Area painting active, handling key {key}");
                 bool handled = false;
 
                 if (key == KeyCode.Space)
                 {
-                    MelonLoader.MelonLogger.Msg("RimWorld Access: Space pressed in area painting mode");
+                    Log.Message("RimWorld Access: Space pressed in area painting mode");
                     AreaPaintingState.ToggleStageCell();
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
-                    MelonLoader.MelonLogger.Msg("RimWorld Access: Enter pressed in area painting mode");
+                    Log.Message("RimWorld Access: Enter pressed in area painting mode");
                     AreaPaintingState.Confirm();
                     handled = true;
                 }
                 else if (key == KeyCode.Escape)
                 {
-                    MelonLoader.MelonLogger.Msg("RimWorld Access: Escape pressed in area painting mode");
+                    Log.Message("RimWorld Access: Escape pressed in area painting mode");
                     AreaPaintingState.Cancel();
                     handled = true;
                 }
@@ -1843,7 +1843,7 @@ namespace RimWorldAccess
                 SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
             }
 
-            MelonLoader.MelonLogger.Msg($"Unforbid all: {unforbiddenCount} items unforbidden");
+            Log.Message($"Unforbid all: {unforbiddenCount} items unforbidden");
         }
 
 }

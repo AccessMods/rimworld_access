@@ -71,7 +71,7 @@ namespace RimWorldAccess
                 TolkHelper.Speak(info);
 
                 // Log to console for debugging
-                MelonLoader.MelonLogger.Msg($"Tile info ({pressedKey.Value}) requested for {currentPosition}");
+                Log.Message($"Tile info ({pressedKey.Value}) requested for {currentPosition}");
             }
         }
 

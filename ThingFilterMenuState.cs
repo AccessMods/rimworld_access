@@ -60,7 +60,7 @@ namespace RimWorldAccess
         {
             if (filter == null)
             {
-                MelonLoader.MelonLogger.Error("Cannot open thing filter menu: filter is null");
+                Log.Error("Cannot open thing filter menu: filter is null");
                 return;
             }
 
@@ -73,7 +73,7 @@ namespace RimWorldAccess
             BuildMenuItems();
             AnnounceCurrentSelection();
 
-            MelonLoader.MelonLogger.Msg($"Opened thing filter menu: {title}");
+            Log.Message($"Opened thing filter menu: {title}");
         }
 
         /// <summary>

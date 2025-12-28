@@ -155,7 +155,7 @@ namespace RimWorldAccess
                 Event.current.Use();
                 
                 // Log for debugging
-                MelonLoader.MelonLogger.Msg("Space key intercepted during zone creation mode");
+                Log.Message("Space key intercepted during zone creation mode");
                 
                 // Don't let TimeControls process this event
                 return false;

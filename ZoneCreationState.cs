@@ -77,7 +77,7 @@ namespace RimWorldAccess
         public static void SetPendingAllowedAreaName(string name)
         {
             pendingAllowedAreaName = name;
-            MelonLoader.MelonLogger.Msg($"Set pending allowed area name: {name}");
+            Log.Message($"Set pending allowed area name: {name}");
         }
 
         /// <summary>
@@ -100,7 +100,7 @@ namespace RimWorldAccess
                     : "Select 4 corner tiles with Space, then press Enter to fill rectangle";
 
             TolkHelper.Speak($"Creating {zoneName} in {modeName} mode. {instructions}");
-            MelonLoader.MelonLogger.Msg($"Entered zone creation mode: {zoneName}, mode: {modeName}");
+            Log.Message($"Entered zone creation mode: {zoneName}, mode: {modeName}");
         }
 
         /// <summary>
@@ -147,7 +147,7 @@ namespace RimWorldAccess
             if (zone == null)
             {
                 TolkHelper.Speak("Cannot expand: no zone provided", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error("EnterExpansionMode called with null zone");
+                Log.Error("EnterExpansionMode called with null zone");
                 return;
             }
 
@@ -182,7 +182,7 @@ namespace RimWorldAccess
 
             string instructions = "Press Space to toggle tiles, Enter to confirm, Escape to cancel. Use Shift+arrows to auto-select to wall";
             TolkHelper.Speak($"Expanding {zone.label}. {selectedCells.Count} tiles currently selected. {instructions}");
-            MelonLoader.MelonLogger.Msg($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles");
+            Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles");
         }
 
         /// <summary>
@@ -263,7 +263,7 @@ namespace RimWorldAccess
                             if (!map.areaManager.TryMakeNewAllowed(out Area_Allowed allowedArea))
                             {
                                 TolkHelper.Speak("Cannot create more allowed areas. Maximum of 10 reached.", SpeechPriority.High);
-                                MelonLoader.MelonLogger.Warning("Failed to create allowed area: max limit reached");
+                                Log.Warning("Failed to create allowed area: max limit reached");
                                 Reset();
                                 return;
                             }
@@ -296,7 +296,7 @@ namespace RimWorldAccess
                             if (homeArea == null)
                             {
                                 TolkHelper.Speak("Error: Home area not found", SpeechPriority.High);
-                                MelonLoader.MelonLogger.Error("Home area not found in area manager");
+                                Log.Error("Home area not found in area manager");
                                 Reset();
                                 return;
                             }
@@ -316,12 +316,12 @@ namespace RimWorldAccess
                 }
 
                 TolkHelper.Speak($"{zoneName} created with {selectedCells.Count} cells");
-                MelonLoader.MelonLogger.Msg($"Created {zoneName} with {selectedCells.Count} cells");
+                Log.Message($"Created {zoneName} with {selectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error creating zone: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"Error creating zone: {ex}");
+                Log.Error($"Error creating zone: {ex}");
             }
             finally
             {
@@ -337,7 +337,7 @@ namespace RimWorldAccess
             if (expandingZone == null)
             {
                 TolkHelper.Speak("Error: No zone to expand", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error("ExpandZone called but expandingZone is null");
+                Log.Error("ExpandZone called but expandingZone is null");
                 Reset();
                 return;
             }
@@ -404,12 +404,12 @@ namespace RimWorldAccess
                 }
 
                 TolkHelper.Speak(message);
-                MelonLoader.MelonLogger.Msg($"Expanded zone {expandingZone.label}: added {addedCount}, removed {removedCount} cells");
+                Log.Message($"Expanded zone {expandingZone.label}: added {addedCount}, removed {removedCount} cells");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error expanding zone: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"Error expanding zone: {ex}");
+                Log.Error($"Error expanding zone: {ex}");
             }
             finally
             {
@@ -423,7 +423,7 @@ namespace RimWorldAccess
         public static void Cancel()
         {
             TolkHelper.Speak("Zone creation cancelled");
-            MelonLoader.MelonLogger.Msg("Zone creation cancelled");
+            Log.Message("Zone creation cancelled");
             Reset();
         }
 
@@ -512,12 +512,12 @@ namespace RimWorldAccess
                 currentMode = ZoneCreationMode.Manual;
 
                 TolkHelper.Speak($"Filled interior with {addedCount} cells. Total: {selectedCells.Count} cells. Now in manual mode");
-                MelonLoader.MelonLogger.Msg($"Borders mode auto-fill: added {addedCount} interior cells, total {selectedCells.Count}");
+                Log.Message($"Borders mode auto-fill: added {addedCount} interior cells, total {selectedCells.Count}");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error filling interior: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"BordersModeAutoFill error: {ex}");
+                Log.Error($"BordersModeAutoFill error: {ex}");
             }
         }
 
@@ -577,12 +577,12 @@ namespace RimWorldAccess
                 int width = maxX - minX + 1;
                 int height = maxZ - minZ + 1;
                 TolkHelper.Speak($"Filled {width} by {height} rectangle. Total: {selectedCells.Count} cells. Now in manual mode");
-                MelonLoader.MelonLogger.Msg($"Corners mode auto-fill: {width}x{height} rectangle, total {selectedCells.Count} cells");
+                Log.Message($"Corners mode auto-fill: {width}x{height} rectangle, total {selectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error filling rectangle: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"CornersModeAutoFill error: {ex}");
+                Log.Error($"CornersModeAutoFill error: {ex}");
             }
         }
 
@@ -617,12 +617,12 @@ namespace RimWorldAccess
 
                 string directionName = direction.ToStringHuman();
                 TolkHelper.Speak($"Selected {addedCount} cells to {directionName}. Total: {selectedCells.Count}");
-                MelonLoader.MelonLogger.Msg($"Auto-select to wall: {addedCount} cells in direction {directionName}");
+                Log.Message($"Auto-select to wall: {addedCount} cells in direction {directionName}");
             }
             catch (System.Exception ex)
             {
                 TolkHelper.Speak($"Error auto-selecting: {ex.Message}", SpeechPriority.High);
-                MelonLoader.MelonLogger.Error($"AutoSelectToWall error: {ex}");
+                Log.Error($"AutoSelectToWall error: {ex}");
             }
         }
 
