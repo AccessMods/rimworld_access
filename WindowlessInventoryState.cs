@@ -17,6 +17,7 @@ namespace RimWorldAccess
         private static List<TreeNode> rootNodes = new List<TreeNode>();
         private static List<TreeNode> flattenedVisibleNodes = new List<TreeNode>();
         private static int selectedIndex = 0;
+        private static Dictionary<TreeNode, TreeNode> lastChildPerParent = new Dictionary<TreeNode, TreeNode>();
 
         public static bool IsActive => isActive;
 
@@ -85,6 +86,7 @@ namespace RimWorldAccess
 
             isActive = true;
             selectedIndex = 0;
+            lastChildPerParent.Clear();
 
             // Collect all stored items
             List<Thing> allItems = InventoryHelper.GetAllStoredItems();
@@ -250,6 +252,7 @@ namespace RimWorldAccess
             rootNodes.Clear();
             flattenedVisibleNodes.Clear();
             selectedIndex = 0;
+            lastChildPerParent.Clear();
 
             TolkHelper.Speak("Inventory menu closed.");
             SoundDefOf.TabClose.PlayOneShotOnCamera();
@@ -364,7 +367,18 @@ namespace RimWorldAccess
                 current.IsExpanded = true;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Expanded: {current.Label}");
+
+                // Restore last selected child position if available
+                if (lastChildPerParent.TryGetValue(current, out TreeNode savedChild))
+                {
+                    int savedIndex = flattenedVisibleNodes.IndexOf(savedChild);
+                    if (savedIndex >= 0)
+                    {
+                        selectedIndex = savedIndex;
+                    }
+                }
+
+                AnnounceCurrentSelection();
             }
             else
             {
@@ -391,6 +405,9 @@ namespace RimWorldAccess
             }
             else if (current.Parent != null)
             {
+                // Save current child position for this parent before collapsing
+                lastChildPerParent[current.Parent] = current;
+
                 // Collapse parent and move focus to it
                 current.Parent.IsExpanded = false;
                 RebuildFlattenedList();

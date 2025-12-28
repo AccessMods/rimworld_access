@@ -18,6 +18,7 @@ namespace RimWorldAccess
         private static List<ResearchMenuNode> flatNavigationList = new List<ResearchMenuNode>();
         private static int currentIndex = 0;
         private static HashSet<string> expandedNodes = new HashSet<string>();
+        private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
 
         public static bool IsActive => isActive;
 
@@ -28,6 +29,7 @@ namespace RimWorldAccess
         {
             isActive = true;
             expandedNodes.Clear();
+            lastChildIdPerParent.Clear();
             rootNodes = BuildCategoryTree();
             flatNavigationList = BuildFlatNavigationList();
             currentIndex = 0;
@@ -43,6 +45,7 @@ namespace RimWorldAccess
             rootNodes.Clear();
             flatNavigationList.Clear();
             expandedNodes.Clear();
+            lastChildIdPerParent.Clear();
             TolkHelper.Speak("Research menu closed");
         }
 
@@ -85,6 +88,17 @@ namespace RimWorldAccess
                 current.IsExpanded = true;
                 expandedNodes.Add(current.Id);
                 flatNavigationList = BuildFlatNavigationList();
+
+                // Restore last selected child position if available
+                if (lastChildIdPerParent.TryGetValue(current.Id, out string savedChildId))
+                {
+                    int savedIndex = flatNavigationList.FindIndex(n => n.Id == savedChildId);
+                    if (savedIndex >= 0)
+                    {
+                        currentIndex = savedIndex;
+                    }
+                }
+
                 AnnounceCurrentSelection();
             }
         }
@@ -127,6 +141,9 @@ namespace RimWorldAccess
                 TolkHelper.Speak("Already at top level.", SpeechPriority.High);
                 return;
             }
+
+            // Save current child position for this parent before collapsing
+            lastChildIdPerParent[parent.Id] = current.Id;
 
             // Collapse the parent
             parent.IsExpanded = false;

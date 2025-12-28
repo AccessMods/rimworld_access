@@ -21,6 +21,7 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static IntVec3 inspectionPosition;
         private static object parentObject = null; // Track parent object for navigation back
+        private static Dictionary<InspectionTreeItem, InspectionTreeItem> lastChildPerParent = new Dictionary<InspectionTreeItem, InspectionTreeItem>();
 
         /// <summary>
         /// Opens the inspection menu for the specified position.
@@ -45,6 +46,7 @@ namespace RimWorldAccess
                 rootItem = InspectionTreeBuilder.BuildTree(objects);
                 RebuildVisibleList();
                 selectedIndex = 0;
+                lastChildPerParent.Clear();
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -91,6 +93,7 @@ namespace RimWorldAccess
                 rootItem = InspectionTreeBuilder.BuildTree(objects);
                 RebuildVisibleList();
                 selectedIndex = 0;
+                lastChildPerParent.Clear();
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -111,6 +114,7 @@ namespace RimWorldAccess
             IsActive = false;
             rootItem = null;
             visibleItems = null;
+            lastChildPerParent.Clear();
             selectedIndex = 0;
             parentObject = null;
         }
@@ -126,6 +130,7 @@ namespace RimWorldAccess
             var objects = BuildObjectList();
             rootItem = InspectionTreeBuilder.BuildTree(objects);
             RebuildVisibleList();
+            lastChildPerParent.Clear(); // Clear saved positions since tree nodes are recreated
 
             // Try to keep selection valid
             if (selectedIndex >= visibleItems.Count)
@@ -242,6 +247,17 @@ namespace RimWorldAccess
             item.IsExpanded = true;
             RebuildVisibleList();
             SoundDefOf.Click.PlayOneShotOnCamera();
+
+            // Restore last selected child position if available
+            if (lastChildPerParent.TryGetValue(item, out InspectionTreeItem savedChild))
+            {
+                int savedIndex = visibleItems.IndexOf(savedChild);
+                if (savedIndex >= 0)
+                {
+                    selectedIndex = savedIndex;
+                }
+            }
+
             AnnounceCurrentSelection();
         }
 
@@ -288,6 +304,9 @@ namespace RimWorldAccess
                 TolkHelper.Speak("Already at top level.", SpeechPriority.High);
                 return;
             }
+
+            // Save current child position for this parent before collapsing
+            lastChildPerParent[parent] = item;
 
             // Collapse the parent
             parent.IsExpanded = false;
