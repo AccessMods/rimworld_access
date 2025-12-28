@@ -4,6 +4,8 @@ Screen reader accessibility for RimWorld. Uses the Tolk library to communicate w
 
 > **Note:** This mod is an early version. Errors may be present. This documentation is a rough overview—for detailed questions and clarifications, join the [Discord server](https://discord.gg/Aecaqnbr).
 
+> **Bug Reports:** Bug reports involving mods other than RimWorld Access are currently unsupported. Please test with only Harmony and RimWorld Access enabled before reporting issues.
+
 ## Table of Contents
 
 - [Installation](#installation)
@@ -22,6 +24,7 @@ Screen reader accessibility for RimWorld. Uses the Tolk library to communicate w
 - [Colony Inventory (I)](#colony-inventory-i)
 - [Trading System](#trading-system)
 - [Other Shortcuts](#other-shortcuts)
+- [Mod Manager](#mod-manager)
 
 ## Installation
 
@@ -64,7 +67,7 @@ Since RimWorld's mod menu is not accessible with a screen reader, you must manua
 4. Add the following two lines at the beginning of the list, immediately after `<activeMods>`:
    ```xml
    <li>brrainz.harmony</li>
-   <li>shane12300.RimWorldAccess</li>
+   <li>shane12300.rimworldaccess</li>
    ```
 5. Save the file
 
@@ -74,7 +77,7 @@ Since RimWorld's mod menu is not accessible with a screen reader, you must manua
   <version>1.6.4633 rev1261</version>
   <activeMods>
     <li>brrainz.harmony</li>
-    <li>shane12300.RimWorldAccess</li>
+    <li>shane12300.rimworldaccess</li>
     <li>ludeon.rimworld</li>
     <!-- other mods and DLCs... -->
   </activeMods>
@@ -293,6 +296,26 @@ Actions per item: Jump to location, View details.
 | F6 | Research menu |
 | F7 | Quest menu |
 | Delete | Delete save file (in save/load menu) |
+
+## Mod Manager
+
+Accessible from Main Menu → Mods. Provides full keyboard navigation for enabling, disabling, and reordering mods.
+
+| Key | Action |
+|-----|--------|
+| Up/Down | Navigate mods in current list |
+| Left/Right | Switch between inactive/active mod columns |
+| Enter | Toggle mod enable/disable |
+| Ctrl+Up | Move mod up in load order (active list only) |
+| Ctrl+Down | Move mod down in load order (active list only) |
+| M | Open mod settings (if mod has settings) |
+| I | Read full mod description and info |
+| S | Save mod changes |
+| R | Auto-sort mods (resolve load order issues) |
+| O | Open mod folder in file explorer |
+| W | Open Steam Workshop page for mod |
+| U | Upload mod to Steam Workshop (requires Dev Mode) |
+| Escape | Close mod manager |
 
 ---
 
