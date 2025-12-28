@@ -126,6 +126,13 @@
       Condition="Exists('$(ProjectDir)README.md')"
     />
 
+    <!-- Copy LICENSE to release folder -->
+    <Copy
+      SourceFiles="$(ProjectDir)LICENSE"
+      DestinationFolder="$(ReleaseFolderPath)"
+      Condition="Exists('$(ProjectDir)LICENSE')"
+    />
+
     <Message Text="--- Release package created at $(ReleaseFolderPath) ---" Importance="high" />
   </Target>
 
