@@ -379,6 +379,27 @@ namespace RimWorldAccess
                 dev.Settings.Add(new CheckboxSetting("Close Log Window On Escape", () => Prefs.CloseLogWindowOnEscape, v => Prefs.CloseLogWindowOnEscape = v));
                 categories.Add(dev);
             }
+
+            // Mod Settings Category - list all mods that have settings
+            var modSettings = new OptionCategory("Mod Settings");
+            foreach (Mod mod in LoadedModManager.ModHandles)
+            {
+                if (!mod.SettingsCategory().NullOrEmpty())
+                {
+                    Mod localMod = mod; // Capture for closure
+                    modSettings.Settings.Add(new ButtonSetting(
+                        localMod.SettingsCategory(),
+                        () => "Press Enter to open",
+                        () => {
+                            Find.WindowStack.Add(new Dialog_ModSettings(localMod));
+                            TolkHelper.Speak($"Opening settings for {localMod.SettingsCategory()}");
+                        }));
+                }
+            }
+            if (modSettings.Settings.Count > 0)
+            {
+                categories.Add(modSettings);
+            }
         }
 
         /// <summary>

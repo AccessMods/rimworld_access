@@ -1,5 +1,5 @@
-/bin/
-/obj/
-/.claude/
+bin/
+obj/
+.claude/
 release/
 GamePaths.props

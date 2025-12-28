@@ -482,6 +482,21 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 - Arrow keys: Navigate menu
 - Enter: Select menu item
 
+**Mod Manager (from Main Menu → Mods):**
+- Up/Down: Navigate mods in current list
+- Left/Right: Switch between inactive/active mod columns
+- Enter: Toggle mod enable/disable
+- Ctrl+Up: Move mod up in load order (active list only)
+- Ctrl+Down: Move mod down in load order (active list only)
+- M: Open mod settings (if mod has settings)
+- I: Read full mod description and info
+- S: Save mod changes
+- R: Auto-sort mods (resolve load order)
+- O: Open mod folder in file explorer
+- W: Open Steam Workshop page for mod
+- U: Upload mod to Steam Workshop (requires Dev Mode)
+- Escape: Close mod manager
+
 **In-Game Navigation:**
 - Arrow keys: Move map cursor
 - Tab/Shift+Tab: Cycle selected pawns
@@ -573,7 +588,7 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 
 ## Code Organization
 
-### Patch Files (~22 files)
+### Patch Files (~24 files)
 Files ending in `*Patch.cs` contain Harmony patches:
 - `MainMenuAccessibilityPatch` - Main menu keyboard navigation
 - `UnifiedKeyboardPatch` - Central keyboard input handler (includes F9 debug menu shortcut)
@@ -594,9 +609,11 @@ Files ending in `*Patch.cs` contain Harmony patches:
 - `CaravanFormationPatch` - Caravan formation dialog keyboard navigation
 - `ForbidTogglePatch` - Forbid/unforbid actions
 - `PawnInfoPatch` - Pawn information display
+- `ModListPatch` - Mod manager (Page_ModsConfig) keyboard navigation
+- `ModSettingsDialogPatch` - Mod settings dialog announcements (Dialog_ModSettings)
 - Plus patches for game setup screens (scenario, storyteller, world params, colonist editor, starting site)
 
-### State Files (~25 files)
+### State Files (~26 files)
 Files ending in `*State.cs` maintain navigation state for different game screens:
 - `ScannerState` - Map item scanner with hierarchical navigation (J key)
 - `NotificationMenuState` - Notification viewer for messages, letters, and alerts (L key)
@@ -608,6 +625,7 @@ Files ending in `*State.cs` maintain navigation state for different game screens
 - `MoodState` - Displays mood information and thoughts for selected pawns (Alt+M)
 - `DialogNavigationState` - Dialog navigation state (all Dialog_NodeTree instances including research completion)
 - `DebugMenuState` - Debug menu navigation (F9 key, arrow key navigation for debug actions)
+- `ModListState` - Mod manager keyboard navigation (Main Menu → Mods, arrow keys, Enter to toggle)
 
 ### Helper Files (~6 files)
 Utility classes for common operations:
