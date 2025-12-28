@@ -509,6 +509,7 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 - Z: Open zone menu
 - / (forward slash): Open debug menu (requires DevMode enabled in Options → Miscellaneous)
 - Shift+C: Reform caravan (on temporary encounter maps after ambushes or events)
+- T: Announce time, weather, date, season, and days passed
 - Alt+M: Display mood information for selected pawn (mood level, description, and thoughts affecting mood)
 - Alt+F: Unforbid all forbidden items on the map
 - Escape: Open pause menu
