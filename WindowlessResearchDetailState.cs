@@ -71,6 +71,7 @@ namespace RimWorldAccess
                 flatNavigationList.Clear();
                 expandedNodes.Clear();
                 lastChildIdPerParent.Clear();
+                navigationStack.Clear();
                 TolkHelper.Speak("Returned to research menu");
             }
         }

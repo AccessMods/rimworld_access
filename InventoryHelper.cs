@@ -217,14 +217,14 @@ namespace RimWorldAccess
                 CategoryNode node = kvp.Value;
 
                 // Skip the actual "Root" category - we'll show its children instead
-                if (category.defName == "Root")
+                if (category == ThingCategoryDefOf.Root)
                     continue;
 
                 // This is a root if it has no parent, its parent isn't in our category set,
                 // or its parent is the "Root" category (which we're skipping)
                 if (category.parent == null ||
                     !categoryNodes.ContainsKey(category.parent) ||
-                    category.parent.defName == "Root")
+                    category.parent == ThingCategoryDefOf.Root)
                 {
                     rootCategories.Add(node);
                 }
