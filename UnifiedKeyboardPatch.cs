@@ -693,9 +693,19 @@ namespace RimWorldAccess
                     WindowlessResearchDetailState.SelectPrevious();
                     handled = true;
                 }
+                else if (key == KeyCode.RightArrow)
+                {
+                    WindowlessResearchDetailState.Expand();
+                    handled = true;
+                }
+                else if (key == KeyCode.LeftArrow)
+                {
+                    WindowlessResearchDetailState.Collapse();
+                    handled = true;
+                }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
-                    WindowlessResearchDetailState.ExecuteCurrentSection();
+                    WindowlessResearchDetailState.ExecuteCurrentItem();
                     handled = true;
                 }
                 else if (key == KeyCode.Escape)

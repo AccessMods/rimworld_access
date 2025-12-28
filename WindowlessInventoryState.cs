@@ -377,6 +377,15 @@ namespace RimWorldAccess
                         selectedIndex = savedIndex;
                     }
                 }
+                else
+                {
+                    // No saved position - move to first child
+                    int firstChildIndex = flattenedVisibleNodes.IndexOf(current) + 1;
+                    if (firstChildIndex < flattenedVisibleNodes.Count)
+                    {
+                        selectedIndex = firstChildIndex;
+                    }
+                }
 
                 AnnounceCurrentSelection();
             }

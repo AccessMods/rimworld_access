@@ -50,6 +50,34 @@ namespace RimWorldAccess
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
+
+                // Special handling for single object: auto-expand and position on first child
+                if (objects.Count == 1 && visibleItems.Count > 0)
+                {
+                    var singleItem = visibleItems[0];
+                    if (singleItem.IsExpandable)
+                    {
+                        // Announce just the item name (no expand/collapse status)
+                        TolkHelper.Speak(singleItem.Label.StripTags());
+
+                        // Trigger lazy loading if needed
+                        if (singleItem.OnActivate != null && singleItem.Children.Count == 0)
+                        {
+                            singleItem.OnActivate();
+                        }
+
+                        if (singleItem.Children.Count > 0)
+                        {
+                            singleItem.IsExpanded = true;
+                            RebuildVisibleList();
+                            selectedIndex = 1; // First child
+                            AnnounceCurrentSelection();
+                        }
+                        return; // Early return - skip normal announcement
+                    }
+                }
+
+                // Normal case: multiple objects or non-expandable single object
                 AnnounceCurrentSelection();
             }
             catch (Exception ex)
@@ -257,6 +285,15 @@ namespace RimWorldAccess
                     selectedIndex = savedIndex;
                 }
             }
+            else
+            {
+                // No saved position - move to first child
+                int firstChildIndex = visibleItems.IndexOf(item) + 1;
+                if (firstChildIndex < visibleItems.Count)
+                {
+                    selectedIndex = firstChildIndex;
+                }
+            }
 
             AnnounceCurrentSelection();
         }
@@ -405,10 +442,9 @@ namespace RimWorldAccess
 
                 // Build status indicators
                 string expandIndicator = "";
-                if (item.IsExpandable && item.IsExpanded)
+                if (item.IsExpandable)
                 {
-                    // Only show [-] when expanded, no [+] when collapsed
-                    expandIndicator = "[-] ";
+                    expandIndicator = item.IsExpanded ? " [Expanded]" : " [Collapsed]";
                 }
 
                 // Build help text
@@ -422,7 +458,7 @@ namespace RimWorldAccess
                 string label = item.Label.StripTags();
 
                 // Build full announcement
-                string announcement = $"{indent}{expandIndicator}{label}";
+                string announcement = $"{indent}{label}{expandIndicator}";
 
                 if (!string.IsNullOrEmpty(helpText))
                 {

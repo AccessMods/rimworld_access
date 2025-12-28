@@ -98,6 +98,15 @@ namespace RimWorldAccess
                         currentIndex = savedIndex;
                     }
                 }
+                else
+                {
+                    // No saved position - move to first child
+                    int firstChildIndex = flatNavigationList.IndexOf(current) + 1;
+                    if (firstChildIndex < flatNavigationList.Count)
+                    {
+                        currentIndex = firstChildIndex;
+                    }
+                }
 
                 AnnounceCurrentSelection();
             }
@@ -365,11 +374,11 @@ namespace RimWorldAccess
             float cost = project.CostApparent;
             if (cost > 0)
             {
-                label += $" - {cost:F0} cost";
+                label += $" - cost: {cost:F0}";
             }
             else if (project.knowledgeCost > 0)
             {
-                label += $" - {project.knowledgeCost:F0} knowledge";
+                label += $" - knowledge: {project.knowledgeCost:F0}";
             }
 
             // Add progress if in progress
@@ -450,17 +459,28 @@ namespace RimWorldAccess
 
             if (current.Type == ResearchMenuNodeType.Category)
             {
-                string expandState = current.IsExpanded ? "expanded" : "collapsed";
-                announcement = $"{indent}{current.Label} - {expandState}";
+                string expandState = current.IsExpanded ? " [Expanded]" : " [Collapsed]";
+                announcement = $"{indent}{current.Label}{expandState}";
             }
             else if (current.Type == ResearchMenuNodeType.Project)
             {
                 announcement = $"{indent}{current.Label}";
             }
 
-            // Add navigation hint
-            int position = currentIndex + 1;
-            announcement += $" - Item {position} of {flatNavigationList.Count}";
+            // Add navigation hint - show position among siblings (same parent)
+            List<ResearchMenuNode> siblings;
+            if (current.Parent == null)
+            {
+                // Top level - siblings are root nodes
+                siblings = rootNodes;
+            }
+            else
+            {
+                // Inside a category - siblings are parent's children
+                siblings = current.Parent.Children;
+            }
+            int siblingPosition = siblings.IndexOf(current) + 1;
+            announcement += $" - Item {siblingPosition} of {siblings.Count}";
 
             TolkHelper.Speak(announcement);
         }
