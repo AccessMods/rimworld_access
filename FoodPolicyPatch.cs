@@ -91,14 +91,14 @@ namespace RimWorldAccess
                     }
                     else if (key == KeyCode.LeftArrow)
                     {
-                        // For categories, left arrow collapses; for sliders, announces value
-                        ThingFilterNavigationState.ToggleExpand();
+                        // For categories, left arrow collapses; for non-categories, moves to parent
+                        ThingFilterNavigationState.Collapse();
                         handled = true;
                     }
                     else if (key == KeyCode.RightArrow)
                     {
-                        // For categories, right arrow expands; for sliders, announces value
-                        ThingFilterNavigationState.ToggleExpand();
+                        // For categories, right arrow expands or moves to first child; for end nodes, rejects
+                        ThingFilterNavigationState.Expand();
                         handled = true;
                     }
                     else if (key == KeyCode.A && Event.current.control)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
 using UnityEngine;
 
@@ -18,6 +19,7 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static StorageSettings currentSettings = null;
         private static HashSet<string> expandedCategories = new HashSet<string>(); // Track which categories are expanded
+        private static int lastAnnouncedLevel = -1; // Track last announced level for WCAG announcements
 
         private enum MenuItemType
         {
@@ -70,6 +72,7 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
+            lastAnnouncedLevel = -1; // Reset level tracking on open
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -87,6 +90,7 @@ namespace RimWorldAccess
             isActive = false;
             currentSettings = null;
             expandedCategories.Clear();
+            lastAnnouncedLevel = -1; // Reset level tracking on close
         }
 
         /// <summary>
@@ -225,20 +229,25 @@ namespace RimWorldAccess
                     break;
 
                 case MenuItemType.Category:
-                    // Only expand if collapsed
+                    TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
+                    if (node == null) break;
+
                     if (!item.isExpanded)
                     {
-                        TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
-                        if (node != null)
-                        {
-                            expandedCategories.Add(node.catDef.defName);
-                            RebuildMenu();
-                            TolkHelper.Speak($"Expanded: {item.label}");
-                        }
+                        // WCAG: Expand node, focus stays on current item
+                        expandedCategories.Add(node.catDef.defName);
+                        RebuildMenu();
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection(); // Re-announce with new state
                     }
                     else
                     {
-                        TolkHelper.Speak($"{item.label} (already expanded)");
+                        // WCAG: Already expanded, try to move to first child
+                        if (!MoveToFirstChild())
+                        {
+                            // No children found, play reject sound
+                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                        }
                     }
                     break;
 
@@ -248,8 +257,8 @@ namespace RimWorldAccess
                 case MenuItemType.QualityRange:
                 case MenuItemType.ClearAll:
                 case MenuItemType.AllowAll:
-                    // Right arrow doesn't apply to these types
-                    TolkHelper.Speak("Press Enter to select");
+                    // End node - play reject sound per WCAG
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     break;
             }
         }
@@ -269,31 +278,37 @@ namespace RimWorldAccess
                     break;
 
                 case MenuItemType.Category:
-                    // Only collapse if expanded
                     if (item.isExpanded)
                     {
+                        // WCAG: Collapse node, focus stays on current item
                         TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
                         if (node != null)
                         {
                             expandedCategories.Remove(node.catDef.defName);
                             RebuildMenu();
-                            TolkHelper.Speak($"Collapsed: {item.label}");
+                            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                            AnnounceCurrentSelection(); // Re-announce with new state
                         }
                     }
                     else
                     {
-                        TolkHelper.Speak($"{item.label} (already collapsed)");
+                        // WCAG: Already collapsed, move to parent without collapsing
+                        MoveToParent();
                     }
                     break;
 
                 case MenuItemType.ThingDef:
                 case MenuItemType.SpecialFilter:
+                    // WCAG: Leaf item, move to parent
+                    MoveToParent();
+                    break;
+
                 case MenuItemType.HitPointsRange:
                 case MenuItemType.QualityRange:
                 case MenuItemType.ClearAll:
                 case MenuItemType.AllowAll:
-                    // Left arrow doesn't apply to these types
-                    TolkHelper.Speak("Press Enter to select");
+                    // Top-level items with no parent - play reject sound
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     break;
             }
         }
@@ -566,25 +581,121 @@ namespace RimWorldAccess
             selectedIndex = Mathf.Clamp(selectedIndex, 0, menuItems.Count - 1);
         }
 
+        /// <summary>
+        /// Gets the sibling position (X of Y) for a menu item.
+        /// Siblings are items with the same parent.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(MenuItem item)
+        {
+            var siblings = menuItems.Where(m => m.parent == item.parent).ToList();
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Gets the level suffix for announcements.
+        /// Only announces level when it changes from the last announced level.
+        /// </summary>
+        private static string GetLevelSuffix(int currentLevel)
+        {
+            int displayLevel = currentLevel + 1; // 1-based for users
+            if (displayLevel != lastAnnouncedLevel)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return $". level {displayLevel}";
+            }
+            return "";
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current item.
+        /// Returns true if a child was found and focus moved, false otherwise.
+        /// </summary>
+        private static bool MoveToFirstChild()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return false;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            // Find first child in the flat list
+            for (int i = selectedIndex + 1; i < menuItems.Count; i++)
+            {
+                if (menuItems[i].parent == item)
+                {
+                    selectedIndex = i;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Moves focus to the parent of the current item.
+        /// Plays reject sound if no parent exists.
+        /// </summary>
+        private static void MoveToParent()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            if (item.parent == null)
+            {
+                // No parent - play reject sound
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return;
+            }
+
+            // Find parent in the menu list
+            for (int i = 0; i < menuItems.Count; i++)
+            {
+                if (menuItems[i] == item.parent)
+                {
+                    selectedIndex = i;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // Parent not found in visible list (shouldn't happen, but handle gracefully)
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+        }
 
         private static void AnnounceCurrentSelection()
         {
             if (selectedIndex >= 0 && selectedIndex < menuItems.Count)
             {
                 MenuItem item = menuItems[selectedIndex];
+
+                // Get sibling position
+                var (position, total) = GetSiblingPosition(item);
+
+                // Build announcement in WCAG format: "{name} {state}. {X of Y}[. level N]. {allowed}."
                 string announcement = item.label;
 
-                // Add state information
-                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
-                {
-                    string state = item.isAllowed ? "Allowed" : "Disallowed";
-                    announcement += $" ({state})";
-                }
-
+                // Add expand/collapse state for categories
                 if (item.type == MenuItemType.Category)
                 {
-                    string expandState = item.isExpanded ? "Expanded" : "Collapsed";
-                    announcement += $" [{expandState}]";
+                    string expandState = item.isExpanded ? "expanded" : "collapsed";
+                    announcement += $" {expandState}";
+                }
+
+                // Add period after label+state, then sibling position
+                announcement += $". {position} of {total}";
+
+                // Add level suffix (only when level changes)
+                announcement += GetLevelSuffix(item.indentLevel);
+
+                // Add allowed/disallowed state at the end for context with period
+                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
+                {
+                    string allowState = item.isAllowed ? "allowed" : "disallowed";
+                    announcement += $". {allowState}.";
                 }
 
                 TolkHelper.Speak(announcement);

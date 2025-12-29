@@ -19,6 +19,7 @@ namespace RimWorldAccess
         private static int currentIndex = 0;
         private static HashSet<string> expandedNodes = new HashSet<string>();
         private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
+        private static int lastAnnouncedLevel = -1;
 
         public static bool IsActive => isActive;
 
@@ -30,6 +31,7 @@ namespace RimWorldAccess
             isActive = true;
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
+            lastAnnouncedLevel = -1;
             rootNodes = BuildCategoryTree();
             flatNavigationList = BuildFlatNavigationList();
             currentIndex = 0;
@@ -46,6 +48,7 @@ namespace RimWorldAccess
             flatNavigationList.Clear();
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
+            lastAnnouncedLevel = -1;
             TolkHelper.Speak("Research menu closed");
         }
 
@@ -76,6 +79,10 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Expands the currently selected category (right arrow).
+        /// WCAG behavior:
+        /// - On closed node: Open node, focus stays
+        /// - On open node: Move to first child
+        /// - On end node: Reject feedback
         /// </summary>
         public static void ExpandCategory()
         {
@@ -83,39 +90,66 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
+            // Case 1: Collapsed category - expand it, focus STAYS on current item
             if (current.Type == ResearchMenuNodeType.Category && !current.IsExpanded)
             {
                 current.IsExpanded = true;
                 expandedNodes.Add(current.Id);
                 flatNavigationList = BuildFlatNavigationList();
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentSelection(); // Focus stays, just announce new state
+                return;
+            }
 
-                // Restore last selected child position if available
-                if (lastChildIdPerParent.TryGetValue(current.Id, out string savedChildId))
-                {
-                    int savedIndex = flatNavigationList.FindIndex(n => n.Id == savedChildId);
-                    if (savedIndex >= 0)
-                    {
-                        currentIndex = savedIndex;
-                    }
-                }
-                else
-                {
-                    // No saved position - move to first child
-                    int firstChildIndex = flatNavigationList.IndexOf(current) + 1;
-                    if (firstChildIndex < flatNavigationList.Count)
-                    {
-                        currentIndex = firstChildIndex;
-                    }
-                }
+            // Case 2: Already expanded category with children - move to first child
+            if (current.Type == ResearchMenuNodeType.Category && current.IsExpanded && current.Children.Count > 0)
+            {
+                MoveToFirstChild();
+                return;
+            }
 
+            // Case 3: End node (Project) or empty category - reject
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current node.
+        /// Used when pressing Right on an already-expanded category.
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            var current = flatNavigationList[currentIndex];
+
+            // Restore last selected child position if available
+            if (lastChildIdPerParent.TryGetValue(current.Id, out string savedChildId))
+            {
+                int savedIndex = flatNavigationList.FindIndex(n => n.Id == savedChildId);
+                if (savedIndex >= 0)
+                {
+                    currentIndex = savedIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // No saved position - move to first child (which is immediately after current in flat list)
+            int firstChildIndex = flatNavigationList.IndexOf(current) + 1;
+            if (firstChildIndex < flatNavigationList.Count)
+            {
+                currentIndex = firstChildIndex;
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
                 AnnounceCurrentSelection();
             }
         }
 
         /// <summary>
         /// Collapses the currently selected category (left arrow).
-        /// If on an expanded category, collapses it.
-        /// If on a child item, collapses the parent and moves focus to it.
+        /// WCAG behavior:
+        /// - On open node: Close node, focus stays
+        /// - On closed node: Move to parent
+        /// - On end node: Move to parent
         /// </summary>
         public static void CollapseCategory()
         {
@@ -123,7 +157,7 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
-            // Case 1: Current is an expanded category - collapse it directly
+            // Case 1: Current is an expanded category - collapse it, focus STAYS
             if (current.Type == ResearchMenuNodeType.Category && current.IsExpanded)
             {
                 current.IsExpanded = false;
@@ -134,7 +168,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Case 2: Find parent and collapse it
+            // Case 2: Find parent to navigate to (do NOT collapse parent, just move to it)
             var parent = current.Parent;
 
             // Skip to find an expandable parent (categories only)
@@ -143,35 +177,25 @@ namespace RimWorldAccess
                 parent = parent.Parent;
             }
 
-            if (parent == null || !parent.IsExpanded)
+            if (parent == null)
             {
-                // No expandable parent to collapse - we're at the top level
+                // No parent to navigate to - we're at the top level
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
                 TolkHelper.Speak("Already at top level.", SpeechPriority.High);
                 return;
             }
 
-            // Save current child position for this parent before collapsing
+            // Save current child position for this parent before moving away
             lastChildIdPerParent[parent.Id] = current.Id;
 
-            // Collapse the parent
-            parent.IsExpanded = false;
-            expandedNodes.Remove(parent.Id);
-            flatNavigationList = BuildFlatNavigationList();
-
-            // Move selection to the parent
+            // Move selection to the parent (do NOT collapse it)
             int parentIndex = flatNavigationList.IndexOf(parent);
             if (parentIndex >= 0)
             {
                 currentIndex = parentIndex;
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                AnnounceCurrentSelection();
             }
-            else if (currentIndex >= flatNavigationList.Count)
-            {
-                currentIndex = Math.Max(0, flatNavigationList.Count - 1);
-            }
-
-            SoundDefOf.Click.PlayOneShotOnCamera();
-            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -442,6 +466,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the currently selected item to the clipboard for screen reader access.
+        /// WCAG format: "{name} {state} {X of Y}[, level N]"
+        /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -452,22 +478,17 @@ namespace RimWorldAccess
             }
 
             var current = flatNavigationList[currentIndex];
-            string announcement = "";
 
-            // Add indentation indicator based on level
-            string indent = new string(' ', current.Level * 2);
+            // Build announcement in WCAG format: "{name} {state} {X of Y}[, level N]"
+            string announcement = current.Label;
 
+            // Add state for expandable nodes (categories)
             if (current.Type == ResearchMenuNodeType.Category)
             {
-                string expandState = current.IsExpanded ? " [Expanded]" : " [Collapsed]";
-                announcement = $"{indent}{current.Label}{expandState}";
-            }
-            else if (current.Type == ResearchMenuNodeType.Project)
-            {
-                announcement = $"{indent}{current.Label}";
+                announcement += current.IsExpanded ? " expanded" : " collapsed";
             }
 
-            // Add navigation hint - show position among siblings (same parent)
+            // Add sibling position (X of Y among siblings at same level)
             List<ResearchMenuNode> siblings;
             if (current.Parent == null)
             {
@@ -480,7 +501,19 @@ namespace RimWorldAccess
                 siblings = current.Parent.Children;
             }
             int siblingPosition = siblings.IndexOf(current) + 1;
-            announcement += $" - Item {siblingPosition} of {siblings.Count}";
+            announcement += $". {siblingPosition} of {siblings.Count}";
+
+            // Add level only when it changes (1-based for user clarity)
+            int currentLevel = current.Level + 1; // Convert 0-based to 1-based
+            if (currentLevel != lastAnnouncedLevel)
+            {
+                announcement += $". level {currentLevel}.";
+                lastAnnouncedLevel = currentLevel;
+            }
+            else
+            {
+                announcement += ".";  // Always end with period
+            }
 
             TolkHelper.Speak(announcement);
         }

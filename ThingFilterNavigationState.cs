@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
 using UnityEngine;
 
@@ -38,6 +39,7 @@ namespace RimWorldAccess
         private static TreeNode_ThingCategory rootNode = null;
         private static List<NavigationNode> flattenedNodes = new List<NavigationNode>();
         private static int selectedIndex = 0;
+        private static int lastAnnouncedLevel = -1;
 
         // Slider states
         private enum SliderMode { None, Quality, HitPoints }
@@ -63,9 +65,10 @@ namespace RimWorldAccess
             hasHitPointsSlider = showHitPoints;
             selectedIndex = 0;
             currentSliderMode = SliderMode.None;
+            lastAnnouncedLevel = -1;
 
             RebuildNavigationList();
-            UpdateClipboard();
+            AnnounceCurrentNode();
         }
 
         /// <summary>
@@ -78,6 +81,7 @@ namespace RimWorldAccess
             rootNode = null;
             flattenedNodes.Clear();
             selectedIndex = 0;
+            lastAnnouncedLevel = -1;
         }
 
         /// <summary>
@@ -202,7 +206,7 @@ namespace RimWorldAccess
                 return;
 
             selectedIndex = (selectedIndex + 1) % flattenedNodes.Count;
-            UpdateClipboard();
+            AnnounceCurrentNode();
         }
 
         /// <summary>
@@ -217,7 +221,7 @@ namespace RimWorldAccess
             if (selectedIndex < 0)
                 selectedIndex = flattenedNodes.Count - 1;
 
-            UpdateClipboard();
+            AnnounceCurrentNode();
         }
 
         /// <summary>
@@ -259,7 +263,7 @@ namespace RimWorldAccess
             {
                 isEditingSlider = false;
                 currentSliderMode = SliderMode.None;
-                UpdateClipboard();
+                AnnounceCurrentNode();
             }
         }
 
@@ -379,23 +383,201 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Expands or collapses a category node.
+        /// Expands the current category node (Right arrow - WCAG tree navigation).
+        /// If collapsed: expand and stay on current node.
+        /// If already expanded: move to first child.
+        /// If end node: reject with feedback.
         /// </summary>
-        public static void ToggleExpand()
+        public static void Expand()
         {
             if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
                 return;
 
             var node = flattenedNodes[selectedIndex];
 
-            if (node.Type == NodeType.Category)
+            // Case 1: Collapsed category - expand it, focus stays
+            if (node.Type == NodeType.Category && !node.IsExpanded)
             {
-                node.IsExpanded = !node.IsExpanded;
+                node.IsExpanded = true;
                 int oldIndex = selectedIndex;
                 RebuildNavigationList();
-                selectedIndex = oldIndex; // Try to maintain position
-                TolkHelper.Speak($"{node.Label}: {(node.IsExpanded ? "Expanded" : "Collapsed")}");
+                // Find the same node after rebuild (it should be at or near the same position)
+                selectedIndex = FindNodeIndex(node);
+                if (selectedIndex < 0) selectedIndex = oldIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
             }
+
+            // Case 2: Expanded category - move to first child
+            if (node.Type == NodeType.Category && node.IsExpanded)
+            {
+                // First child is the next item with higher indent level
+                if (selectedIndex + 1 < flattenedNodes.Count)
+                {
+                    var nextNode = flattenedNodes[selectedIndex + 1];
+                    if (nextNode.IndentLevel > node.IndentLevel)
+                    {
+                        selectedIndex++;
+                        SoundDefOf.Click.PlayOneShotOnCamera();
+                        AnnounceCurrentNode();
+                        return;
+                    }
+                }
+                // No children found (empty category)
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot expand this item.");
+                return;
+            }
+
+            // Case 3: End node (ThingDef, Slider, SpecialFilter, SaveAndReturn) - reject
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Cannot expand this item.");
+        }
+
+        /// <summary>
+        /// Collapses the current category node or moves to parent (Left arrow - WCAG tree navigation).
+        /// If expanded category: collapse and stay on current node.
+        /// If collapsed/end node: move to parent.
+        /// If at root level with no parent: reject with feedback.
+        /// </summary>
+        public static void Collapse()
+        {
+            if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            var node = flattenedNodes[selectedIndex];
+
+            // Case 1: Expanded category - collapse it, focus stays
+            if (node.Type == NodeType.Category && node.IsExpanded)
+            {
+                node.IsExpanded = false;
+                int oldIndex = selectedIndex;
+                RebuildNavigationList();
+                // Find the same node after rebuild
+                selectedIndex = FindNodeIndex(node);
+                if (selectedIndex < 0) selectedIndex = oldIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
+            }
+
+            // Case 2: Move to parent (don't collapse parent)
+            int parentIndex = FindParentIndex(node);
+            if (parentIndex >= 0)
+            {
+                selectedIndex = parentIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
+            }
+
+            // Case 3: At root level with no parent - reject
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Already at top level");
+        }
+
+        /// <summary>
+        /// Finds the index of a node in the flattened list by reference.
+        /// </summary>
+        private static int FindNodeIndex(NavigationNode node)
+        {
+            for (int i = 0; i < flattenedNodes.Count; i++)
+            {
+                if (flattenedNodes[i] == node)
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Finds the parent index for a given node.
+        /// Parent is the nearest preceding node with a lower indent level.
+        /// </summary>
+        private static int FindParentIndex(NavigationNode node)
+        {
+            if (node.IndentLevel <= 0)
+                return -1;
+
+            int targetIndent = node.IndentLevel - 1;
+            int currentIdx = FindNodeIndex(node);
+
+            // Search backwards for a node with lower indent level
+            for (int i = currentIdx - 1; i >= 0; i--)
+            {
+                if (flattenedNodes[i].IndentLevel == targetIndent)
+                    return i;
+                // If we hit something with even lower indent, we've gone too far
+                if (flattenedNodes[i].IndentLevel < targetIndent)
+                    break;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Gets the position of the current node among its siblings (same indent level, same parent).
+        /// Returns (position, total) where position is 1-based.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(NavigationNode node)
+        {
+            int nodeIndex = FindNodeIndex(node);
+            if (nodeIndex < 0)
+                return (1, 1);
+
+            int indentLevel = node.IndentLevel;
+
+            // Find the range of siblings by looking for the parent boundary
+            int startIndex = 0;
+            int endIndex = flattenedNodes.Count - 1;
+
+            // Find start: scan backwards until we hit a lower indent level or start
+            for (int i = nodeIndex - 1; i >= 0; i--)
+            {
+                if (flattenedNodes[i].IndentLevel < indentLevel)
+                {
+                    startIndex = i + 1;
+                    break;
+                }
+            }
+
+            // Find end: scan forwards until we hit a lower indent level or end
+            for (int i = nodeIndex + 1; i < flattenedNodes.Count; i++)
+            {
+                if (flattenedNodes[i].IndentLevel < indentLevel)
+                {
+                    endIndex = i - 1;
+                    break;
+                }
+            }
+
+            // Count siblings at the same indent level within this range
+            int position = 0;
+            int total = 0;
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (flattenedNodes[i].IndentLevel == indentLevel)
+                {
+                    total++;
+                    if (i <= nodeIndex)
+                        position = total;
+                }
+            }
+
+            return (position, total);
+        }
+
+        /// <summary>
+        /// Gets the level suffix for announcements. Only announces level when it changes.
+        /// </summary>
+        private static string GetLevelSuffix(int currentLevel)
+        {
+            int displayLevel = currentLevel + 1; // 1-based for users
+            if (displayLevel != lastAnnouncedLevel)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return $". level {displayLevel}.";
+            }
+            return ".";  // Always end with period
         }
 
         /// <summary>
@@ -509,9 +691,10 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Updates the clipboard with the current selection.
+        /// Announces the current node using WCAG-compliant format.
+        /// Format: "{name} {state} {X of Y}[, level N]"
         /// </summary>
-        private static void UpdateClipboard()
+        private static void AnnounceCurrentNode()
         {
             if (flattenedNodes.Count == 0)
             {
@@ -523,42 +706,68 @@ namespace RimWorldAccess
                 return;
 
             var node = flattenedNodes[selectedIndex];
-            string indent = new string(' ', node.IndentLevel * 2);
-            string typeIcon = "";
+            var (position, total) = GetSiblingPosition(node);
+            string levelSuffix = GetLevelSuffix(node.IndentLevel);
+
+            string announcement;
+
             switch (node.Type)
             {
                 case NodeType.Slider:
-                    typeIcon = "[Slider]";
+                    // Sliders show their current value
+                    string sliderValue = GetSliderValueString(node);
+                    announcement = $"{node.Label} {sliderValue}. {position} of {total}{levelSuffix}";
                     break;
+
                 case NodeType.SpecialFilter:
-                    typeIcon = "[*]";
+                    // Special filters show checked state
+                    string specialState = node.IsChecked ? "checked" : "not checked";
+                    announcement = $"{node.Label} {specialState}. {position} of {total}{levelSuffix}";
                     break;
+
                 case NodeType.Category:
-                    typeIcon = node.IsExpanded ? "[-]" : "[+]";
+                    // Categories show expanded/collapsed state
+                    string categoryState = node.IsExpanded ? "expanded" : "collapsed";
+                    announcement = $"{node.Label} {categoryState}. {position} of {total}{levelSuffix}";
                     break;
+
                 case NodeType.ThingDef:
-                    typeIcon = "[ ]";
+                    // ThingDefs show checked state
+                    string thingState = node.IsChecked ? "checked" : "not checked";
+                    announcement = $"{node.Label} {thingState}. {position} of {total}{levelSuffix}";
                     break;
+
                 case NodeType.SaveAndReturn:
-                    typeIcon = "[Action]";
+                    announcement = $"{node.Label}. {position} of {total}{levelSuffix}";
+                    break;
+
+                default:
+                    announcement = $"{node.Label}. {position} of {total}{levelSuffix}";
                     break;
             }
 
-            string status = "";
-            if (node.Type == NodeType.Category || node.Type == NodeType.ThingDef || node.Type == NodeType.SpecialFilter)
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Gets the current value string for a slider node.
+        /// </summary>
+        private static string GetSliderValueString(NavigationNode node)
+        {
+            string sliderType = node.Data as string;
+
+            if (sliderType == "Quality")
             {
-                status = node.IsChecked ? " (Allowed)" : " (Disallowed)";
+                var range = currentFilter.AllowedQualityLevels;
+                return $"{range.min} to {range.max}";
             }
-            else if (node.Type == NodeType.Slider)
+            else if (sliderType == "HitPoints")
             {
-                status = " - Press Enter to edit";
-            }
-            else if (node.Type == NodeType.SaveAndReturn)
-            {
-                status = " - Press Enter to execute";
+                var range = currentFilter.AllowedHitPointsPercents;
+                return $"{range.min:P0} to {range.max:P0}";
             }
 
-            TolkHelper.Speak($"{indent}{typeIcon} {node.Label}{status} - {selectedIndex + 1}/{flattenedNodes.Count}");
+            return "";
         }
     }
 }

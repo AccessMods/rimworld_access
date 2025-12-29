@@ -22,6 +22,7 @@ namespace RimWorldAccess
         private static HashSet<string> expandedNodes = new HashSet<string>();
         private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
         private static Stack<ResearchProjectDef> navigationStack = new Stack<ResearchProjectDef>();
+        private static int lastAnnouncedLevel = -1;
 
         public static bool IsActive => isActive;
 
@@ -34,6 +35,7 @@ namespace RimWorldAccess
             isActive = true;
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
+            lastAnnouncedLevel = -1;
             rootNodes = BuildDetailTree(project);
             flatNavigationList = BuildFlatNavigationList();
             currentIndex = 0;
@@ -72,6 +74,7 @@ namespace RimWorldAccess
                 expandedNodes.Clear();
                 lastChildIdPerParent.Clear();
                 navigationStack.Clear();
+                lastAnnouncedLevel = -1;
                 TolkHelper.Speak("Returned to research menu");
             }
         }
@@ -105,6 +108,10 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Expands the current category (Right arrow).
+        /// WCAG behavior:
+        /// - On closed node: Open node, focus stays on current item
+        /// - On open node: Move to first child
+        /// - On end node: Reject sound (feedback)
         /// </summary>
         public static void Expand()
         {
@@ -112,54 +119,45 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
+            // End node (not expandable): reject
             if (!current.IsExpandable)
             {
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
                 return;
             }
 
-            if (current.IsExpanded)
-            {
-                SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                return;
-            }
-
+            // No children: reject with message
             if (current.Children == null || current.Children.Count == 0)
             {
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                TolkHelper.Speak("No items");
+                TolkHelper.Speak("Cannot expand this item.");
                 return;
             }
 
+            // Already expanded: move to first child (WCAG behavior)
+            if (current.IsExpanded)
+            {
+                MoveToFirstChild();
+                return;
+            }
+
+            // Closed node: expand it, focus STAYS on current item (WCAG behavior)
             current.IsExpanded = true;
             expandedNodes.Add(current.Id);
             flatNavigationList = BuildFlatNavigationList();
             SoundDefOf.Click.PlayOneShotOnCamera();
 
-            // Restore last selected child position if available
-            if (lastChildIdPerParent.TryGetValue(current.Id, out string savedChildId))
-            {
-                int savedIndex = flatNavigationList.FindIndex(n => n.Id == savedChildId);
-                if (savedIndex >= 0)
-                {
-                    currentIndex = savedIndex;
-                }
-            }
-            else
-            {
-                // Move to first child
-                int firstChildIndex = flatNavigationList.IndexOf(current) + 1;
-                if (firstChildIndex < flatNavigationList.Count)
-                {
-                    currentIndex = firstChildIndex;
-                }
-            }
-
+            // Keep currentIndex pointing to the same node (which is still current after rebuild)
+            // The node is now expanded, announce the state change
             AnnounceCurrentSelection();
         }
 
         /// <summary>
         /// Collapses the current category or navigates to parent (Left arrow).
+        /// WCAG behavior:
+        /// - On open node: Close node, focus stays on current item
+        /// - On closed node: Move to parent WITHOUT collapsing the parent
+        /// - On end node: Move to parent WITHOUT collapsing the parent
         /// </summary>
         public static void Collapse()
         {
@@ -167,7 +165,7 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
-            // Case 1: Current is expanded category - collapse it
+            // Case 1: Current is expanded category - collapse it, focus STAYS (WCAG behavior)
             if (current.IsExpandable && current.IsExpanded)
             {
                 current.IsExpanded = false;
@@ -178,26 +176,22 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Case 2: Navigate to parent and collapse it
+            // Case 2: Navigate to parent WITHOUT collapsing it (WCAG behavior)
             var parent = current.Parent;
-            if (parent != null && parent.IsExpanded)
+            if (parent != null)
             {
-                // Save current position
+                // Save current position for potential future navigation back
                 lastChildIdPerParent[parent.Id] = current.Id;
 
-                parent.IsExpanded = false;
-                expandedNodes.Remove(parent.Id);
-                flatNavigationList = BuildFlatNavigationList();
-
+                // Find parent in flat list and move to it (do NOT collapse)
                 int parentIndex = flatNavigationList.IndexOf(parent);
                 if (parentIndex >= 0)
                 {
                     currentIndex = parentIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return;
                 }
-
-                SoundDefOf.Click.PlayOneShotOnCamera();
-                AnnounceCurrentSelection();
-                return;
             }
 
             SoundDefOf.ClickReject.PlayOneShotOnCamera();
@@ -673,7 +667,66 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the current selection.
+        /// Gets the sibling position (1-based) and total count for an item.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(DetailNode item)
+        {
+            var siblings = item.Parent?.Children ?? rootNodes;
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Gets the depth level of a node (0-based internally, 1-based for display).
+        /// </summary>
+        private static int GetNodeLevel(DetailNode node)
+        {
+            int level = 0;
+            var current = node;
+            while (current.Parent != null)
+            {
+                level++;
+                current = current.Parent;
+            }
+            return level;
+        }
+
+        /// <summary>
+        /// Gets the level suffix for announcement (only if level changed).
+        /// </summary>
+        private static string GetLevelSuffix(int currentLevel)
+        {
+            int displayLevel = currentLevel + 1; // 1-based for users
+            if (displayLevel != lastAnnouncedLevel)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return $". level {displayLevel}.";
+            }
+            return ".";  // Always end with period
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current item.
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            var item = flatNavigationList[currentIndex];
+            if (item.Children != null && item.Children.Count > 0)
+            {
+                int firstChildIndex = flatNavigationList.IndexOf(item) + 1;
+                if (firstChildIndex < flatNavigationList.Count)
+                {
+                    currentIndex = firstChildIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection using WCAG-compliant format.
+        /// Format: "{name} {state} {X of Y}[, level N]"
+        /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -685,35 +738,37 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
-            // Build announcement
-            string announcement = current.Label;
+            // Get position info
+            var (position, total) = GetSiblingPosition(current);
+            int currentLevel = GetNodeLevel(current);
 
-            // Add expand/collapse indicator for categories
+            // Build announcement: "{name} {state}. {X of Y}{levelSuffix}"
+            var sb = new StringBuilder();
+            sb.Append(current.Label);
+
+            // Add expand/collapse state for expandable categories
             if (current.Type == DetailNodeType.Category && current.IsExpandable)
             {
-                announcement += current.IsExpanded ? " [Expanded]" : " [Collapsed]";
+                sb.Append(current.IsExpanded ? " expanded" : " collapsed");
             }
 
-            // For info nodes, append content BEFORE position suffix
+            // Add period after label+state for screen reader pause
+            sb.Append(". ");
+
+            // Add position
+            sb.Append($"{position} of {total}");
+
+            // Add level suffix (includes period at end)
+            sb.Append(GetLevelSuffix(currentLevel));
+
+            // For info nodes, append content after main announcement
             if (current.Type == DetailNodeType.Info && !string.IsNullOrEmpty(current.Content))
             {
-                announcement += "\n\n" + current.Content;
+                sb.Append("\n\n");
+                sb.Append(current.Content);
             }
 
-            // Calculate sibling position and append at the very END
-            List<DetailNode> siblings;
-            if (current.Parent == null)
-            {
-                siblings = rootNodes;
-            }
-            else
-            {
-                siblings = current.Parent.Children;
-            }
-            int siblingPosition = siblings.IndexOf(current) + 1;
-            announcement += $" - Item {siblingPosition} of {siblings.Count}";
-
-            TolkHelper.Speak(announcement);
+            TolkHelper.Speak(sb.ToString());
         }
     }
 

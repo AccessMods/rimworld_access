@@ -22,6 +22,7 @@ namespace RimWorldAccess
         private static IntVec3 inspectionPosition;
         private static object parentObject = null; // Track parent object for navigation back
         private static Dictionary<InspectionTreeItem, InspectionTreeItem> lastChildPerParent = new Dictionary<InspectionTreeItem, InspectionTreeItem>();
+        private static int lastAnnouncedLevel = -1;
 
         /// <summary>
         /// Opens the inspection menu for the specified position.
@@ -47,6 +48,7 @@ namespace RimWorldAccess
                 RebuildVisibleList();
                 selectedIndex = 0;
                 lastChildPerParent.Clear();
+                lastAnnouncedLevel = -1;
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -122,6 +124,7 @@ namespace RimWorldAccess
                 RebuildVisibleList();
                 selectedIndex = 0;
                 lastChildPerParent.Clear();
+                lastAnnouncedLevel = -1;
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -143,6 +146,7 @@ namespace RimWorldAccess
             rootItem = null;
             visibleItems = null;
             lastChildPerParent.Clear();
+            lastAnnouncedLevel = -1;
             selectedIndex = 0;
             parentObject = null;
         }
@@ -237,6 +241,10 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Expands the selected item (Right arrow).
+        /// WCAG behavior:
+        /// - On closed node: Open node, focus stays on current item
+        /// - On open node: Move to first child
+        /// - On end node: Reject sound + feedback
         /// </summary>
         public static void Expand()
         {
@@ -245,20 +253,22 @@ namespace RimWorldAccess
 
             var item = visibleItems[selectedIndex];
 
+            // End node (not expandable) - reject
             if (!item.IsExpandable)
             {
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                TolkHelper.Speak("This item cannot be expanded.", SpeechPriority.High);
+                TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
                 return;
             }
 
+            // Already expanded - move to first child
             if (item.IsExpanded)
             {
-                SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                TolkHelper.Speak("Already expanded.");
+                MoveToFirstChild();
                 return;
             }
 
+            // Collapsed node - expand it (focus stays on current item)
             // Trigger lazy loading if needed
             if (item.OnActivate != null && item.Children.Count == 0)
             {
@@ -276,32 +286,16 @@ namespace RimWorldAccess
             RebuildVisibleList();
             SoundDefOf.Click.PlayOneShotOnCamera();
 
-            // Restore last selected child position if available
-            if (lastChildPerParent.TryGetValue(item, out InspectionTreeItem savedChild))
-            {
-                int savedIndex = visibleItems.IndexOf(savedChild);
-                if (savedIndex >= 0)
-                {
-                    selectedIndex = savedIndex;
-                }
-            }
-            else
-            {
-                // No saved position - move to first child
-                int firstChildIndex = visibleItems.IndexOf(item) + 1;
-                if (firstChildIndex < visibleItems.Count)
-                {
-                    selectedIndex = firstChildIndex;
-                }
-            }
-
+            // Focus stays on current item - just announce the state change
             AnnounceCurrentSelection();
         }
 
         /// <summary>
         /// Collapses the selected item (Left arrow).
-        /// If on an expanded item, collapses it.
-        /// If on a child item, collapses the parent and moves focus to it.
+        /// WCAG behavior:
+        /// - On open node: Close node, focus stays on current item
+        /// - On closed node: Move to parent (WITHOUT collapsing the parent)
+        /// - On end node: Move to parent (WITHOUT collapsing the parent)
         /// </summary>
         public static void Collapse()
         {
@@ -310,7 +304,7 @@ namespace RimWorldAccess
 
             var item = visibleItems[selectedIndex];
 
-            // Case 1: Item is expandable and expanded - collapse it directly
+            // Case 1: Item is expandable and expanded - collapse it (focus stays)
             if (item.IsExpandable && item.IsExpanded)
             {
                 item.IsExpanded = false;
@@ -325,7 +319,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Case 2: Item is not expanded (or not expandable) - find parent and collapse it
+            // Case 2: Item is collapsed or end node - move to parent WITHOUT collapsing
             var parent = item.Parent;
 
             // Skip non-expandable parents (like root) to find an expandable ancestor
@@ -334,34 +328,31 @@ namespace RimWorldAccess
                 parent = parent.Parent;
             }
 
-            if (parent == null || !parent.IsExpanded)
+            if (parent == null)
             {
-                // No expandable parent to collapse - we're at the top level
+                // No expandable parent - we're at the top level
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
                 TolkHelper.Speak("Already at top level.", SpeechPriority.High);
                 return;
             }
 
-            // Save current child position for this parent before collapsing
+            // Save current child position for this parent (for later re-expansion)
             lastChildPerParent[parent] = item;
 
-            // Collapse the parent
-            parent.IsExpanded = false;
-            RebuildVisibleList();
-
-            // Move selection to the parent
+            // Move selection to the parent WITHOUT collapsing it
             int parentIndex = visibleItems.IndexOf(parent);
             if (parentIndex >= 0)
             {
                 selectedIndex = parentIndex;
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                AnnounceCurrentSelection();
             }
-            else if (selectedIndex >= visibleItems.Count)
+            else
             {
-                selectedIndex = Math.Max(0, visibleItems.Count - 1);
+                // Parent not visible (shouldn't happen, but handle it)
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot navigate to parent.", SpeechPriority.High);
             }
-
-            SoundDefOf.Click.PlayOneShotOnCamera();
-            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -420,7 +411,73 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the current selection to the screen reader via clipboard.
+        /// Gets the sibling position (X of Y) for the given item.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(InspectionTreeItem item)
+        {
+            List<InspectionTreeItem> siblings;
+            if (item.Parent == null || item.Parent == rootItem)
+            {
+                siblings = rootItem.Children;
+            }
+            else
+            {
+                siblings = item.Parent.Children;
+            }
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Checks if there's only one root item (single object being inspected).
+        /// </summary>
+        private static bool HasSingleRoot()
+        {
+            return rootItem != null && rootItem.Children.Count == 1;
+        }
+
+        /// <summary>
+        /// Gets the level suffix for announcements (only when level changes).
+        /// </summary>
+        private static string GetLevelSuffix(int currentLevel)
+        {
+            // If single root, subtract 1 so children start at level 1
+            int displayLevel = currentLevel + 1;
+            if (HasSingleRoot())
+            {
+                displayLevel = Math.Max(1, displayLevel - 1);
+            }
+
+            if (displayLevel != lastAnnouncedLevel)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return $". level {displayLevel}.";
+            }
+            return ".";
+        }
+
+        /// <summary>
+        /// Moves selection to the first child of the current item.
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            var item = visibleItems[selectedIndex];
+            if (item.Children.Count > 0)
+            {
+                int firstChildIndex = visibleItems.IndexOf(item) + 1;
+                if (firstChildIndex < visibleItems.Count)
+                {
+                    selectedIndex = firstChildIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection to the screen reader.
+        /// Format: "{name} {state}. {X} of {Y}. level N." or "{name} {state}. {X} of {Y}."
+        /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -437,33 +494,26 @@ namespace RimWorldAccess
 
                 var item = visibleItems[selectedIndex];
 
-                // Build indentation prefix
-                string indent = new string(' ', item.IndentLevel * 2);
-
-                // Build status indicators
-                string expandIndicator = "";
-                if (item.IsExpandable)
-                {
-                    expandIndicator = item.IsExpanded ? " [Expanded]" : " [Collapsed]";
-                }
-
-                // Build help text
-                string helpText = "";
-                if (item.Type == InspectionTreeItem.ItemType.Action)
-                {
-                    helpText = "Enter to execute";
-                }
-
                 // Strip XML tags from label
                 string label = item.Label.StripTags();
 
-                // Build full announcement
-                string announcement = $"{indent}{label}{expandIndicator}";
-
-                if (!string.IsNullOrEmpty(helpText))
+                // Build state indicator (only for expandable items)
+                string stateIndicator = "";
+                if (item.IsExpandable)
                 {
-                    announcement += $"\n{helpText}";
+                    stateIndicator = item.IsExpanded ? " expanded" : " collapsed";
                 }
+
+                // Get sibling position
+                var (position, total) = GetSiblingPosition(item);
+                string positionText = $"{position} of {total}";
+
+                // Get level suffix (only announced when level changes)
+                // Returns ". level N." when level changes, or "." when it doesn't
+                string levelSuffix = GetLevelSuffix(item.IndentLevel);
+
+                // Build full announcement: "{name} {state}. {X} of {Y}{levelSuffix}"
+                string announcement = $"{label}{stateIndicator}. {positionText}{levelSuffix}";
 
                 TolkHelper.Speak(announcement);
             }

@@ -18,6 +18,7 @@ namespace RimWorldAccess
         private static List<TreeNode> flattenedVisibleNodes = new List<TreeNode>();
         private static int selectedIndex = 0;
         private static Dictionary<TreeNode, TreeNode> lastChildPerParent = new Dictionary<TreeNode, TreeNode>();
+        private static int lastAnnouncedLevel = -1;
 
         public static bool IsActive => isActive;
 
@@ -87,6 +88,7 @@ namespace RimWorldAccess
             isActive = true;
             selectedIndex = 0;
             lastChildPerParent.Clear();
+            lastAnnouncedLevel = -1;
 
             // Collect all stored items
             List<Thing> allItems = InventoryHelper.GetAllStoredItems();
@@ -253,6 +255,7 @@ namespace RimWorldAccess
             flattenedVisibleNodes.Clear();
             selectedIndex = 0;
             lastChildPerParent.Clear();
+            lastAnnouncedLevel = -1;
 
             TolkHelper.Speak("Inventory menu closed.");
             SoundDefOf.TabClose.PlayOneShotOnCamera();
@@ -354,7 +357,10 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Expands the currently selected node
+        /// Expands the currently selected node (WCAG-compliant)
+        /// - If collapsed and expandable: expand, focus stays on current item
+        /// - If already expanded with children: move to first child
+        /// - If end node (not expandable): reject feedback
         /// </summary>
         private static void ExpandCurrent()
         {
@@ -362,41 +368,53 @@ namespace RimWorldAccess
 
             TreeNode current = flattenedVisibleNodes[selectedIndex];
 
-            if (current.CanExpand && !current.IsExpanded)
+            if (!current.CanExpand)
             {
+                // End node - provide reject feedback
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
+                return;
+            }
+
+            if (!current.IsExpanded)
+            {
+                // Collapsed node - expand it, focus stays on current item
                 current.IsExpanded = true;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
-
-                // Restore last selected child position if available
-                if (lastChildPerParent.TryGetValue(current, out TreeNode savedChild))
-                {
-                    int savedIndex = flattenedVisibleNodes.IndexOf(savedChild);
-                    if (savedIndex >= 0)
-                    {
-                        selectedIndex = savedIndex;
-                    }
-                }
-                else
-                {
-                    // No saved position - move to first child
-                    int firstChildIndex = flattenedVisibleNodes.IndexOf(current) + 1;
-                    if (firstChildIndex < flattenedVisibleNodes.Count)
-                    {
-                        selectedIndex = firstChildIndex;
-                    }
-                }
-
+                // Focus stays on current item, just announce the state change
                 AnnounceCurrentSelection();
             }
             else
             {
-                TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
+                // Already expanded - move to first child
+                MoveToFirstChild();
             }
         }
 
         /// <summary>
-        /// Collapses the currently selected node
+        /// Moves focus to the first child of the current expanded item
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            TreeNode current = flattenedVisibleNodes[selectedIndex];
+
+            if (current.Children.Count > 0)
+            {
+                int firstChildIndex = flattenedVisibleNodes.IndexOf(current) + 1;
+                if (firstChildIndex < flattenedVisibleNodes.Count)
+                {
+                    selectedIndex = firstChildIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Collapses the currently selected node (WCAG-compliant)
+        /// - If expanded: collapse, focus stays on current item
+        /// - If collapsed or end node: move to parent WITHOUT collapsing it
         /// </summary>
         private static void CollapseCurrent()
         {
@@ -406,7 +424,7 @@ namespace RimWorldAccess
 
             if (current.CanExpand && current.IsExpanded)
             {
-                // Collapse the current expanded item
+                // Currently expanded - collapse it, focus stays on current item
                 current.IsExpanded = false;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
@@ -414,22 +432,21 @@ namespace RimWorldAccess
             }
             else if (current.Parent != null)
             {
-                // Save current child position for this parent before collapsing
+                // Collapsed or end node - move to parent WITHOUT collapsing it
+                // Save current child position for potential future restoration
                 lastChildPerParent[current.Parent] = current;
 
-                // Collapse parent and move focus to it
-                current.Parent.IsExpanded = false;
-                RebuildFlattenedList();
-
-                // Select the parent
+                // Move focus to parent (do NOT collapse it)
                 selectedIndex = flattenedVisibleNodes.IndexOf(current.Parent);
                 if (selectedIndex < 0) selectedIndex = 0;
 
-                SoundDefOf.Click.PlayOneShotOnCamera();
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
                 AnnounceCurrentSelection();
             }
             else
             {
+                // Already at top level with no parent
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
                 TolkHelper.Speak("Already at top level.", SpeechPriority.High);
             }
         }
@@ -470,7 +487,32 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the currently selected item via clipboard
+        /// Gets the sibling position (1-based) and total siblings for a node
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(TreeNode item)
+        {
+            List<TreeNode> siblings = item.Parent != null ? item.Parent.Children : rootNodes;
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Gets the level suffix for announcements (only when level changes)
+        /// </summary>
+        private static string GetLevelSuffix(int currentLevel)
+        {
+            int displayLevel = currentLevel + 1; // 1-based for users
+            if (displayLevel != lastAnnouncedLevel)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return $". level {displayLevel}.";
+            }
+            return ".";  // Always end with period
+        }
+
+        /// <summary>
+        /// Announces the currently selected item via screen reader
+        /// Format: "{name} {state}. {X of Y}. level N." or "{name}. {X of Y}. level N."
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -481,23 +523,34 @@ namespace RimWorldAccess
             }
 
             TreeNode current = flattenedVisibleNodes[selectedIndex];
-            string typeInfo = "";
 
-            switch (current.Type)
+            // Get state info (only for expandable nodes)
+            string stateInfo = "";
+            if (current.CanExpand)
             {
-                case TreeNode.NodeType.Category:
-                    typeInfo = current.CanExpand ? (current.IsExpanded ? "[Expanded]" : "[Collapsed]") : "";
-                    break;
-                case TreeNode.NodeType.Item:
-                    typeInfo = current.IsExpanded ? "[Expanded]" : "[Collapsed]";
-                    break;
-                case TreeNode.NodeType.Action:
-                    typeInfo = ""; // No suffix for actions
-                    break;
+                stateInfo = current.IsExpanded ? "expanded" : "collapsed";
             }
 
-            string announcement = $"{current.Label} {typeInfo}".Trim();
-            TolkHelper.Speak(announcement);
+            // Get sibling position
+            var (position, total) = GetSiblingPosition(current);
+            string positionInfo = $"{position} of {total}";
+
+            // Get level suffix (only announced when level changes)
+            string levelSuffix = GetLevelSuffix(current.Depth);
+
+            // Build announcement: "{name} {state}. {X of Y}{levelSuffix}" or "{name}. {X of Y}{levelSuffix}"
+            string announcement;
+            if (string.IsNullOrEmpty(stateInfo))
+            {
+                // End node (action) - no state
+                announcement = $"{current.Label}. {positionInfo}{levelSuffix}";
+            }
+            else
+            {
+                announcement = $"{current.Label} {stateInfo}. {positionInfo}{levelSuffix}";
+            }
+
+            TolkHelper.Speak(announcement.Trim());
         }
 
         /// <summary>
