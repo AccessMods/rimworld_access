@@ -616,12 +616,30 @@ namespace RimWorldAccess
             if (currentBulkIndex < 0 || currentBulkIndex >= item.BulkCount)
                 return;
 
+            // For terrain bulk groups, we don't have individual things
+            if (item.IsTerrain)
+            {
+                var terrainPosition = currentBulkIndex + 1;
+                TolkHelper.Speak($"{item.Label} - {terrainPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                return;
+            }
+
+            // For thing bulk groups, get label from the actual thing at this index
+            if (item.BulkThings == null || currentBulkIndex >= item.BulkThings.Count)
+                return;
+
             var targetThing = item.BulkThings[currentBulkIndex];
+            if (targetThing == null)
+                return;
+
             var cursorPos = MapNavigationState.CurrentCursorPosition;
             var distance = (targetThing.Position - cursorPos).LengthHorizontal;
             var position = currentBulkIndex + 1;
 
-            TolkHelper.Speak($"{item.Label} - {distance:F1} tiles, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            // Build label from this specific thing, not the group label
+            string thingLabel = targetThing.LabelShort ?? targetThing.def?.label ?? item.Label;
+
+            TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles, {position} of {item.BulkCount}", SpeechPriority.Normal);
         }
     }
 }
