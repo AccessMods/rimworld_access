@@ -153,6 +153,64 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Deletes the currently selected letter. Only letters can be deleted.
+        /// </summary>
+        public static void DeleteSelected()
+        {
+            if (!isActive || notifications == null || notifications.Count == 0)
+                return;
+
+            if (currentIndex < 0 || currentIndex >= notifications.Count)
+                return;
+
+            NotificationItem item = notifications[currentIndex];
+
+            // Only letters can be deleted
+            if (item.Type != NotificationType.Letter)
+            {
+                TolkHelper.Speak("Only letters can be deleted", SpeechPriority.High);
+                return;
+            }
+
+            // Get the letter from sourceObject
+            Letter letter = item.GetSourceLetter();
+            if (letter == null)
+            {
+                TolkHelper.Speak("Cannot delete this letter", SpeechPriority.High);
+                return;
+            }
+
+            string deletedLabel = item.Label;
+
+            // Delete immediately
+            Find.LetterStack.RemoveLetter(letter);
+
+            // Refresh the list
+            notifications = CollectNotifications();
+
+            // Adjust current index if needed
+            if (notifications.Count == 0)
+            {
+                Close();
+                TolkHelper.Speak($"Deleted {deletedLabel}. No notifications remaining");
+                return;
+            }
+
+            if (currentIndex >= notifications.Count)
+            {
+                currentIndex = notifications.Count - 1;
+            }
+
+            // Reset detail view state
+            isInDetailView = false;
+            detailScrollIndex = 0;
+
+            // Announce deletion and current position
+            TolkHelper.Speak($"Deleted {deletedLabel}");
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Collects all notifications from messages, letters, and alerts.
         /// </summary>
         private static List<NotificationItem> CollectNotifications()
@@ -507,6 +565,14 @@ namespace RimWorldAccess
                 Timestamp = Find.TickManager?.TicksGame ?? 0; // Use current game tick as timestamp (alerts are ongoing)
                 sourceObject = alert;
                 ProcessExplanation();
+            }
+
+            /// <summary>
+            /// Gets the source Letter object if this is a letter notification.
+            /// </summary>
+            public Letter GetSourceLetter()
+            {
+                return sourceObject as Letter;
             }
 
             /// <summary>

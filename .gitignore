@@ -3,3 +3,5 @@ obj/
 .claude/
 release/
 GamePaths.props
+/decompiled/
+how-it-works.md

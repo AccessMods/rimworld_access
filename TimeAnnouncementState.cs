@@ -104,6 +104,13 @@ namespace RimWorldAccess
 
             sb.Append($"Time: {timeString}");
 
+            // Weather (only if on a map)
+            if (Find.CurrentMap?.weatherManager?.curWeather != null)
+            {
+                WeatherDef weather = Find.CurrentMap.weatherManager.curWeather;
+                sb.Append($", Weather: {weather.LabelCap}");
+            }
+
             // Date
             string dateString = GenDate.DateReadoutStringAt(absTicks, longLat);
             sb.Append($", Date: {dateString}");

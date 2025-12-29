@@ -224,10 +224,14 @@ namespace RimWorldAccess
             terrainCategory.Subcategories.Add(terrainNaturalSubcat);
             terrainCategory.Subcategories.Add(terrainConstructedSubcat);
 
-            // Mineable category
+            // Mineable category with Rare/Stone/Chunks subcategories
             var mineableCategory = new ScannerCategory("Mineable");
-            var mineableSubcat = new ScannerSubcategory("Mineable-All");
-            mineableCategory.Subcategories.Add(mineableSubcat);
+            var mineableRareSubcat = new ScannerSubcategory("Mineable-Rare");
+            var mineableStoneSubcat = new ScannerSubcategory("Mineable-Stone");
+            var mineableChunksSubcat = new ScannerSubcategory("Mineable-Chunks");
+            mineableCategory.Subcategories.Add(mineableRareSubcat);
+            mineableCategory.Subcategories.Add(mineableStoneSubcat);
+            mineableCategory.Subcategories.Add(mineableChunksSubcat);
 
             // Collect all things from the map
             var allThings = map.listerThings.AllThings;
@@ -384,6 +388,11 @@ namespace RimWorldAccess
                         structureSubcat.Items.Add(item);
                     }
                 }
+                else if (IsStoneChunk(thing))
+                {
+                    // Stone chunks go to mineable chunks subcategory
+                    mineableChunksSubcat.Items.Add(item);
+                }
                 else if (!IsDebrisItem(thing))
                 {
                     // Regular items - categorize by storage state
@@ -419,13 +428,23 @@ namespace RimWorldAccess
 
                 var terrain = map.terrainGrid.TerrainAt(cell);
 
-                // Check for mineable rocks
+                // Check for mineable rocks (both ore and plain stone)
                 var edifice = cell.GetEdifice(map);
-                if (edifice != null && edifice.def.building != null &&
-                    edifice.def.building.isResourceRock && edifice.def.building.mineableYield > 0)
+                if (edifice != null && edifice.def.building != null && edifice.def.building.isNaturalRock)
                 {
                     var item = new ScannerItem(edifice, cursorPosition);
-                    mineableSubcat.Items.Add(item);
+
+                    // Separate rare minerals (ore) from plain stone
+                    if (edifice.def.building.isResourceRock && edifice.def.building.mineableYield > 0)
+                    {
+                        // Rare minerals (steel, gold, plasteel, uranium, etc.)
+                        mineableRareSubcat.Items.Add(item);
+                    }
+                    else
+                    {
+                        // Plain stone (granite, marble, slate, limestone, sandstone)
+                        mineableStoneSubcat.Items.Add(item);
+                    }
                 }
 
                 // Collect terrain tiles
@@ -520,14 +539,32 @@ namespace RimWorldAccess
             return false;
         }
 
+        private static bool IsStoneChunk(Thing thing)
+        {
+            // Check if this is a stone chunk (mineable resource lying on ground)
+            if (thing.def.defName.Contains("Chunk"))
+                return true;
+
+            // Also check thingCategories for StoneChunks
+            if (thing.def.thingCategories != null)
+            {
+                foreach (var cat in thing.def.thingCategories)
+                {
+                    if (cat.defName.Contains("Chunk"))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool IsDebrisItem(Thing thing)
         {
             // Check for common debris types
             if (thing.def.category == ThingCategory.Filth)
                 return true;
 
-            if (thing.def.defName.Contains("Chunk"))
-                return true;
+            // Note: Chunks are now handled by IsStoneChunk, not filtered as debris
 
             if (thing.def.defName == "Slag")
                 return true;
@@ -635,22 +672,37 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Unwraps a MinifiedThing to get the actual inner item, or returns the thing as-is.
+        /// Handles MinifiedThing and MinifiedTree (which extends MinifiedThing).
+        /// </summary>
+        private static Thing GetActualThing(Thing thing)
+        {
+            if (thing is MinifiedThing minified && minified.InnerThing != null)
+                return minified.InnerThing;
+            return thing;
+        }
+
+        /// <summary>
         /// Checks if two things are identical (same def, quality, stuff, etc.)
         /// HP differences are ignored to prevent duplicate entries for damaged items.
         /// </summary>
         private static bool AreThingsIdentical(Thing a, Thing b)
         {
+            // Unwrap minified things to compare actual items
+            var actualA = GetActualThing(a);
+            var actualB = GetActualThing(b);
+
             // Must be the same def
-            if (a.def != b.def)
+            if (actualA.def != actualB.def)
                 return false;
 
             // Must have same stuff (material)
-            if (a.Stuff != b.Stuff)
+            if (actualA.Stuff != actualB.Stuff)
                 return false;
 
             // Check quality if applicable
-            var qualityA = a.TryGetComp<CompQuality>();
-            var qualityB = b.TryGetComp<CompQuality>();
+            var qualityA = actualA.TryGetComp<CompQuality>();
+            var qualityB = actualB.TryGetComp<CompQuality>();
 
             if (qualityA != null && qualityB != null)
             {

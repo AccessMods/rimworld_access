@@ -224,6 +224,7 @@ The mod supports two approaches for audio feedback:
 - **Navigation**:
   - Up/Down: Navigate through notifications (in list view) or scroll explanation text (in detail view)
   - Enter: Open detail view (from list) or jump to target (from detail)
+  - Delete: Delete the selected letter (only letters can be deleted)
   - Escape: Go back (detail → list) or close menu (list → close)
 - Collects notifications via reflection from:
   - `Messages.liveMessages` (private static field)
@@ -509,6 +510,7 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 - Z: Open zone menu
 - / (forward slash): Open debug menu (requires DevMode enabled in Options → Miscellaneous)
 - Shift+C: Reform caravan (on temporary encounter maps after ambushes or events)
+- T: Announce time, weather, date, season, and days passed
 - Alt+M: Display mood information for selected pawn (mood level, description, and thoughts affecting mood)
 - Alt+F: Unforbid all forbidden items on the map
 - Escape: Open pause menu
