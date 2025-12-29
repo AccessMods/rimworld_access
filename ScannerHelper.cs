@@ -677,6 +677,18 @@ namespace RimWorldAccess
         /// </summary>
         private static bool AreThingsIdentical(Thing a, Thing b)
         {
+            // For MinifiedThings (uninstalled furniture), compare the inner thing
+            if (a is MinifiedThing minA && b is MinifiedThing minB)
+            {
+                if (minA.InnerThing == null || minB.InnerThing == null)
+                    return false;
+                return AreThingsIdentical(minA.InnerThing, minB.InnerThing);
+            }
+
+            // If only one is minified, they're not identical
+            if (a is MinifiedThing || b is MinifiedThing)
+                return false;
+
             // Must be the same def
             if (a.def != b.def)
                 return false;
