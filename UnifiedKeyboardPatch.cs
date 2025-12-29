@@ -233,6 +233,7 @@ namespace RimWorldAccess
                     (key == KeyCode.M && Event.current.alt) ||
                     (key == KeyCode.H && Event.current.alt) ||
                     (key == KeyCode.N && Event.current.alt) ||
+                    (key == KeyCode.B && Event.current.alt) ||
                     (key == KeyCode.F && Event.current.alt))
                 {
                     // These keys should not work in world view - they're map-specific
@@ -1263,6 +1264,27 @@ namespace RimWorldAccess
                     NeedsState.DisplayNeedsInfo();
 
                     // Prevent the default N key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 6.525: Display combat log with Alt+B (if pawn is selected) =====
+            if (key == KeyCode.B && Event.current.alt)
+            {
+                // Only display combat log if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode)
+                {
+                    // Display combat log information
+                    CombatLogState.DisplayCombatLog();
+
+                    // Prevent the default B key behavior
                     Event.current.Use();
                     return;
                 }
