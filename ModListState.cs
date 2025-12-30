@@ -29,6 +29,8 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static Page_ModsConfig currentPage = null;
 
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
         // Cached reflection fields
         private static FieldInfo primarySelectedModField;
         private static FieldInfo activeModListField;
@@ -81,6 +83,8 @@ namespace RimWorldAccess
             currentColumn = ModListColumn.Active;
             selectedIndex = 0;
 
+            typeahead.ClearSearch();
+
             // Get the active list and announce
             var activeList = GetCurrentList();
             if (activeList != null && activeList.Count > 0)
@@ -110,6 +114,7 @@ namespace RimWorldAccess
             isActive = false;
             currentPage = null;
             selectedIndex = 0;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -145,6 +150,7 @@ namespace RimWorldAccess
         {
             currentColumn = (currentColumn == ModListColumn.Active) ? ModListColumn.Inactive : ModListColumn.Active;
             selectedIndex = 0;
+            typeahead.ClearSearch();
 
             var list = GetCurrentList();
             if (list != null && list.Count > 0)
@@ -639,6 +645,73 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the list of mod name labels for typeahead search.
+        /// </summary>
+        private static List<string> GetModLabels()
+        {
+            var labels = new List<string>();
+            var list = GetCurrentList();
+            if (list != null)
+            {
+                foreach (var mod in list)
+                {
+                    labels.Add(mod.Name);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Jumps to the first mod in the current list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            typeahead.ClearSearch();
+            var list = GetCurrentList();
+            if (list == null || list.Count == 0) return;
+
+            selectedIndex = 0;
+            SyncSelection();
+            AnnounceCurrentMod();
+        }
+
+        /// <summary>
+        /// Jumps to the last mod in the current list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            typeahead.ClearSearch();
+            var list = GetCurrentList();
+            if (list == null || list.Count == 0) return;
+
+            selectedIndex = list.Count - 1;
+            SyncSelection();
+            AnnounceCurrentMod();
+        }
+
+        /// <summary>
+        /// Announces the current mod with search match info.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            var mod = GetSelectedMod();
+            if (mod == null) return;
+
+            var list = GetCurrentList();
+            int position = selectedIndex + 1;
+            int total = list?.Count ?? 0;
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{mod.Name}, {position} of {total}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                TolkHelper.Speak(GetModAnnouncement(mod));
+            }
+        }
+
+        /// <summary>
         /// Handles keyboard input for the mod list.
         /// Returns true if input was handled.
         /// </summary>
@@ -651,59 +724,187 @@ namespace RimWorldAccess
             var key = Event.current.keyCode;
             bool ctrl = Event.current.control;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
-                    if (ctrl)
-                        MoveUp();
-                    else
-                        SelectPrevious();
-                    return true;
+                JumpToFirst();
+                return true;
+            }
 
-                case KeyCode.DownArrow:
-                    if (ctrl)
-                        MoveDown();
-                    else
-                        SelectNext();
-                    return true;
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                return true;
+            }
 
-                case KeyCode.LeftArrow:
-                case KeyCode.RightArrow:
-                    SwitchColumn();
+            // Handle Escape - clear search first, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceWithSearch();
                     return true;
+                }
+                // Let escape pass through for dialog closing
+                return false;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    ToggleSelected();
-                    return true;
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetModLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        SyncSelection();
+                    }
+                    AnnounceWithSearch();
+                }
+                return true;
+            }
 
-                case KeyCode.M:
-                    OpenSettings();
-                    return true;
+            // Handle * key - consume to prevent passthrough (reserved for future)
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
+            {
+                return true;
+            }
 
-                case KeyCode.I:
-                    ReadInfo();
-                    return true;
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
 
-                case KeyCode.S:
-                    SaveChanges();
-                    return true;
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetModLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        SyncSelection();
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                return true;
+            }
 
-                case KeyCode.O:
-                    OpenModFolder();
-                    return true;
+            // Handle Up/Down arrows with typeahead support
+            if (key == KeyCode.UpArrow)
+            {
+                if (ctrl)
+                {
+                    MoveUp();
+                }
+                else if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prev = typeahead.GetPreviousMatch(selectedIndex);
+                    if (prev >= 0)
+                    {
+                        selectedIndex = prev;
+                        SyncSelection();
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectPrevious();
+                }
+                return true;
+            }
 
-                case KeyCode.W:
-                    OpenWorkshopPage();
-                    return true;
+            if (key == KeyCode.DownArrow)
+            {
+                if (ctrl)
+                {
+                    MoveDown();
+                }
+                else if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int next = typeahead.GetNextMatch(selectedIndex);
+                    if (next >= 0)
+                    {
+                        selectedIndex = next;
+                        SyncSelection();
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectNext();
+                }
+                return true;
+            }
 
-                case KeyCode.U:
-                    UploadToWorkshop();
-                    return true;
+            // Handle Left/Right arrows - switch column (clears search)
+            if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+            {
+                SwitchColumn();
+                return true;
+            }
 
-                case KeyCode.R:
-                    AutoSortMods();
-                    return true;
+            // Handle Enter - toggle selected
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ToggleSelected();
+                return true;
+            }
+
+            // Handle other hotkeys
+            if (key == KeyCode.M)
+            {
+                OpenSettings();
+                return true;
+            }
+
+            if (key == KeyCode.I)
+            {
+                ReadInfo();
+                return true;
+            }
+
+            if (key == KeyCode.S)
+            {
+                SaveChanges();
+                return true;
+            }
+
+            if (key == KeyCode.O)
+            {
+                OpenModFolder();
+                return true;
+            }
+
+            if (key == KeyCode.W)
+            {
+                OpenWorkshopPage();
+                return true;
+            }
+
+            if (key == KeyCode.U)
+            {
+                UploadToWorkshop();
+                return true;
+            }
+
+            if (key == KeyCode.R)
+            {
+                AutoSortMods();
+                return true;
             }
 
             return false;

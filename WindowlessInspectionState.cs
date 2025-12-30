@@ -16,6 +16,9 @@ namespace RimWorldAccess
     {
         public static bool IsActive { get; private set; } = false;
 
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+        public static TypeaheadSearchHelper Typeahead => typeahead;
+
         private static InspectionTreeItem rootItem = null;
         private static List<InspectionTreeItem> visibleItems = null;
         private static int selectedIndex = 0;
@@ -52,6 +55,7 @@ namespace RimWorldAccess
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
+                typeahead.ClearSearch();
 
                 // Special handling for single object: auto-expand and position on first child
                 if (objects.Count == 1 && visibleItems.Count > 0)
@@ -128,6 +132,7 @@ namespace RimWorldAccess
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
+                typeahead.ClearSearch();
                 AnnounceCurrentSelection();
             }
             catch (Exception ex)
@@ -149,6 +154,7 @@ namespace RimWorldAccess
             lastAnnouncedLevel = -1;
             selectedIndex = 0;
             parentObject = null;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -251,6 +257,9 @@ namespace RimWorldAccess
             if (!IsActive || visibleItems == null || selectedIndex >= visibleItems.Count)
                 return;
 
+            // Clear search when expanding to avoid "no more search results" confusion
+            typeahead.ClearSearch();
+
             var item = visibleItems[selectedIndex];
 
             // End node (not expandable) - reject
@@ -301,6 +310,9 @@ namespace RimWorldAccess
         {
             if (!IsActive || visibleItems == null || selectedIndex >= visibleItems.Count)
                 return;
+
+            // Clear search when collapsing to avoid "no more search results" confusion
+            typeahead.ClearSearch();
 
             var item = visibleItems[selectedIndex];
 
@@ -475,6 +487,54 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the list of labels for all visible items.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+            if (visibleItems != null)
+            {
+                foreach (var item in visibleItems)
+                {
+                    labels.Add(item.Label.StripTags());
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
+                return;
+
+            if (selectedIndex < 0 || selectedIndex >= visibleItems.Count)
+                return;
+
+            var item = visibleItems[selectedIndex];
+            string label = item.Label.StripTags();
+
+            if (typeahead.HasActiveSearch)
+            {
+                // Build state indicator (only for expandable items)
+                string stateIndicator = "";
+                if (item.IsExpandable)
+                {
+                    stateIndicator = item.IsExpanded ? " expanded" : " collapsed";
+                }
+
+                string announcement = $"{label}{stateIndicator}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'";
+                TolkHelper.Speak(announcement);
+            }
+            else
+            {
+                AnnounceCurrentSelection();
+            }
+        }
+
+        /// <summary>
         /// Announces the current selection to the screen reader.
         /// Format: "{name} {state}. {X} of {Y}. level N." or "{name} {state}. {X} of {Y}."
         /// Level is only announced when it changes.
@@ -559,39 +619,129 @@ namespace RimWorldAccess
                     return CharacterTabState.HandleInput(ev);
                 }
 
-                // Handle regular inspection menu input
-                switch (ev.keyCode)
+                KeyCode key = ev.keyCode;
+
+                // Handle Escape - clear search FIRST, then close
+                if (key == KeyCode.Escape)
                 {
-                    case KeyCode.UpArrow:
+                    if (typeahead.HasActiveSearch)
+                    {
+                        typeahead.ClearSearchAndAnnounce();
+                        ev.Use();
+                        return true;
+                    }
+                    ClosePanel();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle Backspace for search
+                if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+                {
+                    var labels = GetItemLabels();
+                    if (typeahead.ProcessBackspace(labels, out int newIndex))
+                    {
+                        if (newIndex >= 0)
+                            selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle Up arrow - navigate with search awareness
+                if (key == KeyCode.UpArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+                        if (prevIndex >= 0)
+                        {
+                            selectedIndex = prevIndex;
+                            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                            AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
                         SelectPrevious();
-                        ev.Use();
-                        return true;
+                    }
+                    ev.Use();
+                    return true;
+                }
 
-                    case KeyCode.DownArrow:
+                // Handle Down arrow - navigate with search awareness
+                if (key == KeyCode.DownArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int nextIndex = typeahead.GetNextMatch(selectedIndex);
+                        if (nextIndex >= 0)
+                        {
+                            selectedIndex = nextIndex;
+                            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                            AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
                         SelectNext();
-                        ev.Use();
-                        return true;
+                    }
+                    ev.Use();
+                    return true;
+                }
 
-                    case KeyCode.RightArrow:
-                        Expand();
-                        ev.Use();
-                        return true;
+                // Handle Right arrow - expand
+                if (key == KeyCode.RightArrow)
+                {
+                    Expand();
+                    ev.Use();
+                    return true;
+                }
 
-                    case KeyCode.LeftArrow:
-                        Collapse();
-                        ev.Use();
-                        return true;
+                // Handle Left arrow - collapse
+                if (key == KeyCode.LeftArrow)
+                {
+                    Collapse();
+                    ev.Use();
+                    return true;
+                }
 
-                    case KeyCode.Return:
-                    case KeyCode.KeypadEnter:
-                        ActivateAction();
-                        ev.Use();
-                        return true;
+                // Handle Enter - execute
+                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    ActivateAction();
+                    ev.Use();
+                    return true;
+                }
 
-                    case KeyCode.Escape:
-                        ClosePanel();
-                        ev.Use();
-                        return true;
+                // Handle typeahead characters
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    var labels = GetItemLabels();
+                    if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                    {
+                        if (newIndex >= 0)
+                        {
+                            selectedIndex = newIndex;
+                            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                            AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                    }
+                    ev.Use();
+                    return true;
                 }
             }
             catch (Exception ex)

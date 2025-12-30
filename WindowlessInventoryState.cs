@@ -19,8 +19,10 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static Dictionary<TreeNode, TreeNode> lastChildPerParent = new Dictionary<TreeNode, TreeNode>();
         private static int lastAnnouncedLevel = -1;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static TypeaheadSearchHelper Typeahead => typeahead;
 
         /// <summary>
         /// Represents a node in the inventory tree (category, item, or action)
@@ -89,6 +91,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             lastChildPerParent.Clear();
             lastAnnouncedLevel = -1;
+            typeahead.ClearSearch();
 
             // Collect all stored items
             List<Thing> allItems = InventoryHelper.GetAllStoredItems();
@@ -256,6 +259,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             lastChildPerParent.Clear();
             lastAnnouncedLevel = -1;
+            typeahead.ClearSearch();
 
             TolkHelper.Speak("Inventory menu closed.");
             SoundDefOf.TabClose.PlayOneShotOnCamera();
@@ -271,19 +275,91 @@ namespace RimWorldAccess
 
             KeyCode key = ev.keyCode;
 
-            // Up arrow - previous item
-            if (key == KeyCode.UpArrow)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
                 ev.Use();
-                SelectPrevious();
+                JumpToFirst();
                 return true;
             }
 
-            // Down arrow - next item
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                ev.Use();
+                JumpToLast();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    ev.Use();
+                    return true;
+                }
+                ev.Use();
+                Close();
+                return true;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetItemLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                        selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                ev.Use();
+                return true;
+            }
+
+            // Up arrow - navigate with search awareness
+            if (key == KeyCode.UpArrow)
+            {
+                ev.Use();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+                    if (prevIndex >= 0)
+                    {
+                        selectedIndex = prevIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectPrevious();
+                }
+                return true;
+            }
+
+            // Down arrow - navigate with search awareness
             if (key == KeyCode.DownArrow)
             {
                 ev.Use();
-                SelectNext();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int nextIndex = typeahead.GetNextMatch(selectedIndex);
+                    if (nextIndex >= 0)
+                    {
+                        selectedIndex = nextIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectNext();
+                }
                 return true;
             }
 
@@ -311,15 +387,124 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Escape - close menu
-            if (key == KeyCode.Escape)
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
             {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetItemLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
                 ev.Use();
-                Close();
                 return true;
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        private static void JumpToFirst()
+        {
+            if (flattenedVisibleNodes.Count == 0) return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        private static void JumpToLast()
+        {
+            if (flattenedVisibleNodes.Count == 0) return;
+
+            selectedIndex = flattenedVisibleNodes.Count - 1;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Gets the list of labels for all visible items.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flattenedVisibleNodes)
+            {
+                labels.Add(node.Label ?? "");
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flattenedVisibleNodes.Count == 0)
+            {
+                TolkHelper.Speak("Inventory is empty.");
+                return;
+            }
+
+            TreeNode current = flattenedVisibleNodes[selectedIndex];
+
+            // Get state info (only for expandable nodes)
+            string stateInfo = "";
+            if (current.CanExpand)
+            {
+                stateInfo = current.IsExpanded ? "expanded" : "collapsed";
+            }
+
+            // Get sibling position
+            var (position, total) = GetSiblingPosition(current);
+            string positionInfo = $"{position} of {total}";
+
+            // Build announcement with search context
+            string announcement;
+            if (string.IsNullOrEmpty(stateInfo))
+            {
+                announcement = $"{current.Label}";
+            }
+            else
+            {
+                announcement = $"{current.Label} {stateInfo}";
+            }
+
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'";
+            }
+            else
+            {
+                announcement += $". {positionInfo}";
+            }
+
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            TolkHelper.Speak(announcement.Trim());
         }
 
         /// <summary>
@@ -365,6 +550,9 @@ namespace RimWorldAccess
         private static void ExpandCurrent()
         {
             if (flattenedVisibleNodes.Count == 0) return;
+
+            // Clear search when expanding to avoid "no more search results" confusion
+            typeahead.ClearSearch();
 
             TreeNode current = flattenedVisibleNodes[selectedIndex];
 
@@ -419,6 +607,9 @@ namespace RimWorldAccess
         private static void CollapseCurrent()
         {
             if (flattenedVisibleNodes.Count == 0) return;
+
+            // Clear search when collapsing to avoid "no more search results" confusion
+            typeahead.ClearSearch();
 
             TreeNode current = flattenedVisibleNodes[selectedIndex];
 

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
-using System.Linq;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldAccess
@@ -640,6 +640,70 @@ namespace RimWorldAccess
             string thingLabel = targetThing.LabelShort ?? targetThing.def?.label ?? item.Label;
 
             TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles, {position} of {item.BulkCount}", SpeechPriority.Normal);
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the current subcategory.
+        /// </summary>
+        public static void JumpToFirstItem()
+        {
+            if (WorldNavigationState.IsActive) return;
+
+            // Initialize scanner if not already done
+            if (categories.Count == 0)
+            {
+                RefreshItems();
+                if (categories.Count == 0) return;
+                AnnounceCurrentCategory();
+            }
+
+            var currentSubcat = GetCurrentSubcategory();
+            if (currentSubcat == null || currentSubcat.Items.Count == 0) return;
+
+            currentItemIndex = 0;
+            currentBulkIndex = 0;
+            RecalculateDistances();
+
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentItem();
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current subcategory.
+        /// </summary>
+        public static void JumpToLastItem()
+        {
+            if (WorldNavigationState.IsActive) return;
+
+            // Initialize scanner if not already done
+            if (categories.Count == 0)
+            {
+                RefreshItems();
+                if (categories.Count == 0) return;
+                AnnounceCurrentCategory();
+            }
+
+            var currentSubcat = GetCurrentSubcategory();
+            if (currentSubcat == null || currentSubcat.Items.Count == 0) return;
+
+            currentItemIndex = currentSubcat.Items.Count - 1;
+            currentBulkIndex = 0;
+            RecalculateDistances();
+
+            if (autoJumpMode)
+            {
+                JumpToCurrent();
+            }
+            else
+            {
+                AnnounceCurrentItem();
+            }
         }
     }
 }

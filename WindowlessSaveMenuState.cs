@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Verse;
 using RimWorld;
+using UnityEngine;
 
 namespace RimWorldAccess
 {
@@ -27,8 +28,11 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static SaveLoadMode currentMode = SaveLoadMode.Load;
         private static string typedSaveName = "";
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Opens the save/load menu.
@@ -39,6 +43,7 @@ namespace RimWorldAccess
             ReloadFiles();
             selectedIndex = 0;
             isActive = true;
+            typeahead.ClearSearch();
 
             // For save mode, initialize with default name
             if (mode == SaveLoadMode.Save)
@@ -66,6 +71,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             typedSaveName = "";
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -302,6 +308,220 @@ namespace RimWorldAccess
         {
             Close();
             WindowlessPauseMenuState.Open();
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (saveFiles == null)
+                return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentState();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (saveFiles == null)
+                return;
+
+            int maxIndex = currentMode == SaveLoadMode.Save ? saveFiles.Count : saveFiles.Count - 1;
+            if (maxIndex < 0)
+                return;
+
+            selectedIndex = maxIndex;
+            typeahead.ClearSearch();
+            AnnounceCurrentState();
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces.
+        /// Returns true if there was an active search to clear.
+        /// </summary>
+        public static bool ClearTypeaheadSearch()
+        {
+            return typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Processes a typeahead character input.
+        /// </summary>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            if (!isActive || saveFiles == null)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    // In save mode, newIndex is already correct (0 = Create New Save, 1+ = files)
+                    // In load mode, newIndex maps directly to save files
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static void ProcessBackspace()
+        {
+            if (!isActive || saveFiles == null || !typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Navigates to the next match in typeahead search, or next item if no search.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            if (saveFiles == null)
+                return;
+
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int nextIndex = typeahead.GetNextMatch(selectedIndex);
+                if (nextIndex >= 0)
+                {
+                    selectedIndex = nextIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                SelectNext();
+            }
+        }
+
+        /// <summary>
+        /// Navigates to the previous match in typeahead search, or previous item if no search.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            if (saveFiles == null)
+                return;
+
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+                if (prevIndex >= 0)
+                {
+                    selectedIndex = prevIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                SelectPrevious();
+            }
+        }
+
+        /// <summary>
+        /// Gets the list of labels for typeahead matching.
+        /// In save mode, index 0 is "Create New Save", indices 1+ are file names.
+        /// In load mode, all indices are file names.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+            if (saveFiles == null)
+                return labels;
+
+            if (currentMode == SaveLoadMode.Save)
+            {
+                // Add "Create New Save" as the first entry
+                labels.Add(typedSaveName);
+            }
+
+            foreach (var file in saveFiles)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(file.FileName);
+                labels.Add(fileName ?? "");
+            }
+
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (saveFiles == null)
+                return;
+
+            string baseMessage = GetCurrentItemDescription();
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{baseMessage}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                TolkHelper.Speak(baseMessage);
+            }
+        }
+
+        /// <summary>
+        /// Gets a description of the currently selected item.
+        /// </summary>
+        private static string GetCurrentItemDescription()
+        {
+            if (currentMode == SaveLoadMode.Save)
+            {
+                int totalCount = saveFiles != null ? saveFiles.Count + 1 : 1;
+
+                if (selectedIndex == 0)
+                {
+                    return $"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}";
+                }
+                else if (saveFiles != null && selectedIndex > 0 && selectedIndex <= saveFiles.Count)
+                {
+                    SaveFileInfo file = saveFiles[selectedIndex - 1];
+                    string fileName = Path.GetFileNameWithoutExtension(file.FileName);
+                    return $"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {totalCount}";
+                }
+                else
+                {
+                    return $"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}";
+                }
+            }
+            else // Load mode
+            {
+                if (saveFiles != null && saveFiles.Count > 0 && selectedIndex >= 0 && selectedIndex < saveFiles.Count)
+                {
+                    SaveFileInfo file = saveFiles[selectedIndex];
+                    string fileName = Path.GetFileNameWithoutExtension(file.FileName);
+                    return $"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {saveFiles.Count}";
+                }
+                else
+                {
+                    return "No save files available";
+                }
+            }
         }
     }
 

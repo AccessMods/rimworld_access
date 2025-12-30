@@ -17,6 +17,7 @@ namespace RimWorldAccess
         private static List<Gizmo> availableGizmos = new List<Gizmo>();
         private static Dictionary<Gizmo, ISelectable> gizmoOwners = new Dictionary<Gizmo, ISelectable>();
         private static bool pawnJustSelected = false;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
         /// Gets whether gizmo navigation is currently active.
@@ -76,6 +77,7 @@ namespace RimWorldAccess
             // Start at the first gizmo
             selectedGizmoIndex = 0;
             isActive = true;
+            typeahead.ClearSearch();
 
             // Announce the first gizmo
             AnnounceCurrentGizmo();
@@ -157,6 +159,7 @@ namespace RimWorldAccess
             // Start at the first gizmo
             selectedGizmoIndex = 0;
             isActive = true;
+            typeahead.ClearSearch();
 
             // Announce what we're looking at and the first gizmo
             string objectNames = string.Join(", ", thingsAtPosition.Select(t => t.LabelShort).Take(3));
@@ -178,6 +181,7 @@ namespace RimWorldAccess
             selectedGizmoIndex = 0;
             availableGizmos.Clear();
             gizmoOwners.Clear();
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -350,6 +354,270 @@ namespace RimWorldAccess
 
             // Always close after executing (per user requirement)
             Close();
+        }
+
+        /// <summary>
+        /// Jumps to the first gizmo in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return;
+
+            selectedGizmoIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentGizmo();
+        }
+
+        /// <summary>
+        /// Jumps to the last gizmo in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return;
+
+            selectedGizmoIndex = availableGizmos.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentGizmo();
+        }
+
+        /// <summary>
+        /// Handles typeahead character input for the gizmo menu.
+        /// Called from UnifiedKeyboardPatch to process alphanumeric characters.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return;
+
+            var labels = GetGizmoLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedGizmoIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace key for typeahead search.
+        /// Called from UnifiedKeyboardPatch.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetGizmoLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedGizmoIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Handles keyboard input for the gizmo menu, including typeahead search.
+        /// </summary>
+        /// <returns>True if input was handled, false otherwise.</returns>
+        public static bool HandleInput()
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return false;
+
+            if (Event.current.type != EventType.KeyDown)
+                return false;
+
+            KeyCode key = Event.current.keyCode;
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                JumpToFirst();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceCurrentGizmo();
+                    Event.current.Use();
+                    return true;
+                }
+                // Let the caller handle normal escape (close menu)
+                return false;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetGizmoLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                        selectedGizmoIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Up arrow - navigate with search awareness
+            if (key == KeyCode.UpArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prevIndex = typeahead.GetPreviousMatch(selectedGizmoIndex);
+                    if (prevIndex >= 0)
+                    {
+                        selectedGizmoIndex = prevIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectPrevious();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Down arrow - navigate with search awareness
+            if (key == KeyCode.DownArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int nextIndex = typeahead.GetNextMatch(selectedGizmoIndex);
+                    if (nextIndex >= 0)
+                    {
+                        selectedGizmoIndex = nextIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectNext();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Enter - execute selected
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ExecuteSelected();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetGizmoLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedGizmoIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the list of labels for all gizmos.
+        /// </summary>
+        private static List<string> GetGizmoLabels()
+        {
+            var labels = new List<string>();
+            foreach (var gizmo in availableGizmos)
+            {
+                labels.Add(GetGizmoLabel(gizmo));
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (!isActive || availableGizmos.Count == 0)
+                return;
+
+            if (selectedGizmoIndex < 0 || selectedGizmoIndex >= availableGizmos.Count)
+                return;
+
+            Gizmo gizmo = availableGizmos[selectedGizmoIndex];
+            string label = GetGizmoLabel(gizmo);
+
+            if (typeahead.HasActiveSearch)
+            {
+                string announcement = $"{label}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'";
+
+                // Add disabled status if applicable
+                if (gizmo.Disabled)
+                {
+                    string reason = gizmo.disabledReason;
+                    if (string.IsNullOrEmpty(reason))
+                        reason = "Not available";
+                    announcement += $" [DISABLED: {reason}]";
+                }
+
+                TolkHelper.Speak(announcement);
+            }
+            else
+            {
+                AnnounceCurrentGizmo();
+            }
         }
 
         /// <summary>

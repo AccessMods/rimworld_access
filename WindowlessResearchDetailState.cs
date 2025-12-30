@@ -23,8 +23,11 @@ namespace RimWorldAccess
         private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
         private static Stack<ResearchProjectDef> navigationStack = new Stack<ResearchProjectDef>();
         private static int lastAnnouncedLevel = -1;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Opens the detail view for a specific research project.
@@ -36,6 +39,7 @@ namespace RimWorldAccess
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
             lastAnnouncedLevel = -1;
+            typeahead.ClearSearch();
             rootNodes = BuildDetailTree(project);
             flatNavigationList = BuildFlatNavigationList();
             currentIndex = 0;
@@ -75,6 +79,7 @@ namespace RimWorldAccess
                 lastChildIdPerParent.Clear();
                 navigationStack.Clear();
                 lastAnnouncedLevel = -1;
+                typeahead.ClearSearch();
                 TolkHelper.Speak("Returned to research menu");
             }
         }
@@ -116,6 +121,9 @@ namespace RimWorldAccess
         public static void Expand()
         {
             if (flatNavigationList.Count == 0) return;
+
+            // Clear search when expanding to avoid navigation confusion
+            typeahead.ClearSearch();
 
             var current = flatNavigationList[currentIndex];
 
@@ -162,6 +170,9 @@ namespace RimWorldAccess
         public static void Collapse()
         {
             if (flatNavigationList.Count == 0) return;
+
+            // Clear search when collapsing to avoid navigation confusion
+            typeahead.ClearSearch();
 
             var current = flatNavigationList[currentIndex];
 
@@ -693,10 +704,17 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the level suffix for announcement (only if level changed).
+        /// Don't announce level 1 - it's implied at the top of an isolated menu.
         /// </summary>
         private static string GetLevelSuffix(int currentLevel)
         {
             int displayLevel = currentLevel + 1; // 1-based for users
+            // Don't announce level 1 - it's implied at the top of an isolated menu
+            if (displayLevel == 1)
+            {
+                lastAnnouncedLevel = displayLevel;
+                return ".";
+            }
             if (displayLevel != lastAnnouncedLevel)
             {
                 lastAnnouncedLevel = displayLevel;
@@ -769,6 +787,133 @@ namespace RimWorldAccess
             }
 
             TolkHelper.Speak(sb.ToString());
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces "Search cleared".
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0) currentIndex = newIndex;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes a character input for typeahead search.
+        /// </summary>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0) { currentIndex = newIndex; AnnounceWithSearch(); }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the next match in the typeahead search results.
+        /// </summary>
+        public static bool SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int next = typeahead.GetNextMatch(currentIndex);
+            if (next >= 0)
+            {
+                currentIndex = next;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the previous match in the typeahead search results.
+        /// </summary>
+        public static bool SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int prev = typeahead.GetPreviousMatch(currentIndex);
+            if (prev >= 0)
+            {
+                currentIndex = prev;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the labels of all visible items in the navigation list.
+        /// </summary>
+        private static List<string> GetVisibleItemLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flatNavigationList)
+            {
+                labels.Add(node.Label);
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with typeahead search info.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            var current = flatNavigationList[currentIndex];
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{current.Label}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentSelection();
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the navigation list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (flatNavigationList.Count == 0) return;
+            currentIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the navigation list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (flatNavigationList.Count == 0) return;
+            currentIndex = flatNavigationList.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
         }
     }
 

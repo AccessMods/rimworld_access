@@ -126,6 +126,49 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
+
+                // === Handle Home/End for menu navigation ===
+                if (key == KeyCode.Home)
+                {
+                    SettlementBrowserState.JumpToFirst();
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.End)
+                {
+                    SettlementBrowserState.JumpToLast();
+                    Event.current.Use();
+                    return;
+                }
+
+                // === Handle Backspace for typeahead ===
+                if (key == KeyCode.Backspace)
+                {
+                    SettlementBrowserState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // === Consume ALL alphanumeric + * for typeahead ===
+                // This MUST be at the end to catch any unhandled characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+
+                if (isLetter || isNumber || isStar)
+                {
+                    if (isStar)
+                    {
+                        // Reserved for future "expand all at level" in tree views
+                        Event.current.Use();
+                        return;
+                    }
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    SettlementBrowserState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;  // CRITICAL: Don't fall through to other handlers
+                }
             }
 
             // ===== PRIORITY 0.25: Handle caravan destination selection if active =====
@@ -167,6 +210,49 @@ namespace RimWorldAccess
                 {
                     Event.current.Use();
                     return;
+                }
+
+                // === Handle Home/End for menu navigation ===
+                if (key == KeyCode.Home)
+                {
+                    CaravanFormationState.JumpToFirst();
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.End)
+                {
+                    CaravanFormationState.JumpToLast();
+                    Event.current.Use();
+                    return;
+                }
+
+                // === Handle Backspace for typeahead ===
+                if (key == KeyCode.Backspace)
+                {
+                    CaravanFormationState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // === Consume ALL alphanumeric + * for typeahead ===
+                // This MUST be at the end to catch any unhandled characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+
+                if (isLetter || isNumber || isStar)
+                {
+                    if (isStar)
+                    {
+                        // Reserved for future "expand all at level" in tree views
+                        Event.current.Use();
+                        return;
+                    }
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    CaravanFormationState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;  // CRITICAL: Don't fall through to other handlers
                 }
             }
 
@@ -347,12 +433,53 @@ namespace RimWorldAccess
                 bool ctrl = Event.current.control;
                 bool alt = Event.current.alt;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
+                {
+                    TradeNavigationState.JumpToFirst();
+                    handled = true;
+                }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    TradeNavigationState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then exit quantity mode, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (TradeNavigationState.HasActiveSearch)
+                    {
+                        TradeNavigationState.ClearTypeaheadSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        // Escape exits quantity mode first, then closes menu
+                        bool exitedQuantityMode = TradeNavigationState.ExitQuantityMode();
+                        // If we didn't exit quantity mode (were already in list view), close the trade
+                        if (!exitedQuantityMode)
+                        {
+                            TradeNavigationState.Close();
+                            TradeSession.Close();
+                        }
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && TradeNavigationState.HasActiveSearch)
+                {
+                    TradeNavigationState.ProcessBackspace();
+                    handled = true;
+                }
+                else if (key == KeyCode.DownArrow)
                 {
                     if (shift)
                         TradeNavigationState.AdjustQuantityLarge(-1);
                     else if (ctrl)
                         TradeNavigationState.AdjustQuantityVeryLarge(-1);
+                    else if (TradeNavigationState.HasActiveSearch && !TradeNavigationState.HasNoMatches)
+                        TradeNavigationState.SelectNextMatch();
                     else
                         TradeNavigationState.SelectNext();
                     handled = true;
@@ -365,6 +492,8 @@ namespace RimWorldAccess
                         TradeNavigationState.AdjustQuantityVeryLarge(1);
                     else if (alt)
                         TradeNavigationState.SetToMaximumSell();
+                    else if (TradeNavigationState.HasActiveSearch && !TradeNavigationState.HasNoMatches)
+                        TradeNavigationState.SelectPreviousMatch();
                     else
                         TradeNavigationState.SelectPrevious();
                     handled = true;
@@ -385,19 +514,7 @@ namespace RimWorldAccess
                     TradeNavigationState.EnterQuantityMode();
                     handled = true;
                 }
-                else if (key == KeyCode.Escape)
-                {
-                    // Escape exits quantity mode first, then closes menu
-                    bool exitedQuantityMode = TradeNavigationState.ExitQuantityMode();
-                    // If we didn't exit quantity mode (were already in list view), close the trade
-                    if (!exitedQuantityMode)
-                    {
-                        TradeNavigationState.Close();
-                        TradeSession.Close();
-                    }
-                    handled = true;
-                }
-                else if (key == KeyCode.A && !shift && !ctrl && !alt)
+                else if (key == KeyCode.T && !shift && !ctrl && !alt)
                 {
                     TradeNavigationState.AcceptTrade();
                     handled = true;
@@ -437,6 +554,23 @@ namespace RimWorldAccess
                     TradeNavigationState.AdjustQuantity(1);
                     handled = true;
                 }
+                // Handle typeahead characters (letters and numbers except those used for commands)
+                else
+                {
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    // Exclude letters used for commands: T (accept trade), R (reset), G (gift), P (price), B (balance)
+                    bool isExcludedLetter = key == KeyCode.T || key == KeyCode.R || key == KeyCode.G ||
+                                           key == KeyCode.P || key == KeyCode.B;
+
+                    if ((isLetter || isNumber) && !shift && !ctrl && !alt && !isExcludedLetter)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        TradeNavigationState.ProcessTypeaheadCharacter(c);
+                        handled = true;
+                    }
+                }
 
                 if (handled)
                 {
@@ -450,14 +584,47 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
-                    WindowlessSaveMenuState.SelectNext();
+                    WindowlessSaveMenuState.JumpToFirst();
                     handled = true;
                 }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    WindowlessSaveMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (WindowlessSaveMenuState.HasActiveSearch)
+                    {
+                        WindowlessSaveMenuState.ClearTypeaheadSearch();
+                    }
+                    else
+                    {
+                        WindowlessSaveMenuState.GoBack();
+                    }
+                    handled = true;
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && WindowlessSaveMenuState.HasActiveSearch)
+                {
+                    WindowlessSaveMenuState.ProcessBackspace();
+                    handled = true;
+                }
+                // Handle Down arrow - navigate with search awareness
+                else if (key == KeyCode.DownArrow)
+                {
+                    WindowlessSaveMenuState.SelectNextMatch();
+                    handled = true;
+                }
+                // Handle Up arrow - navigate with search awareness
                 else if (key == KeyCode.UpArrow)
                 {
-                    WindowlessSaveMenuState.SelectPrevious();
+                    WindowlessSaveMenuState.SelectPreviousMatch();
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
@@ -470,10 +637,18 @@ namespace RimWorldAccess
                     WindowlessSaveMenuState.DeleteSelected();
                     handled = true;
                 }
-                else if (key == KeyCode.Escape)
+                // Handle typeahead characters
+                else
                 {
-                    WindowlessSaveMenuState.GoBack();
-                    handled = true;
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if (isLetter || isNumber)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        WindowlessSaveMenuState.ProcessTypeaheadCharacter(c);
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -486,32 +661,17 @@ namespace RimWorldAccess
             // ===== PRIORITY 4: Handle pause menu if active =====
             if (WindowlessPauseMenuState.IsActive)
             {
-                bool handled = false;
+                if (WindowlessPauseMenuState.HandleInput())
+                {
+                    Event.current.Use();
+                    return;
+                }
 
-                if (key == KeyCode.DownArrow)
-                {
-                    WindowlessPauseMenuState.SelectNext();
-                    handled = true;
-                }
-                else if (key == KeyCode.UpArrow)
-                {
-                    WindowlessPauseMenuState.SelectPrevious();
-                    handled = true;
-                }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    WindowlessPauseMenuState.ExecuteSelected();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
+                // HandleInput returns false for Escape without active search - handle closing here
+                if (key == KeyCode.Escape)
                 {
                     WindowlessPauseMenuState.Close();
                     TolkHelper.Speak("Menu closed");
-                    handled = true;
-                }
-
-                if (handled)
-                {
                     Event.current.Use();
                     return;
                 }
@@ -561,35 +721,98 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
-                    WindowlessOptionsMenuState.SelectNext();
+                    WindowlessOptionsMenuState.JumpToFirst();
                     handled = true;
                 }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    WindowlessOptionsMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then go back
+                else if (key == KeyCode.Escape)
+                {
+                    if (WindowlessOptionsMenuState.HasActiveSearch)
+                    {
+                        WindowlessOptionsMenuState.ClearTypeaheadSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        WindowlessOptionsMenuState.GoBack();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && WindowlessOptionsMenuState.HasActiveSearch)
+                {
+                    WindowlessOptionsMenuState.ProcessBackspace();
+                    handled = true;
+                }
+                // Handle Up arrow - navigate with search awareness
                 else if (key == KeyCode.UpArrow)
                 {
-                    WindowlessOptionsMenuState.SelectPrevious();
+                    if (WindowlessOptionsMenuState.HasActiveSearch && !WindowlessOptionsMenuState.HasNoMatches)
+                    {
+                        WindowlessOptionsMenuState.SelectPreviousMatch();
+                    }
+                    else
+                    {
+                        WindowlessOptionsMenuState.SelectPrevious();
+                    }
                     handled = true;
                 }
+                // Handle Down arrow - navigate with search awareness
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (WindowlessOptionsMenuState.HasActiveSearch && !WindowlessOptionsMenuState.HasNoMatches)
+                    {
+                        WindowlessOptionsMenuState.SelectNextMatch();
+                    }
+                    else
+                    {
+                        WindowlessOptionsMenuState.SelectNext();
+                    }
+                    handled = true;
+                }
+                // Handle Left/Right arrows - only for settings level to adjust values
                 else if (key == KeyCode.LeftArrow)
                 {
-                    WindowlessOptionsMenuState.AdjustSetting(-1);  // Decrease slider or cycle left
-                    handled = true;
+                    if (WindowlessOptionsMenuState.CurrentLevel == OptionsMenuLevel.SettingsList)
+                    {
+                        WindowlessOptionsMenuState.AdjustSetting(-1);  // Decrease slider or cycle left
+                        handled = true;
+                    }
                 }
                 else if (key == KeyCode.RightArrow)
                 {
-                    WindowlessOptionsMenuState.AdjustSetting(1);   // Increase slider or cycle right
-                    handled = true;
+                    if (WindowlessOptionsMenuState.CurrentLevel == OptionsMenuLevel.SettingsList)
+                    {
+                        WindowlessOptionsMenuState.AdjustSetting(1);   // Increase slider or cycle right
+                        handled = true;
+                    }
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
                     WindowlessOptionsMenuState.ExecuteSelected();
                     handled = true;
                 }
-                else if (key == KeyCode.Escape)
+                // Handle typeahead characters (letter keys)
+                else
                 {
-                    WindowlessOptionsMenuState.GoBack();
-                    handled = true;
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if ((isLetter || isNumber) && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        WindowlessOptionsMenuState.ProcessTypeaheadCharacter(c);
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -684,14 +907,61 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
-                    WindowlessResearchDetailState.SelectNext();
+                    WindowlessResearchDetailState.JumpToFirst();
+                    handled = true;
+                }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    WindowlessResearchDetailState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (WindowlessResearchDetailState.HasActiveSearch)
+                    {
+                        WindowlessResearchDetailState.ClearTypeaheadSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        WindowlessResearchDetailState.Close();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && WindowlessResearchDetailState.HasActiveSearch)
+                {
+                    WindowlessResearchDetailState.ProcessBackspace();
+                    handled = true;
+                }
+                // Handle Up/Down with typeahead filtering
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (WindowlessResearchDetailState.HasActiveSearch && !WindowlessResearchDetailState.HasNoMatches)
+                    {
+                        WindowlessResearchDetailState.SelectNextMatch();
+                    }
+                    else
+                    {
+                        WindowlessResearchDetailState.SelectNext();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.UpArrow)
                 {
-                    WindowlessResearchDetailState.SelectPrevious();
+                    if (WindowlessResearchDetailState.HasActiveSearch && !WindowlessResearchDetailState.HasNoMatches)
+                    {
+                        WindowlessResearchDetailState.SelectPreviousMatch();
+                    }
+                    else
+                    {
+                        WindowlessResearchDetailState.SelectPrevious();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.RightArrow)
@@ -709,10 +979,18 @@ namespace RimWorldAccess
                     WindowlessResearchDetailState.ExecuteCurrentItem();
                     handled = true;
                 }
-                else if (key == KeyCode.Escape)
+                // Handle typeahead characters
+                else
                 {
-                    WindowlessResearchDetailState.Close();
-                    handled = true;
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if (isLetter || isNumber)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        WindowlessResearchDetailState.ProcessTypeaheadCharacter(c);
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -727,14 +1005,71 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
-                    WindowlessResearchMenuState.SelectNext();
+                    WindowlessResearchMenuState.JumpToFirst();
+                    handled = true;
+                }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    WindowlessResearchMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (WindowlessResearchMenuState.HasActiveSearch)
+                    {
+                        WindowlessResearchMenuState.ClearTypeaheadSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        WindowlessResearchMenuState.Close();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && WindowlessResearchMenuState.HasActiveSearch)
+                {
+                    WindowlessResearchMenuState.ProcessBackspace();
+                    handled = true;
+                }
+                // Handle * key - consume to prevent passthrough (reserved for future expand-all)
+                else if (Event.current.character == '*')
+                {
+                    // TODO: Future - ExpandAllAtLevel() for tree views
+                    handled = true;
+                }
+                // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (WindowlessResearchMenuState.HasActiveSearch && !WindowlessResearchMenuState.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        WindowlessResearchMenuState.SelectNextMatch();
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        WindowlessResearchMenuState.SelectNext();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.UpArrow)
                 {
-                    WindowlessResearchMenuState.SelectPrevious();
+                    if (WindowlessResearchMenuState.HasActiveSearch && !WindowlessResearchMenuState.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        WindowlessResearchMenuState.SelectPreviousMatch();
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        WindowlessResearchMenuState.SelectPrevious();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.RightArrow)
@@ -752,10 +1087,19 @@ namespace RimWorldAccess
                     WindowlessResearchMenuState.ExecuteSelected();
                     handled = true;
                 }
-                else if (key == KeyCode.Escape)
+                // Handle typeahead characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                else
                 {
-                    WindowlessResearchMenuState.Close();
-                    handled = true;
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if (isLetter || isNumber)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        WindowlessResearchMenuState.ProcessTypeaheadCharacter(c);
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -769,15 +1113,80 @@ namespace RimWorldAccess
             if (QuestMenuState.IsActive)
             {
                 bool handled = false;
+                bool alt = Event.current.alt;
+                var typeahead = QuestMenuState.Typeahead;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
-                    QuestMenuState.SelectNext();
+                    QuestMenuState.JumpToFirst();
                     handled = true;
                 }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    QuestMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (typeahead.HasActiveSearch)
+                    {
+                        typeahead.ClearSearchAndAnnounce();
+                        QuestMenuState.AnnounceWithSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        QuestMenuState.Close();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace)
+                {
+                    QuestMenuState.HandleBackspace();
+                    handled = true;
+                }
+                // Handle Down arrow (use typeahead if active with matches)
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetNextMatch(QuestMenuState.CurrentIndex);
+                        if (newIndex >= 0)
+                        {
+                            QuestMenuState.SetCurrentIndex(newIndex);
+                            QuestMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        QuestMenuState.SelectNext();
+                    }
+                    handled = true;
+                }
+                // Handle Up arrow (use typeahead if active with matches)
                 else if (key == KeyCode.UpArrow)
                 {
-                    QuestMenuState.SelectPrevious();
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetPreviousMatch(QuestMenuState.CurrentIndex);
+                        if (newIndex >= 0)
+                        {
+                            QuestMenuState.SetCurrentIndex(newIndex);
+                            QuestMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        QuestMenuState.SelectPrevious();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.RightArrow)
@@ -795,24 +1204,41 @@ namespace RimWorldAccess
                     QuestMenuState.ViewSelectedQuest();
                     handled = true;
                 }
-                else if (key == KeyCode.A)
+                else if (key == KeyCode.A && alt)
                 {
                     QuestMenuState.AcceptQuest();
                     handled = true;
                 }
-                else if (key == KeyCode.D)
+                else if (key == KeyCode.D && alt)
                 {
                     QuestMenuState.ToggleDismissQuest();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    QuestMenuState.Close();
                     handled = true;
                 }
 
                 if (handled)
                 {
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle * key - consume to prevent passthrough
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+                if (isStarKey)
+                {
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle typeahead characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    QuestMenuState.HandleTypeahead(c);
                     Event.current.Use();
                     return;
                 }
@@ -911,25 +1337,84 @@ namespace RimWorldAccess
             if (NotificationMenuState.IsActive)
             {
                 bool handled = false;
+                var typeahead = NotificationMenuState.Typeahead;
 
-                if (key == KeyCode.DownArrow)
+                // Handle Home - jump to first (only in list view, not detail view)
+                if (key == KeyCode.Home && !NotificationMenuState.IsInDetailView)
                 {
-                    NotificationMenuState.SelectNext();
+                    NotificationMenuState.JumpToFirst();
                     handled = true;
                 }
+                // Handle End - jump to last (only in list view, not detail view)
+                else if (key == KeyCode.End && !NotificationMenuState.IsInDetailView)
+                {
+                    NotificationMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then go back
+                else if (key == KeyCode.Escape)
+                {
+                    if (typeahead.HasActiveSearch)
+                    {
+                        typeahead.ClearSearchAndAnnounce();
+                        NotificationMenuState.AnnounceWithSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        NotificationMenuState.GoBack();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search (only in list view)
+                else if (key == KeyCode.Backspace && !NotificationMenuState.IsInDetailView)
+                {
+                    NotificationMenuState.HandleBackspace();
+                    handled = true;
+                }
+                // Handle Down arrow (use typeahead if active with matches, in list view)
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetNextMatch(NotificationMenuState.CurrentIndex);
+                        if (newIndex >= 0)
+                        {
+                            NotificationMenuState.SetCurrentIndex(newIndex);
+                            NotificationMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        NotificationMenuState.SelectNext();
+                    }
+                    handled = true;
+                }
+                // Handle Up arrow (use typeahead if active with matches, in list view)
                 else if (key == KeyCode.UpArrow)
                 {
-                    NotificationMenuState.SelectPrevious();
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetPreviousMatch(NotificationMenuState.CurrentIndex);
+                        if (newIndex >= 0)
+                        {
+                            NotificationMenuState.SetCurrentIndex(newIndex);
+                            NotificationMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        NotificationMenuState.SelectPrevious();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
                     NotificationMenuState.OpenDetailOrJump();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    NotificationMenuState.GoBack();
                     handled = true;
                 }
                 else if (key == KeyCode.Delete)
@@ -943,37 +1428,50 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
+
+                // Handle typeahead only in list view, not detail view
+                if (!NotificationMenuState.IsInDetailView)
+                {
+                    // Handle * key - consume to prevent passthrough
+                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                    bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+                    if (isStarKey)
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Handle typeahead characters
+                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if (isLetter || isNumber)
+                    {
+                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        NotificationMenuState.HandleTypeahead(c);
+                        Event.current.Use();
+                        return;
+                    }
+                }
             }
 
             // ===== PRIORITY 4.78: Handle gizmo navigation if active =====
             if (GizmoNavigationState.IsActive)
             {
-                bool handled = false;
+                // Let GizmoNavigationState.HandleInput() process all input
+                // It handles typeahead-aware navigation, Home/End, Escape, Enter, etc.
+                if (GizmoNavigationState.HandleInput())
+                {
+                    return;
+                }
 
-                if (key == KeyCode.DownArrow || key == KeyCode.RightArrow)
-                {
-                    GizmoNavigationState.SelectNext();
-                    handled = true;
-                }
-                else if (key == KeyCode.UpArrow || key == KeyCode.LeftArrow)
-                {
-                    GizmoNavigationState.SelectPrevious();
-                    handled = true;
-                }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    GizmoNavigationState.ExecuteSelected();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
+                // HandleInput returns false for Escape when no search is active
+                // Handle close explicitly
+                if (key == KeyCode.Escape)
                 {
                     GizmoNavigationState.Close();
                     TolkHelper.Speak("Gizmo menu closed");
-                    handled = true;
-                }
-
-                if (handled)
-                {
                     Event.current.Use();
                     return;
                 }
@@ -1061,12 +1559,28 @@ namespace RimWorldAccess
 
                 if (key == KeyCode.DownArrow)
                 {
-                    WindowlessFloatMenuState.SelectNext();
+                    if (WindowlessFloatMenuState.HasActiveSearch && !WindowlessFloatMenuState.HasNoMatches)
+                    {
+                        // Navigate through search matches only
+                        WindowlessFloatMenuState.HandleInput();
+                    }
+                    else
+                    {
+                        WindowlessFloatMenuState.SelectNext();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.UpArrow)
                 {
-                    WindowlessFloatMenuState.SelectPrevious();
+                    if (WindowlessFloatMenuState.HasActiveSearch && !WindowlessFloatMenuState.HasNoMatches)
+                    {
+                        // Navigate through search matches only
+                        WindowlessFloatMenuState.HandleInput();
+                    }
+                    else
+                    {
+                        WindowlessFloatMenuState.SelectPrevious();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
@@ -1087,11 +1601,49 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Menu closed");
                     handled = true;
                 }
+                // === Handle Home/End for menu navigation ===
+                else if (key == KeyCode.Home)
+                {
+                    WindowlessFloatMenuState.JumpToFirst();
+                    handled = true;
+                }
+                else if (key == KeyCode.End)
+                {
+                    WindowlessFloatMenuState.JumpToLast();
+                    handled = true;
+                }
+                // === Handle Backspace for typeahead ===
+                else if (key == KeyCode.Backspace)
+                {
+                    WindowlessFloatMenuState.HandleBackspace();
+                    handled = true;
+                }
 
                 if (handled)
                 {
                     Event.current.Use();
                     return;
+                }
+
+                // === Consume ALL alphanumeric + * for typeahead ===
+                // This MUST be at the end to catch any unhandled characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+
+                if (isLetter || isNumber || isStar)
+                {
+                    if (isStar)
+                    {
+                        // Reserved for future "expand all at level" in tree views
+                        Event.current.Use();
+                        return;
+                    }
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    WindowlessFloatMenuState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;  // CRITICAL: Don't fall through to T=time, R=draft, etc.
                 }
             }
 

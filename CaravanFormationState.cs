@@ -29,6 +29,7 @@ namespace RimWorldAccess
         private static Tab currentTab = Tab.Pawns;
         private static int selectedIndex = 0;
         private static bool isChoosingDestination = false;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
         /// Gets whether caravan formation keyboard navigation is currently active.
@@ -113,6 +114,7 @@ namespace RimWorldAccess
             currentDialog = dialog;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
+            typeahead.ClearSearch();
 
             // Disable auto-select travel supplies to prevent it from resetting our manual selections
             DisableAutoSelectTravelSupplies();
@@ -131,6 +133,7 @@ namespace RimWorldAccess
             currentDialog = null;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -332,6 +335,19 @@ namespace RimWorldAccess
                 return;
             }
 
+            // If typeahead is active with matches, navigate to next match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int nextMatch = typeahead.GetNextMatch(selectedIndex);
+                if (nextMatch >= 0)
+                {
+                    selectedIndex = nextMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
+
+            // Navigate normally (either no search active, OR search with no matches)
             selectedIndex++;
             if (selectedIndex >= transferables.Count)
                 selectedIndex = 0;
@@ -352,10 +368,57 @@ namespace RimWorldAccess
                 return;
             }
 
+            // If typeahead is active with matches, navigate to previous match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int prevMatch = typeahead.GetPreviousMatch(selectedIndex);
+                if (prevMatch >= 0)
+                {
+                    selectedIndex = prevMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
+
+            // Navigate normally (either no search active, OR search with no matches)
             selectedIndex--;
             if (selectedIndex < 0)
                 selectedIndex = transferables.Count - 1;
 
+            AnnounceCurrentItem();
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the current tab.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            selectedIndex = 0;
+            AnnounceCurrentItem();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current tab.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            selectedIndex = transferables.Count - 1;
             AnnounceCurrentItem();
         }
 
@@ -366,6 +429,7 @@ namespace RimWorldAccess
         {
             currentTab = (Tab)(((int)currentTab + 1) % 3);
             selectedIndex = 0;
+            typeahead.ClearSearch();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -377,6 +441,7 @@ namespace RimWorldAccess
         {
             currentTab = (Tab)(((int)currentTab + 2) % 3);
             selectedIndex = 0;
+            typeahead.ClearSearch();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -767,6 +832,147 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the list of transferable labels for the current tab for typeahead search.
+        /// </summary>
+        private static List<string> GetTransferableLabels()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+            var labels = new List<string>();
+            foreach (var t in transferables)
+            {
+                if (t.AnyThing is Pawn pawn)
+                {
+                    labels.Add(pawn.LabelShortCap);
+                }
+                else
+                {
+                    labels.Add(t.LabelCap);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current item with search information.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            if (selectedIndex < 0 || selectedIndex >= transferables.Count)
+            {
+                selectedIndex = 0;
+            }
+
+            TransferableOneWay transferable = transferables[selectedIndex];
+            StringBuilder announcement = new StringBuilder();
+
+            // Add search info prefix
+            string searchInfo = $"'{typeahead.SearchBuffer}' match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}: ";
+            announcement.Append(searchInfo);
+
+            if (transferable.AnyThing is Pawn pawn)
+            {
+                // Pawn announcement
+                announcement.Append(pawn.LabelShortCap);
+
+                if (pawn.story != null && !pawn.story.TitleCap.NullOrEmpty())
+                {
+                    announcement.Append($", {pawn.story.TitleCap}");
+                }
+
+                if (transferable.CountToTransfer > 0)
+                {
+                    announcement.Append(" - Selected");
+                }
+                else
+                {
+                    announcement.Append(" - Not selected");
+                }
+            }
+            else
+            {
+                // Item announcement
+                announcement.Append(transferable.LabelCap);
+
+                int current = transferable.CountToTransfer;
+                int max = transferable.GetMaximumToTransfer();
+
+                announcement.Append($" - {current} of {max}");
+
+                // Add mass information if significant
+                if (current > 0)
+                {
+                    float totalMass = transferable.AnyThing.GetStatValue(StatDefOf.Mass) * current;
+                    if (totalMass >= 1f)
+                    {
+                        announcement.Append($", {totalMass:F1} kg");
+                    }
+                }
+            }
+
+            TolkHelper.Speak(announcement.ToString());
+        }
+
+        /// <summary>
+        /// Handles typeahead character input for caravan formation.
+        /// Called from UnifiedKeyboardPatch to process alphanumeric characters.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            if (!isActive || isChoosingDestination)
+                return;
+
+            var labels = GetTransferableLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace key for typeahead search.
+        /// Called from UnifiedKeyboardPatch.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!isActive || isChoosingDestination)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetTransferableLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
         /// Handles keyboard input for caravan formation.
         /// Returns true if the input was handled.
         /// </summary>
@@ -778,6 +984,84 @@ namespace RimWorldAccess
             // When choosing destination, let world navigation handle the input
             if (isChoosingDestination)
                 return false;
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                JumpToFirst();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then let dialog close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceCurrentItem();
+                    Event.current.Use();
+                    return true;
+                }
+                // Let the dialog handle its own closing
+                // CaravanFormationPatch.PostClose will call Close()
+                return false;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetTransferableLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0) selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle * key - consume to prevent passthrough
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetTransferableLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                Event.current.Use();
+                return true;
+            }
 
             switch (key)
             {
@@ -864,11 +1148,6 @@ namespace RimWorldAccess
                         return true;
                     }
                     break;
-
-                case KeyCode.Escape:
-                    // Let the dialog handle its own closing
-                    // CaravanFormationPatch.PostClose will call Close()
-                    return false;
 
                 default:
                     return false;

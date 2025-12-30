@@ -31,6 +31,88 @@ namespace RimWorldAccess
             bool handled = false;
             KeyCode key = Event.current.keyCode;
             bool shift = Event.current.shift;
+            var typeahead = WorkMenuState.Typeahead;
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                WorkMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                WorkMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    WorkMenuState.AnnounceCurrentSelection();
+                    Event.current.Use();
+                    return;
+                }
+                WorkMenuState.Cancel();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = WorkMenuState.GetItemLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0) WorkMenuState.SetSelectedIndex(newIndex);
+                    WorkMenuState.AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle * key - consume to prevent passthrough
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                Event.current.Use();
+                return;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            // Exclude keys used for other purposes: 0-4 for priority, M for mode toggle
+            bool isExcludedNumber = key == KeyCode.Alpha0 || key == KeyCode.Alpha1 ||
+                key == KeyCode.Alpha2 || key == KeyCode.Alpha3 || key == KeyCode.Alpha4 ||
+                key == KeyCode.Keypad0 || key == KeyCode.Keypad1 || key == KeyCode.Keypad2 ||
+                key == KeyCode.Keypad3 || key == KeyCode.Keypad4;
+            bool isExcludedLetter = key == KeyCode.M;
+
+            if ((isLetter || isNumber) && !shift && !isExcludedNumber && !isExcludedLetter)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = WorkMenuState.GetItemLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0) { WorkMenuState.SetSelectedIndex(newIndex); WorkMenuState.AnnounceWithSearch(); }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                Event.current.Use();
+                return;
+            }
 
             // Handle Shift+Up: Reorder work type up (manual priority mode only)
             if (key == KeyCode.UpArrow && shift)
@@ -44,16 +126,44 @@ namespace RimWorldAccess
                 WorkMenuState.ReorderWorkTypeDown();
                 handled = true;
             }
-            // Handle Arrow Up: Navigate up
+            // Handle Arrow Up: Navigate up (use typeahead if active with matches)
             else if (key == KeyCode.UpArrow)
             {
-                WorkMenuState.MoveUp();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int newIndex = typeahead.GetPreviousMatch(WorkMenuState.SelectedIndex);
+                    if (newIndex >= 0)
+                    {
+                        WorkMenuState.SetSelectedIndex(newIndex);
+                        WorkMenuState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    WorkMenuState.MoveUp();
+                }
                 handled = true;
             }
-            // Handle Arrow Down: Navigate down
+            // Handle Arrow Down: Navigate down (use typeahead if active with matches)
             else if (key == KeyCode.DownArrow)
             {
-                WorkMenuState.MoveDown();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int newIndex = typeahead.GetNextMatch(WorkMenuState.SelectedIndex);
+                    if (newIndex >= 0)
+                    {
+                        WorkMenuState.SetSelectedIndex(newIndex);
+                        WorkMenuState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    WorkMenuState.MoveDown();
+                }
                 handled = true;
             }
             // Handle Tab: Switch to next pawn
@@ -112,12 +222,7 @@ namespace RimWorldAccess
                 WorkMenuState.Confirm();
                 handled = true;
             }
-            // Handle Escape: Cancel without applying changes
-            else if (key == KeyCode.Escape)
-            {
-                WorkMenuState.Cancel();
-                handled = true;
-            }
+            // Note: Escape is handled above with typeahead check
 
             // Consume the event if we handled it
             if (handled)

@@ -36,10 +36,23 @@ namespace RimWorldAccess
         private static TransferableSorterDef sorter1 = null;
         private static TransferableSorterDef sorter2 = null;
 
+        // Typeahead search
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
         /// <summary>
         /// Gets whether the trade menu is currently active.
         /// </summary>
         public static bool IsActive => isActive;
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Gets whether typeahead search has no matches.
+        /// </summary>
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Trade categories for navigation.
@@ -89,6 +102,7 @@ namespace RimWorldAccess
             isInQuantityMode = false;
             hasAnnouncedControls = false;
             filterText = "";
+            typeahead.ClearSearch();
 
             // Build initial tradeable lists
             RefreshTradeables();
@@ -126,6 +140,7 @@ namespace RimWorldAccess
             cachedTrader = null;
             cachedNegotiator = null;
             filterText = "";
+            typeahead.ClearSearch();
 
             TolkHelper.Speak("Trade cancelled");
             SoundDefOf.Click.PlayOneShotOnCamera();
@@ -332,6 +347,7 @@ namespace RimWorldAccess
             currentCategory = (TradeCategory)(((int)currentCategory + 1) % 3);
             currentIndex = 0;
             ClampCurrentIndex();
+            typeahead.ClearSearch();
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
             AnnounceCategorySwitch();
@@ -351,6 +367,7 @@ namespace RimWorldAccess
             currentCategory = (TradeCategory)(((int)currentCategory + 2) % 3);
             currentIndex = 0;
             ClampCurrentIndex();
+            typeahead.ClearSearch();
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
             AnnounceCategorySwitch();
@@ -1008,5 +1025,184 @@ namespace RimWorldAccess
 
             TolkHelper.Speak(balanceText);
         }
+
+        #region Typeahead Search Methods
+
+        /// <summary>
+        /// Gets the list of labels for items in the current category for typeahead search.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            List<Tradeable> list = GetCurrentList();
+            List<string> labels = new List<string>();
+            foreach (Tradeable tradeable in list)
+            {
+                labels.Add(tradeable.Label ?? "");
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Processes a typeahead character input.
+        /// </summary>
+        /// <param name="c">The character typed</param>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            if (isInQuantityMode)
+                return;
+
+            List<string> labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        /// <returns>True if backspace was handled</returns>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return false;
+
+            List<string> labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces it.
+        /// </summary>
+        /// <returns>True if there was an active search to clear</returns>
+        public static bool ClearTypeaheadSearch()
+        {
+            return typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the current category.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (isInQuantityMode)
+            {
+                TolkHelper.Speak("Exit quantity mode first");
+                return;
+            }
+
+            List<Tradeable> list = GetCurrentList();
+            if (list.Count == 0)
+            {
+                TolkHelper.Speak("No items in this category");
+                return;
+            }
+
+            currentIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current category.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (isInQuantityMode)
+            {
+                TolkHelper.Speak("Exit quantity mode first");
+                return;
+            }
+
+            List<Tradeable> list = GetCurrentList();
+            if (list.Count == 0)
+            {
+                TolkHelper.Speak("No items in this category");
+                return;
+            }
+
+            currentIndex = list.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+        }
+
+        /// <summary>
+        /// Selects the next match in the typeahead search results.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches)
+                return;
+
+            int nextIndex = typeahead.GetNextMatch(currentIndex);
+            if (nextIndex >= 0)
+            {
+                currentIndex = nextIndex;
+                AnnounceWithSearch();
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous match in the typeahead search results.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches)
+                return;
+
+            int prevIndex = typeahead.GetPreviousMatch(currentIndex);
+            if (prevIndex >= 0)
+            {
+                currentIndex = prevIndex;
+                AnnounceWithSearch();
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            Tradeable tradeable = GetCurrentTradeable();
+            if (tradeable == null)
+            {
+                TolkHelper.Speak("No item selected");
+                return;
+            }
+
+            string baseAnnouncement = BuildTradeableAnnouncement(tradeable);
+
+            if (typeahead.HasActiveSearch)
+            {
+                string searchContext = $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+                TolkHelper.Speak(baseAnnouncement + searchContext);
+            }
+            else
+            {
+                TolkHelper.Speak(baseAnnouncement);
+            }
+        }
+
+        #endregion
     }
 }

@@ -18,6 +18,7 @@ namespace RimWorldAccess
         private static List<Pawn> allPawns = new List<Pawn>();
         private static int selectedIndex = 0;
         private static List<WorkTypeEntry> workEntries = new List<WorkTypeEntry>();
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
         public static int SelectedIndex => selectedIndex;
@@ -25,6 +26,7 @@ namespace RimWorldAccess
         public static Pawn CurrentPawn => currentPawn;
         public static int CurrentPawnIndex => currentPawnIndex;
         public static int TotalPawns => allPawns.Count;
+        public static TypeaheadSearchHelper Typeahead => typeahead;
 
         /// <summary>
         /// Opens the work menu for the specified pawn.
@@ -37,6 +39,7 @@ namespace RimWorldAccess
             isActive = true;
             currentPawn = pawn;
             selectedIndex = 0;
+            typeahead.ClearSearch();
 
             // Build list of all colonists
             allPawns.Clear();
@@ -99,6 +102,7 @@ namespace RimWorldAccess
             allPawns.Clear();
             selectedIndex = 0;
             workEntries.Clear();
+            typeahead.ClearSearch();
 
             TolkHelper.Speak("Work menu cancelled");
         }
@@ -129,6 +133,7 @@ namespace RimWorldAccess
             allPawns.Clear();
             selectedIndex = 0;
             workEntries.Clear();
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -256,6 +261,7 @@ namespace RimWorldAccess
             currentPawnIndex = (currentPawnIndex + 1) % allPawns.Count;
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
+            typeahead.ClearSearch();
             LoadWorkTypesForCurrentPawn();
             TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
@@ -278,6 +284,7 @@ namespace RimWorldAccess
 
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
+            typeahead.ClearSearch();
             LoadWorkTypesForCurrentPawn();
             TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
@@ -526,6 +533,106 @@ namespace RimWorldAccess
                 case 4: return "Priority 4 (low)";
                 default: return $"Priority {priority}";
             }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (workEntries.Count == 0)
+                return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            UpdateClipboard();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (workEntries.Count == 0)
+                return;
+
+            selectedIndex = workEntries.Count - 1;
+            typeahead.ClearSearch();
+            UpdateClipboard();
+        }
+
+        /// <summary>
+        /// Gets a list of labels for all work entries for typeahead search.
+        /// </summary>
+        public static List<string> GetItemLabels()
+        {
+            List<string> labels = new List<string>();
+            foreach (var entry in workEntries)
+            {
+                labels.Add(entry.WorkType.labelShort);
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Sets the selected index directly.
+        /// </summary>
+        public static void SetSelectedIndex(int index)
+        {
+            if (index >= 0 && index < workEntries.Count)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
+            {
+                TolkHelper.Speak("No work types available");
+                return;
+            }
+
+            var entry = workEntries[selectedIndex];
+            string message;
+
+            if (entry.IsDisabled)
+            {
+                message = $"{entry.WorkType.labelShort}: Permanently disabled";
+            }
+            else if (Find.PlaySettings.useWorkPriorities)
+            {
+                string priorityDesc = GetPriorityDescription(entry.CurrentPriority);
+                string changed = (entry.CurrentPriority != entry.OriginalPriority) ? " (pending)" : "";
+                message = $"{entry.WorkType.labelShort}: {priorityDesc}{changed}";
+            }
+            else
+            {
+                bool isEnabled = (entry.CurrentPriority > 0);
+                bool wasEnabled = (entry.OriginalPriority > 0);
+                string status = isEnabled ? "Enabled" : "Disabled";
+                string changed = (isEnabled != wasEnabled) ? " (pending)" : "";
+                message = $"{entry.WorkType.labelShort}: {status}{changed}";
+            }
+
+            // Add search context if active
+            if (typeahead.HasActiveSearch)
+            {
+                message += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(message);
+        }
+
+        /// <summary>
+        /// Announces the current selection (same as UpdateClipboard but public).
+        /// </summary>
+        public static void AnnounceCurrentSelection()
+        {
+            UpdateClipboard();
         }
 
         /// <summary>

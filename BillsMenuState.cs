@@ -17,6 +17,7 @@ namespace RimWorldAccess
         private static List<MenuItem> menuItems = null;
         private static int selectedIndex = 0;
         private static bool isActive = false;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         private enum MenuItemType
         {
@@ -42,6 +43,9 @@ namespace RimWorldAccess
         }
 
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
+        public static int SelectedIndex => selectedIndex;
 
         /// <summary>
         /// Opens the bills menu for the given bill giver.
@@ -59,6 +63,7 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
+            typeahead.ClearSearch();
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -75,6 +80,7 @@ namespace RimWorldAccess
             menuItems = null;
             selectedIndex = 0;
             isActive = false;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -172,6 +178,171 @@ namespace RimWorldAccess
 
             selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
             AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Sets the selected index directly (used for typeahead navigation).
+        /// </summary>
+        public static void SetSelectedIndex(int index)
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            if (index >= 0 && index < menuItems.Count)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            selectedIndex = menuItems.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Processes a typeahead character input.
+        /// </summary>
+        /// <param name="c">The character typed</param>
+        /// <returns>True if a match was found</returns>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return false;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        /// <returns>True if backspace was handled</returns>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return false;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces the action.
+        /// </summary>
+        /// <returns>True if there was an active search to clear</returns>
+        public static bool ClearTypeaheadSearch()
+        {
+            return typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Gets the next match index when navigating with active search.
+        /// </summary>
+        public static int SelectNextMatch()
+        {
+            return typeahead.GetNextMatch(selectedIndex);
+        }
+
+        /// <summary>
+        /// Gets the previous match index when navigating with active search.
+        /// </summary>
+        public static int SelectPreviousMatch()
+        {
+            return typeahead.GetPreviousMatch(selectedIndex);
+        }
+
+        /// <summary>
+        /// Gets the current search buffer for announcements.
+        /// </summary>
+        public static string GetSearchBuffer()
+        {
+            return typeahead.SearchBuffer;
+        }
+
+        /// <summary>
+        /// Gets a list of labels for all menu items for typeahead search.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            List<string> labels = new List<string>();
+            if (menuItems != null)
+            {
+                foreach (var item in menuItems)
+                {
+                    labels.Add(item.label ?? "");
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            if (selectedIndex < 0 || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+            string announcement = item.label;
+
+            if (!item.isEnabled)
+            {
+                announcement += " (unavailable)";
+            }
+
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+            else
+            {
+                announcement += $". {selectedIndex + 1} of {menuItems.Count}";
+            }
+
+            TolkHelper.Speak(announcement);
         }
 
         /// <summary>

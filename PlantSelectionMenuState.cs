@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Verse;
 using RimWorld;
+using UnityEngine;
 
 namespace RimWorldAccess
 {
@@ -15,6 +16,7 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static bool isActive = false;
         private static IPlantToGrowSettable currentSettable = null;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         private class PlantOption
         {
@@ -135,6 +137,7 @@ namespace RimWorldAccess
             availablePlants = new List<PlantOption>();
             selectedIndex = 0;
             isActive = true;
+            typeahead.ClearSearch();
 
             // Get list of available plants
             List<IPlantToGrowSettable> settables = new List<IPlantToGrowSettable> { settable };
@@ -194,6 +197,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             currentSettable = null;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -250,6 +254,262 @@ namespace RimWorldAccess
             Log.Message($"Set plant to: {plantDef.label}");
 
             Close();
+        }
+
+        /// <summary>
+        /// Jumps to the first plant in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (availablePlants == null || availablePlants.Count == 0)
+                return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last plant in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (availablePlants == null || availablePlants.Count == 0)
+                return;
+
+            selectedIndex = availablePlants.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Handles typeahead character input for the plant selection menu.
+        /// Called from StorageSettingsMenuPatch to process alphanumeric characters.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            if (!isActive || availablePlants == null || availablePlants.Count == 0)
+                return;
+
+            var labels = GetPlantLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace key for typeahead search.
+        /// Called from StorageSettingsMenuPatch.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!isActive || availablePlants == null || availablePlants.Count == 0)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetPlantLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Handles keyboard input for the plant selection menu, including typeahead search.
+        /// </summary>
+        /// <returns>True if input was handled, false otherwise.</returns>
+        public static bool HandleInput()
+        {
+            if (!isActive || availablePlants == null || availablePlants.Count == 0)
+                return false;
+
+            if (Event.current.type != EventType.KeyDown)
+                return false;
+
+            KeyCode key = Event.current.keyCode;
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                JumpToFirst();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceCurrentSelection();
+                    Event.current.Use();
+                    return true;
+                }
+                // Let the caller handle normal escape (close menu)
+                return false;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetPlantLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                        selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Up arrow - navigate with search awareness
+            if (key == KeyCode.UpArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+                    if (prevIndex >= 0)
+                    {
+                        selectedIndex = prevIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectPrevious();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Down arrow - navigate with search awareness
+            if (key == KeyCode.DownArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int nextIndex = typeahead.GetNextMatch(selectedIndex);
+                    if (nextIndex >= 0)
+                    {
+                        selectedIndex = nextIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectNext();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Enter - confirm selection
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ConfirmSelection();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetPlantLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the list of labels for all plants.
+        /// </summary>
+        private static List<string> GetPlantLabels()
+        {
+            var labels = new List<string>();
+            if (availablePlants != null)
+            {
+                foreach (var plant in availablePlants)
+                {
+                    string label = plant.plantDef.LabelCap;
+                    labels.Add(string.IsNullOrEmpty(label) ? "" : label);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (availablePlants == null || availablePlants.Count == 0)
+                return;
+
+            if (selectedIndex < 0 || selectedIndex >= availablePlants.Count)
+                return;
+
+            PlantOption current = availablePlants[selectedIndex];
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{current.displayText}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentSelection();
+            }
         }
 
         private static void AnnounceCurrentSelection()

@@ -67,39 +67,120 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
+                StorageSettingsMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                StorageSettingsMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch)
+                {
+                    StorageSettingsMenuState.ClearTypeaheadSearch();
+                    Event.current.Use();
+                    return;
+                }
+                StorageSettingsMenuState.Close();
+                TolkHelper.Speak("Closed storage settings menu");
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && StorageSettingsMenuState.HasActiveSearch)
+            {
+                StorageSettingsMenuState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle * key - consume to prevent passthrough (reserved for future expand-all)
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                // TODO: Future - ExpandAllAtLevel() for tree views
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
+            if (key == KeyCode.UpArrow)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch && !StorageSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    StorageSettingsMenuState.SelectPreviousMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     StorageSettingsMenuState.SelectPrevious();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.DownArrow:
+            if (key == KeyCode.DownArrow)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch && !StorageSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    StorageSettingsMenuState.SelectNextMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     StorageSettingsMenuState.SelectNext();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.RightArrow:
-                    StorageSettingsMenuState.ExpandCurrent();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.RightArrow)
+            {
+                StorageSettingsMenuState.ExpandCurrent();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.LeftArrow:
-                    StorageSettingsMenuState.CollapseCurrent();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.LeftArrow)
+            {
+                StorageSettingsMenuState.CollapseCurrent();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    StorageSettingsMenuState.ToggleCurrent();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                StorageSettingsMenuState.ToggleCurrent();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Escape:
-                    StorageSettingsMenuState.Close();
-                    TolkHelper.Speak("Closed storage settings menu");
-                    Event.current.Use();
-                    break;
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                StorageSettingsMenuState.ProcessTypeaheadCharacter(c);
+                Event.current.Use();
+                return;
             }
         }
 
@@ -175,6 +256,46 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Closed plant selection menu");
                     Event.current.Use();
                     break;
+
+                // === Handle Home/End for menu navigation ===
+                case KeyCode.Home:
+                    PlantSelectionMenuState.JumpToFirst();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.End:
+                    PlantSelectionMenuState.JumpToLast();
+                    Event.current.Use();
+                    break;
+
+                // === Handle Backspace for typeahead ===
+                case KeyCode.Backspace:
+                    PlantSelectionMenuState.HandleBackspace();
+                    Event.current.Use();
+                    break;
+
+                default:
+                    // === Consume ALL alphanumeric + * for typeahead ===
+                    // This MUST be at the end to catch any unhandled characters
+                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                    bool isLetterPlant = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumberPlant = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                    bool isStarPlant = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+
+                    if (isLetterPlant || isNumberPlant || isStarPlant)
+                    {
+                        if (isStarPlant)
+                        {
+                            // Reserved for future "expand all at level" in tree views
+                            Event.current.Use();
+                            return;
+                        }
+                        char c = isLetterPlant ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        PlantSelectionMenuState.HandleTypeahead(c);
+                        Event.current.Use();
+                        return;  // CRITICAL: Don't fall through to other handlers
+                    }
+                    break;
             }
         }
 
@@ -182,29 +303,96 @@ namespace RimWorldAccess
         {
             KeyCode key = Event.current.keyCode;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
+                ZoneSettingsMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                ZoneSettingsMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch)
+                {
+                    ZoneSettingsMenuState.ClearTypeaheadSearch();
+                    Event.current.Use();
+                    return;
+                }
+                ZoneSettingsMenuState.Close();
+                TolkHelper.Speak("Closed zone settings menu");
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && ZoneSettingsMenuState.HasActiveSearch)
+            {
+                ZoneSettingsMenuState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
+            if (key == KeyCode.UpArrow)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    ZoneSettingsMenuState.SelectPreviousMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     ZoneSettingsMenuState.SelectPrevious();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.DownArrow:
+            if (key == KeyCode.DownArrow)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    ZoneSettingsMenuState.SelectNextMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     ZoneSettingsMenuState.SelectNext();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    ZoneSettingsMenuState.ExecuteSelected();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ZoneSettingsMenuState.ExecuteSelected();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Escape:
-                    ZoneSettingsMenuState.Close();
-                    TolkHelper.Speak("Closed zone settings menu");
-                    Event.current.Use();
-                    break;
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                ZoneSettingsMenuState.ProcessTypeaheadCharacter(c);
+                Event.current.Use();
+                return;
             }
         }
 

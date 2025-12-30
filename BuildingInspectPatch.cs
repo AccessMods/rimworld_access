@@ -188,18 +188,110 @@ namespace RimWorldAccess
         {
             KeyCode key = Event.current.keyCode;
 
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                BillsMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                BillsMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (BillsMenuState.HasActiveSearch)
+                {
+                    BillsMenuState.ClearTypeaheadSearch();
+                    BillsMenuState.AnnounceWithSearch();
+                    Event.current.Use();
+                    return;
+                }
+                BillsMenuState.Close();
+                TolkHelper.Speak("Closed bills menu");
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && BillsMenuState.HasActiveSearch)
+            {
+                BillsMenuState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle typeahead characters
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            // Exclude keys used for other purposes: C for copy (with Ctrl)
+            bool isExcludedLetter = key == KeyCode.C && Event.current.control;
+
+            if ((isLetter || isNumber) && !isExcludedLetter)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                if (!BillsMenuState.ProcessTypeaheadCharacter(c))
+                {
+                    TolkHelper.Speak($"No matches for '{BillsMenuState.GetSearchBuffer()}'");
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Arrow Up - navigate with search awareness
+            if (key == KeyCode.UpArrow)
+            {
+                if (BillsMenuState.HasActiveSearch && !BillsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int newIndex = BillsMenuState.SelectPreviousMatch();
+                    if (newIndex >= 0)
+                    {
+                        BillsMenuState.SetSelectedIndex(newIndex);
+                        BillsMenuState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    BillsMenuState.SelectPrevious();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Arrow Down - navigate with search awareness
+            if (key == KeyCode.DownArrow)
+            {
+                if (BillsMenuState.HasActiveSearch && !BillsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int newIndex = BillsMenuState.SelectNextMatch();
+                    if (newIndex >= 0)
+                    {
+                        BillsMenuState.SetSelectedIndex(newIndex);
+                        BillsMenuState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    BillsMenuState.SelectNext();
+                }
+                Event.current.Use();
+                return;
+            }
+
             switch (key)
             {
-                case KeyCode.UpArrow:
-                    BillsMenuState.SelectPrevious();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.DownArrow:
-                    BillsMenuState.SelectNext();
-                    Event.current.Use();
-                    break;
-
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
                     BillsMenuState.ExecuteSelected();
@@ -217,12 +309,6 @@ namespace RimWorldAccess
                         BillsMenuState.CopySelected();
                         Event.current.Use();
                     }
-                    break;
-
-                case KeyCode.Escape:
-                    BillsMenuState.Close();
-                    TolkHelper.Speak("Closed bills menu");
-                    Event.current.Use();
                     break;
             }
         }

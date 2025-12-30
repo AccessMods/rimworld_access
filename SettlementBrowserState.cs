@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using RimWorld;
 using RimWorld.Planet;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldAccess
@@ -29,6 +30,7 @@ namespace RimWorldAccess
         private static int currentIndex = 0;
         private static FactionFilter currentFilter = FactionFilter.All;
         private static PlanetTile originTile = PlanetTile.Invalid;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
         /// Gets whether the settlement browser is currently active.
@@ -50,6 +52,7 @@ namespace RimWorldAccess
             originTile = origin;
             currentIndex = 0;
             currentFilter = FactionFilter.All;
+            typeahead.ClearSearch();
 
             RefreshSettlementList();
 
@@ -71,6 +74,7 @@ namespace RimWorldAccess
             filteredSettlements.Clear();
             currentIndex = 0;
             originTile = PlanetTile.Invalid;
+            typeahead.ClearSearch();
             TolkHelper.Speak("Settlement browser closed");
         }
 
@@ -146,6 +150,7 @@ namespace RimWorldAccess
         {
             currentFilter = (FactionFilter)(((int)currentFilter + 1) % 5);
             currentIndex = 0;
+            typeahead.ClearSearch();
             RefreshSettlementList();
             AnnounceFilter();
 
@@ -166,6 +171,7 @@ namespace RimWorldAccess
         {
             currentFilter = (FactionFilter)(((int)currentFilter + 4) % 5);
             currentIndex = 0;
+            typeahead.ClearSearch();
             RefreshSettlementList();
             AnnounceFilter();
 
@@ -190,6 +196,19 @@ namespace RimWorldAccess
                 return;
             }
 
+            // If typeahead is active with matches, navigate to next match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int nextMatch = typeahead.GetNextMatch(currentIndex);
+                if (nextMatch >= 0)
+                {
+                    currentIndex = nextMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
+
+            // Navigate normally (either no search active, OR search with no matches)
             currentIndex++;
             if (currentIndex >= filteredSettlements.Count)
                 currentIndex = 0;
@@ -208,10 +227,53 @@ namespace RimWorldAccess
                 return;
             }
 
+            // If typeahead is active with matches, navigate to previous match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int prevMatch = typeahead.GetPreviousMatch(currentIndex);
+                if (prevMatch >= 0)
+                {
+                    currentIndex = prevMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
+
+            // Navigate normally (either no search active, OR search with no matches)
             currentIndex--;
             if (currentIndex < 0)
                 currentIndex = filteredSettlements.Count - 1;
 
+            AnnounceCurrentSettlement();
+        }
+
+        /// <summary>
+        /// Jumps to the first settlement in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (filteredSettlements.Count == 0)
+            {
+                TolkHelper.Speak("No settlements available");
+                return;
+            }
+
+            currentIndex = 0;
+            AnnounceCurrentSettlement();
+        }
+
+        /// <summary>
+        /// Jumps to the last settlement in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (filteredSettlements.Count == 0)
+            {
+                TolkHelper.Speak("No settlements available");
+                return;
+            }
+
+            currentIndex = filteredSettlements.Count - 1;
             AnnounceCurrentSettlement();
         }
 
@@ -330,20 +392,202 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the list of settlement labels for typeahead search.
+        /// </summary>
+        private static List<string> GetSettlementLabels()
+        {
+            return filteredSettlements.Select(s => s.Label).ToList();
+        }
+
+        /// <summary>
+        /// Announces the current settlement with search information.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (filteredSettlements.Count == 0)
+            {
+                TolkHelper.Speak("No settlements available");
+                return;
+            }
+
+            if (currentIndex < 0 || currentIndex >= filteredSettlements.Count)
+                return;
+
+            Settlement settlement = filteredSettlements[currentIndex];
+
+            // Calculate distance from origin
+            float distance = 0f;
+            if (originTile.Valid && Find.WorldGrid != null)
+            {
+                distance = Find.WorldGrid.ApproxDistanceInTiles(originTile, settlement.Tile);
+            }
+
+            // Get faction relationship
+            string relationship = "Unknown";
+            if (settlement.Faction == Faction.OfPlayer)
+            {
+                relationship = "Player";
+            }
+            else if (settlement.Faction.HostileTo(Faction.OfPlayer))
+            {
+                relationship = "Hostile";
+            }
+            else
+            {
+                relationship = settlement.Faction.PlayerRelationKind.GetLabel();
+            }
+
+            // Build announcement with search info
+            string searchInfo = $"'{typeahead.SearchBuffer}' match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}";
+            string announcement = $"{searchInfo}: {settlement.Label}, {settlement.Faction.Name}, {relationship}, {distance:F1} tiles";
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Handles typeahead character input for the settlement browser.
+        /// Called from UnifiedKeyboardPatch to process alphanumeric characters.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            if (!isActive)
+                return;
+
+            var labels = GetSettlementLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace key for typeahead search.
+        /// Called from UnifiedKeyboardPatch.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!isActive)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetSettlementLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
         /// Handles keyboard input for the settlement browser.
         /// Called from WorldNavigationPatch or UnifiedKeyboardPatch.
         /// </summary>
-        public static bool HandleInput(UnityEngine.KeyCode key)
+        public static bool HandleInput(KeyCode key)
         {
             if (!isActive)
                 return false;
 
-            bool shift = UnityEngine.Input.GetKey(UnityEngine.KeyCode.LeftShift) ||
-                        UnityEngine.Input.GetKey(UnityEngine.KeyCode.RightShift);
+            bool shift = Input.GetKey(KeyCode.LeftShift) ||
+                        Input.GetKey(KeyCode.RightShift);
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                JumpToFirst();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceCurrentSettlement();
+                    Event.current.Use();
+                    return true;
+                }
+                Close();
+                return true;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetSettlementLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0) currentIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle * key - consume to prevent passthrough
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetSettlementLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        currentIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                }
+                Event.current.Use();
+                return true;
+            }
 
             switch (key)
             {
-                case UnityEngine.KeyCode.UpArrow:
+                case KeyCode.UpArrow:
                     if (shift)
                     {
                         // Shift+Up does nothing in settlement browser
@@ -352,7 +596,7 @@ namespace RimWorldAccess
                     SelectPrevious();
                     return true;
 
-                case UnityEngine.KeyCode.DownArrow:
+                case KeyCode.DownArrow:
                     if (shift)
                     {
                         // Shift+Down does nothing in settlement browser
@@ -361,7 +605,7 @@ namespace RimWorldAccess
                     SelectNext();
                     return true;
 
-                case UnityEngine.KeyCode.LeftArrow:
+                case KeyCode.LeftArrow:
                     if (shift)
                     {
                         PreviousFilter();
@@ -369,7 +613,7 @@ namespace RimWorldAccess
                     }
                     return false;
 
-                case UnityEngine.KeyCode.RightArrow:
+                case KeyCode.RightArrow:
                     if (shift)
                     {
                         NextFilter();
@@ -377,13 +621,9 @@ namespace RimWorldAccess
                     }
                     return false;
 
-                case UnityEngine.KeyCode.Return:
-                case UnityEngine.KeyCode.KeypadEnter:
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
                     JumpToSelected();
-                    return true;
-
-                case UnityEngine.KeyCode.Escape:
-                    Close();
                     return true;
 
                 default:

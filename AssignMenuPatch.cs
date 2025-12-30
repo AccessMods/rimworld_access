@@ -32,16 +32,62 @@ namespace RimWorldAccess
             KeyCode key = Event.current.keyCode;
             bool shift = Event.current.shift;
 
-            // Handle Arrow Up: Navigate to previous option in current column
-            if (key == KeyCode.UpArrow)
+            // Handle Home: Jump to first option in current column
+            if (key == KeyCode.Home)
             {
-                AssignMenuState.SelectPreviousOption();
+                AssignMenuState.JumpToFirst();
                 handled = true;
             }
-            // Handle Arrow Down: Navigate to next option in current column
+            // Handle End: Jump to last option in current column
+            else if (key == KeyCode.End)
+            {
+                AssignMenuState.JumpToLast();
+                handled = true;
+            }
+            // Handle Escape: Clear search first if active, then close menu
+            else if (key == KeyCode.Escape)
+            {
+                if (AssignMenuState.HasActiveSearch)
+                {
+                    AssignMenuState.ClearTypeaheadSearch();
+                    handled = true;
+                }
+                else
+                {
+                    AssignMenuState.Close();
+                    handled = true;
+                }
+            }
+            // Handle Backspace: Remove last character from search if active
+            else if (key == KeyCode.Backspace && AssignMenuState.HasActiveSearch)
+            {
+                AssignMenuState.ProcessBackspace();
+                handled = true;
+            }
+            // Handle Arrow Up: Navigate to previous option (with search awareness)
+            else if (key == KeyCode.UpArrow)
+            {
+                if (AssignMenuState.HasActiveSearch && !AssignMenuState.HasNoMatches)
+                {
+                    AssignMenuState.SelectPreviousMatch();
+                }
+                else
+                {
+                    AssignMenuState.SelectPreviousOption();
+                }
+                handled = true;
+            }
+            // Handle Arrow Down: Navigate to next option (with search awareness)
             else if (key == KeyCode.DownArrow)
             {
-                AssignMenuState.SelectNextOption();
+                if (AssignMenuState.HasActiveSearch && !AssignMenuState.HasNoMatches)
+                {
+                    AssignMenuState.SelectNextMatch();
+                }
+                else
+                {
+                    AssignMenuState.SelectNextOption();
+                }
                 handled = true;
             }
             // Handle Arrow Left: Navigate to previous column
@@ -80,11 +126,18 @@ namespace RimWorldAccess
                 AssignMenuState.OpenManagementDialog();
                 handled = true;
             }
-            // Handle Escape: Close menu
-            else if (key == KeyCode.Escape)
+            // Handle typeahead characters (letters and numbers)
+            else
             {
-                AssignMenuState.Close();
-                handled = true;
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    AssignMenuState.ProcessTypeaheadCharacter(c);
+                    handled = true;
+                }
             }
 
             // Consume the event if we handled it

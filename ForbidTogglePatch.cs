@@ -41,6 +41,22 @@ namespace RimWorldAccess
             if (ZoneRenameState.IsActive)
                 return;
 
+            // Don't process if any menu with typeahead search is active
+            // These menus use letter keys for search, so F would conflict
+            if (WindowlessInventoryState.IsActive ||
+                WindowlessInspectionState.IsActive ||
+                WindowlessResearchMenuState.IsActive ||
+                NotificationMenuState.IsActive ||
+                QuestMenuState.IsActive ||
+                GizmoNavigationState.IsActive ||
+                SettlementBrowserState.IsActive ||
+                CaravanFormationState.IsActive ||
+                StorageSettingsMenuState.IsActive ||
+                PlantSelectionMenuState.IsActive ||
+                WorkMenuState.IsActive ||
+                ModListState.IsActive)
+                return;
+
             // Check for F key press (but not Alt+F, which is handled by UnifiedKeyboardPatch)
             if (Input.GetKeyDown(KeyCode.F) && !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt))
             {
