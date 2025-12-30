@@ -499,7 +499,7 @@ See `api_reference.md` in the mod directory for detailed namespace breakdown.
 - Escape: Close mod manager
 
 **In-Game Navigation:**
-- Arrow keys: Move map cursor
+- Arrow keys: Move map cursor (announces "not visible" first if drafted pawn cannot see the tile)
 - Tab/Shift+Tab: Cycle selected pawns
 - R: Toggle draft mode for selected pawn
 - ]: Open order menu for selected pawns (includes draft mode orders like "Move here", "Attack", etc. when drafted)

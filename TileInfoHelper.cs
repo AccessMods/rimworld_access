@@ -27,6 +27,19 @@ namespace RimWorldAccess
                 return "unseen";
             var sb = new StringBuilder();
 
+            // Check visibility from drafted pawn FIRST (if one is selected)
+            bool notVisible = false;
+            Pawn selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
+            if (selectedPawn != null && selectedPawn.Drafted && selectedPawn.Spawned && selectedPawn.Map == map)
+            {
+                // Check if pawn can see this position using line of sight
+                if (!GenSight.LineOfSight(selectedPawn.Position, position, map))
+                {
+                    sb.Append("not visible");
+                    notVisible = true;
+                }
+            }
+
             // Get all things at this position
             List<Thing> things = position.GetThingList(map);
 
@@ -48,7 +61,7 @@ namespace RimWorldAccess
                     items.Add(thing);
             }
 
-            bool addedSomething = false;
+            bool addedSomething = notVisible;
 
             // Add individual pawns (most important)
             foreach (var pawn in pawns.Take(3))
