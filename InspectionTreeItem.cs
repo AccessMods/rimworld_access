@@ -27,6 +27,7 @@ namespace RimWorldAccess
         public List<InspectionTreeItem> Children { get; set; }
         public object Data { get; set; }  // Associated data (Pawn, Building, SkillRecord, etc.)
         public Action OnActivate { get; set; }  // Action to execute when Enter is pressed
+        public Action OnDelete { get; set; }  // Action to execute when Delete is pressed (for canceling jobs, etc.)
 
         public InspectionTreeItem()
         {

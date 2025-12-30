@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using RimWorld;
 using Verse;
+using Verse.AI;
 
 namespace RimWorldAccess
 {
@@ -96,6 +97,13 @@ namespace RimWorldAccess
                 }
 
                 return sb.ToString();
+            }
+
+            // Special handling for Job Queue category to show count
+            if (category == "Job Queue" && obj is Pawn jobPawn && jobPawn.jobs?.jobQueue != null)
+            {
+                int queueCount = jobPawn.jobs.jobQueue.Count;
+                return $"Job Queue ({queueCount} queued)";
             }
 
             return category;
@@ -245,7 +253,8 @@ namespace RimWorldAccess
                    category == "Social" ||
                    category == "Training" ||
                    category == "Character" ||
-                   category == "Log";
+                   category == "Log" ||
+                   category == "Job Queue";
         }
 
         /// <summary>
@@ -383,6 +392,107 @@ namespace RimWorldAccess
             else if (category == "Log")
             {
                 BuildLogChildren(categoryItem, pawn);
+            }
+            else if (category == "Job Queue")
+            {
+                BuildJobQueueChildren(categoryItem, pawn);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Job Queue category.
+        /// Shows current job and all queued jobs with delete capability.
+        /// </summary>
+        private static void BuildJobQueueChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (pawn.jobs == null)
+                return;
+
+            var jobTracker = pawn.jobs;
+            int indent = parentItem.IndentLevel + 1;
+
+            // Add current job (not deletable)
+            if (jobTracker.curJob != null)
+            {
+                string currentJobReport = "Idle";
+                try
+                {
+                    currentJobReport = jobTracker.curJob.GetReport(pawn)?.CapitalizeFirst() ?? "Unknown job";
+                }
+                catch
+                {
+                    currentJobReport = jobTracker.curJob.def?.label?.CapitalizeFirst() ?? "Unknown job";
+                }
+
+                var currentItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"Current: {currentJobReport}",
+                    Data = jobTracker.curJob,
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(currentItem);
+            }
+            else
+            {
+                var idleItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = "Current: Idle",
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                parentItem.Children.Add(idleItem);
+            }
+
+            // Add queued jobs (deletable)
+            var jobQueue = jobTracker.jobQueue;
+            if (jobQueue != null && jobQueue.Count > 0)
+            {
+                int queueIndex = 1;
+                foreach (var queuedJob in jobQueue)
+                {
+                    if (queuedJob?.job == null)
+                        continue;
+
+                    string jobReport;
+                    try
+                    {
+                        jobReport = queuedJob.job.GetReport(pawn)?.CapitalizeFirst() ?? "Unknown job";
+                    }
+                    catch
+                    {
+                        jobReport = queuedJob.job.def?.label?.CapitalizeFirst() ?? "Unknown job";
+                    }
+
+                    var queuedItem = new InspectionTreeItem
+                    {
+                        Type = InspectionTreeItem.ItemType.Item,
+                        Label = $"Queued {queueIndex}: {jobReport}",
+                        Data = queuedJob,
+                        IndentLevel = indent,
+                        IsExpandable = false
+                    };
+
+                    // Capture the job for the closure
+                    var jobToCancel = queuedJob.job;
+                    var jobLabel = jobReport;
+                    queuedItem.OnDelete = () =>
+                    {
+                        // Cancel the queued job
+                        jobQueue.Extract(jobToCancel);
+                        TolkHelper.Speak($"Cancelled: {jobLabel}", SpeechPriority.High);
+
+                        // Rebuild the parent to reflect the change
+                        parentItem.Children.Clear();
+                        BuildJobQueueChildren(parentItem, pawn);
+                        WindowlessInspectionState.RebuildAfterAction();
+                    };
+
+                    parentItem.Children.Add(queuedItem);
+                    queueIndex++;
+                }
             }
         }
 

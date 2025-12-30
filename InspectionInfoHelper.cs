@@ -82,6 +82,12 @@ namespace RimWorldAccess
                     categories.Add("Work Priorities");
                     categories.Add("Log");
 
+                    // Add Job Queue category if there are queued jobs
+                    if (pawn.jobs?.jobQueue?.Count > 0)
+                    {
+                        categories.Add("Job Queue");
+                    }
+
                     // Add Prisoner category for prisoners and slaves
                     if (pawn.IsPrisonerOfColony || pawn.IsSlaveOfColony)
                     {
