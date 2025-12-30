@@ -289,7 +289,7 @@ namespace RimWorldAccess
             string status = "";
 
             // Add position info
-            string position = $"({currentIndex + 1}/{currentQuests.Count})";
+            string position = $"{currentIndex + 1} of {currentQuests.Count}";
 
             // Add quest name (strip XML tags)
             string name = quest.name.StripTags();
@@ -322,7 +322,7 @@ namespace RimWorldAccess
             int rating = Math.Max(quest.challengeRating, 1);
             string ratingInfo = rating == 1 ? " (1 star)" : $" ({rating} stars)";
 
-            return $"{position} {name}{status}{timeInfo}{ratingInfo}";
+            return $"{name}{status}{timeInfo}{ratingInfo}. {position}";
         }
 
         /// <summary>

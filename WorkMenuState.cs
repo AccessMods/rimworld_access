@@ -257,7 +257,7 @@ namespace RimWorldAccess
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
             LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
 
         /// <summary>
@@ -279,7 +279,7 @@ namespace RimWorldAccess
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
             LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
 
         /// <summary>

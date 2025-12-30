@@ -321,7 +321,7 @@ namespace RimWorldAccess
                 string typeLabel = item.Type == NotificationType.Message ? "Message" :
                                   item.Type == NotificationType.Letter ? "Letter" :
                                   "Alert";
-                string announcement = $"{typeLabel}: {item.Label}";
+                string announcement = $"{typeLabel}: {item.Label}. {currentIndex + 1} of {notifications.Count}";
                 TolkHelper.Speak(announcement);
             }
         }

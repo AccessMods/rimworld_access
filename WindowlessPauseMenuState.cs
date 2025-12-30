@@ -90,7 +90,7 @@ namespace RimWorldAccess
         {
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
             {
-                TolkHelper.Speak(currentOptions[selectedIndex].Label);
+                TolkHelper.Speak($"{currentOptions[selectedIndex].Label}. {selectedIndex + 1} of {currentOptions.Count}");
             }
         }
 

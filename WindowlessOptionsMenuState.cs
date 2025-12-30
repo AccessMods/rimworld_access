@@ -166,12 +166,13 @@ namespace RimWorldAccess
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 string categoryName = categories[selectedCategoryIndex].Name;
-                TolkHelper.Speak($"Category: {categoryName}");
+                TolkHelper.Speak($"Category: {categoryName}. {selectedCategoryIndex + 1} of {categories.Count}");
             }
             else // SettingsList
             {
                 var setting = categories[selectedCategoryIndex].Settings[selectedSettingIndex];
-                TolkHelper.Speak(setting.GetAnnouncement());
+                var currentSettings = categories[selectedCategoryIndex].Settings;
+                TolkHelper.Speak($"{setting.GetAnnouncement()}. {selectedSettingIndex + 1} of {currentSettings.Count}");
             }
         }
 

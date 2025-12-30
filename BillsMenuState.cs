@@ -434,6 +434,8 @@ namespace RimWorldAccess
                     announcement += " (unavailable)";
                 }
 
+                announcement += $". {selectedIndex + 1} of {menuItems.Count}";
+
                 TolkHelper.Speak(announcement);
             }
         }

@@ -48,7 +48,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak(optionText);
+                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {options.Count}");
             }
         }
 
@@ -91,7 +91,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak(optionText);
+                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
             }
         }
 
@@ -124,7 +124,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak(optionText);
+                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
             }
         }
 

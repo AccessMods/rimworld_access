@@ -97,7 +97,9 @@ namespace RimWorldAccess
             ListableOption selected = GetCurrentSelection();
             if (selected != null)
             {
-                TolkHelper.Speak(selected.label);
+                int count = currentColumn == 0 ? column0Options.Count : column1Options.Count;
+                int index = currentColumn == 0 ? selectedIndexColumn0 : selectedIndexColumn1;
+                TolkHelper.Speak($"{selected.label}. {index + 1} of {count}");
             }
         }
 

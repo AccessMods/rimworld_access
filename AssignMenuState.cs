@@ -475,7 +475,7 @@ namespace RimWorldAccess
             LoadAllPolicies();
             selectedOptionIndex = GetCurrentOptionIndex();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
 
         /// <summary>
@@ -495,7 +495,7 @@ namespace RimWorldAccess
             LoadAllPolicies();
             selectedOptionIndex = GetCurrentOptionIndex();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
         }
 
         /// <summary>
@@ -621,7 +621,7 @@ namespace RimWorldAccess
             string optionName = GetCurrentOptionName();
             int optionCount = GetCurrentColumnOptionCount();
 
-            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName} ({selectedOptionIndex + 1}/{optionCount})";
+            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {selectedOptionIndex + 1} of {optionCount}";
             TolkHelper.Speak(message);
         }
 

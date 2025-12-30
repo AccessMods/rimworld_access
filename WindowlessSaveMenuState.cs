@@ -261,20 +261,23 @@ namespace RimWorldAccess
         {
             if (currentMode == SaveLoadMode.Save)
             {
+                // In save mode, we have "Create New Save" at index 0 (virtual entry), then existing files
+                int totalCount = saveFiles != null ? saveFiles.Count + 1 : 1;
+
                 // Index 0 is "Create New Save", indices 1+ are existing files
                 if (selectedIndex == 0)
                 {
-                    TolkHelper.Speak($"Create New Save: {typedSaveName}");
+                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}");
                 }
                 else if (saveFiles != null && selectedIndex > 0 && selectedIndex <= saveFiles.Count)
                 {
                     SaveFileInfo file = saveFiles[selectedIndex - 1]; // Adjust for "Create New Save" at index 0
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}");
+                    TolkHelper.Speak($"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {totalCount}");
                 }
                 else
                 {
-                    TolkHelper.Speak($"Create New Save: {typedSaveName}");
+                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}");
                 }
             }
             else // Load mode
@@ -283,7 +286,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}");
+                    TolkHelper.Speak($"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {saveFiles.Count}");
                 }
                 else
                 {
