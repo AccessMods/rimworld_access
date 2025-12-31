@@ -10,11 +10,12 @@ namespace RimWorldAccess
     /// <summary>
     /// Manages the state and navigation for the grid-based work assignment menu.
     ///
-    /// Manual Mode: 5-column virtual grid (Priority 1, 2, 3, 4, Disabled)
-    /// Basic Mode: Single column of all tasks with enable/disable toggle
+    /// Manual Mode: 5-row virtual grid (Priority 1, 2, 3, 4, Disabled)
+    /// Basic Mode: Single list of all tasks with enable/disable toggle
     ///
-    /// Navigation preserves row position when moving between columns.
-    /// Shift+Up/Down reorders tasks within their column for execution priority.
+    /// Up/Down navigates between priority levels.
+    /// Left/Right navigates between tasks within a priority level.
+    /// Shift+Left/Right reorders tasks within their priority level for execution order.
     /// </summary>
     public static class WorkMenuState
     {
@@ -47,6 +48,9 @@ namespace RimWorldAccess
         private static bool searchJumpPending = false;
         private static int searchTargetColumn = -1;
         private static int searchTargetRow = -1;
+
+        // Track if changes were made to current pawn
+        private static bool hasUnsavedChanges = false;
 
         // Skill level descriptors (game's 21 levels)
         private static readonly string[] SkillDescriptors = new string[]
@@ -99,6 +103,7 @@ namespace RimWorldAccess
             basicModeIndex = 0;
             typeahead.ClearSearch();
             searchJumpPending = false;
+            hasUnsavedChanges = false;
 
             // Build list of all colonists
             allPawns.Clear();
@@ -273,6 +278,7 @@ namespace RimWorldAccess
         private static void SaveAndSwitchPawn(int newPawnIndex)
         {
             string previousPawnName = currentPawn?.LabelShort ?? "Unknown";
+            bool hadChanges = hasUnsavedChanges;
 
             if (currentPawn != null && currentPawn.workSettings != null)
             {
@@ -280,22 +286,33 @@ namespace RimWorldAccess
                 currentPawn.workSettings.Notify_UseWorkPrioritiesChanged();
             }
 
+            // Preserve the current column when switching pawns
+            int preservedColumn = currentColumn;
+
             currentPawnIndex = newPawnIndex;
             currentPawn = allPawns[currentPawnIndex];
-            currentColumn = 0;
-            currentRow = 0;
             basicModeIndex = 0;
             typeahead.ClearSearch();
             searchJumpPending = false;
+            hasUnsavedChanges = false;
 
             LoadWorkTypesForCurrentPawn();
 
             if (IsManualMode)
             {
-                FindFirstPopulatedColumn();
+                // Stay at the same priority level
+                currentColumn = preservedColumn;
+                currentRow = 0;
             }
 
-            TolkHelper.Speak($"{previousPawnName}'s work preferences saved. Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
+            if (hadChanges)
+            {
+                TolkHelper.Speak($"{previousPawnName}'s work preferences saved. Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
+            }
+            else
+            {
+                TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
+            }
             AnnounceCurrentPosition(true);
         }
 
@@ -330,84 +347,52 @@ namespace RimWorldAccess
         #region Navigation
 
         /// <summary>
-        /// Moves cursor up within current column (manual) or list (basic).
+        /// Moves cursor up to previous priority column (manual mode only).
+        /// Not used in basic mode.
         /// </summary>
         public static void MoveUp()
         {
-            if (IsManualMode)
+            if (!IsManualMode)
             {
-                var col = columns[currentColumn];
-                if (col.Count == 0)
-                {
-                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
-                    return;
-                }
+                TolkHelper.Speak("Up/Down navigation only in manual mode. Press Alt+M to switch.");
+                return;
+            }
 
-                if (currentRow > 0)
-                {
-                    currentRow--;
-                    AnnounceCurrentPosition(false);
-                }
-                else
-                {
-                    TolkHelper.Speak("At top");
-                }
+            // Navigate to previous (higher) priority column
+            if (currentColumn > 0)
+            {
+                currentColumn--;
+                ClampRowToColumn();
+                AnnounceCurrentPosition(true);
             }
             else
             {
-                // Basic mode
-                if (allEntries.Count == 0) return;
-
-                if (basicModeIndex > 0)
-                {
-                    basicModeIndex--;
-                    AnnounceCurrentPosition(false);
-                }
-                else
-                {
-                    TolkHelper.Speak("At top");
-                }
+                TolkHelper.Speak("At highest priority");
             }
         }
 
         /// <summary>
-        /// Moves cursor down within current column (manual) or list (basic).
+        /// Moves cursor down to next priority column (manual mode only).
+        /// Not used in basic mode.
         /// </summary>
         public static void MoveDown()
         {
-            if (IsManualMode)
+            if (!IsManualMode)
             {
-                var col = columns[currentColumn];
-                if (col.Count == 0)
-                {
-                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
-                    return;
-                }
+                TolkHelper.Speak("Up/Down navigation only in manual mode. Press Alt+M to switch.");
+                return;
+            }
 
-                if (currentRow < col.Count - 1)
-                {
-                    currentRow++;
-                    AnnounceCurrentPosition(false);
-                }
-                else
-                {
-                    TolkHelper.Speak("At bottom");
-                }
+            // Navigate to next (lower) priority column
+            if (currentColumn < 4)
+            {
+                currentColumn++;
+                ClampRowToColumn();
+                AnnounceCurrentPosition(true);
             }
             else
             {
-                // Basic mode
-                if (allEntries.Count == 0) return;
-
-                if (basicModeIndex < allEntries.Count - 1)
-                {
-                    basicModeIndex++;
-                    AnnounceCurrentPosition(false);
-                }
-                else
-                {
-                    TolkHelper.Speak("At bottom");
-                }
+                TolkHelper.Speak("At disabled column");
             }
         }
 
@@ -427,7 +412,7 @@ namespace RimWorldAccess
 
                 if (currentRow == 0)
                 {
-                    TolkHelper.Speak("Already at top");
+                    TolkHelper.Speak("Already at leftmost task");
                     return;
                 }
 
@@ -440,7 +425,7 @@ namespace RimWorldAccess
 
                 if (basicModeIndex == 0)
                 {
-                    TolkHelper.Speak("Already at top");
+                    TolkHelper.Speak("Already at leftmost task");
                     return;
                 }
 
@@ -465,7 +450,7 @@ namespace RimWorldAccess
 
                 if (currentRow == col.Count - 1)
                 {
-                    TolkHelper.Speak("Already at bottom");
+                    TolkHelper.Speak("Already at rightmost task");
                     return;
                 }
 
@@ -478,7 +463,7 @@ namespace RimWorldAccess
 
                 if (basicModeIndex == allEntries.Count - 1)
                 {
-                    TolkHelper.Speak("Already at bottom");
+                    TolkHelper.Speak("Already at rightmost task");
                     return;
                 }
 
@@ -488,50 +473,86 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Moves cursor left to previous column (manual mode only).
-        /// Maintains row position.
+        /// Moves cursor left within current column (manual) or list (basic).
+        /// Navigates to earlier task in execution order.
         /// </summary>
         public static void MoveLeft()
         {
-            if (!IsManualMode)
+            if (IsManualMode)
             {
-                TolkHelper.Speak("Left/Right navigation only in manual mode. Press Alt+M to switch.");
-                return;
-            }
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
 
-            if (currentColumn > 0)
-            {
-                currentColumn--;
-                ClampRowToColumn();
-                AnnounceCurrentPosition(true);
+                if (currentRow > 0)
+                {
+                    currentRow--;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At leftmost task");
+                }
             }
             else
             {
-                TolkHelper.Speak("At leftmost column");
+                // Basic mode - navigate task list
+                if (allEntries.Count == 0) return;
+
+                if (basicModeIndex > 0)
+                {
+                    basicModeIndex--;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At leftmost task");
+                }
             }
         }
 
         /// <summary>
-        /// Moves cursor right to next column (manual mode only).
-        /// Maintains row position.
+        /// Moves cursor right within current column (manual) or list (basic).
+        /// Navigates to later task in execution order.
         /// </summary>
         public static void MoveRight()
         {
-            if (!IsManualMode)
+            if (IsManualMode)
             {
-                TolkHelper.Speak("Left/Right navigation only in manual mode. Press Alt+M to switch.");
-                return;
-            }
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
 
-            if (currentColumn < 4)
-            {
-                currentColumn++;
-                ClampRowToColumn();
-                AnnounceCurrentPosition(true);
+                if (currentRow < col.Count - 1)
+                {
+                    currentRow++;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At rightmost task");
+                }
             }
             else
             {
-                TolkHelper.Speak("At rightmost column");
+                // Basic mode - navigate task list
+                if (allEntries.Count == 0) return;
+
+                if (basicModeIndex < allEntries.Count - 1)
+                {
+                    basicModeIndex++;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At rightmost task");
+                }
             }
         }
 
@@ -612,34 +633,34 @@ namespace RimWorldAccess
                 // Update priority
                 entry.CurrentPriority = priority;
                 currentPawn.workSettings.SetPriority(entry.WorkType, priority);
+                hasUnsavedChanges = true;
 
-                // Add to new column (at bottom for enabled, above permanently disabled for disabled)
+                // Add to new column in correct naturalPriority order
                 var newColumn = columns[newColumnIndex];
-                if (newColumnIndex == 4) // Disabled column
-                {
-                    // Insert above permanently disabled entries
-                    int insertIndex = newColumn.FindIndex(e => e.IsPermanentlyDisabled);
-                    if (insertIndex < 0) insertIndex = newColumn.Count;
-                    newColumn.Insert(insertIndex, entry);
-                }
-                else
-                {
-                    newColumn.Add(entry);
-                }
+                int insertIndex = FindInsertionIndex(newColumn, entry);
+                newColumn.Insert(insertIndex, entry);
 
-                // Announce the move
+                // Announce the move with placement context (except for disabled)
                 if (newColumnIndex == 4) // Disabled
                 {
                     TolkHelper.Speak($"{entry.WorkType.labelShort} disabled");
                 }
                 else
                 {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} set to {GetColumnName(newColumnIndex)}");
+                    string placementContext = GetPlacementContext(newColumn, insertIndex);
+                    if (string.IsNullOrEmpty(placementContext))
+                    {
+                        TolkHelper.Speak($"{entry.WorkType.labelShort} set to {GetColumnName(newColumnIndex)}");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak($"{entry.WorkType.labelShort} set to {GetColumnName(newColumnIndex)}, {placementContext}");
+                    }
                 }
 
                 if (oldColumn.Count == 0)
                 {
-                    TolkHelper.Speak($"{GetColumnName(currentColumn)}: empty");
+                    TolkHelper.Speak($"Your cursor is now at {GetColumnName(currentColumn)}, which is empty");
                 }
                 else
                 {
@@ -654,6 +675,7 @@ namespace RimWorldAccess
                 // Basic mode: just set the priority directly
                 entry.CurrentPriority = priority;
                 currentPawn.workSettings.SetPriority(entry.WorkType, priority);
+                hasUnsavedChanges = true;
                 AnnounceCurrentPosition(false);
             }
         }
@@ -674,218 +696,6 @@ namespace RimWorldAccess
 
             int newPriority = (entry.CurrentPriority == 0) ? 3 : 0;
             SetPriority(newPriority);
-        }
-
-        /// <summary>
-        /// Reorders current task up within its column (executes earlier).
-        /// </summary>
-        public static void ReorderUp()
-        {
-            WorkTypeEntry entry = GetCurrentEntry();
-            if (entry == null) return;
-
-            if (entry.IsPermanentlyDisabled)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder permanently disabled task");
-                return;
-            }
-
-            if (IsManualMode)
-            {
-                var col = columns[currentColumn];
-
-                // Count movable items (exclude permanently disabled)
-                int movableCount = col.Count(e => !e.IsPermanentlyDisabled);
-
-                if (movableCount <= 1)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
-                    return;
-                }
-
-                if (currentRow <= 0)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the top");
-                    return;
-                }
-
-                var other = col[currentRow - 1];
-
-                if (other.IsPermanentlyDisabled)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder");
-                    return;
-                }
-
-                col[currentRow - 1] = entry;
-                col[currentRow] = other;
-                SwapNaturalPriorities(entry.WorkType, other.WorkType);
-                currentRow--;
-
-                AnnounceReorderResult(entry, col, currentRow, "up");
-            }
-            else
-            {
-                // Basic mode
-                if (allEntries.Count <= 1)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
-                    return;
-                }
-
-                if (basicModeIndex <= 0)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the top");
-                    return;
-                }
-
-                var other = allEntries[basicModeIndex - 1];
-                allEntries[basicModeIndex - 1] = entry;
-                allEntries[basicModeIndex] = other;
-                SwapNaturalPriorities(entry.WorkType, other.WorkType);
-                basicModeIndex--;
-
-                AnnounceReorderResultBasic(entry, basicModeIndex, "up");
-            }
-
-            RefreshAllPawnsWorkGivers();
-        }
-
-        /// <summary>
-        /// Reorders current task down within its column (executes later).
-        /// </summary>
-        public static void ReorderDown()
-        {
-            WorkTypeEntry entry = GetCurrentEntry();
-            if (entry == null) return;
-
-            if (entry.IsPermanentlyDisabled)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder permanently disabled task");
-                return;
-            }
-
-            if (IsManualMode)
-            {
-                var col = columns[currentColumn];
-
-                // Count movable items (exclude permanently disabled)
-                int movableCount = col.Count(e => !e.IsPermanentlyDisabled);
-
-                if (movableCount <= 1)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
-                    return;
-                }
-
-                // Find the last movable index (before permanently disabled section)
-                int lastMovableIndex = col.FindIndex(e => e.IsPermanentlyDisabled) - 1;
-                if (lastMovableIndex < 0) lastMovableIndex = col.Count - 1;
-
-                if (currentRow >= lastMovableIndex)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
-                    return;
-                }
-
-                var other = col[currentRow + 1];
-
-                if (other.IsPermanentlyDisabled)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
-                    return;
-                }
-
-                col[currentRow + 1] = entry;
-                col[currentRow] = other;
-                SwapNaturalPriorities(entry.WorkType, other.WorkType);
-                currentRow++;
-
-                AnnounceReorderResult(entry, col, currentRow, "down");
-            }
-            else
-            {
-                // Basic mode
-                if (allEntries.Count <= 1)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
-                    return;
-                }
-
-                if (basicModeIndex >= allEntries.Count - 1)
-                {
-                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
-                    return;
-                }
-
-                var other = allEntries[basicModeIndex + 1];
-                allEntries[basicModeIndex + 1] = entry;
-                allEntries[basicModeIndex] = other;
-                SwapNaturalPriorities(entry.WorkType, other.WorkType);
-                basicModeIndex++;
-
-                AnnounceReorderResultBasic(entry, basicModeIndex, "down");
-            }
-
-            RefreshAllPawnsWorkGivers();
-        }
-
-        private static void SwapNaturalPriorities(WorkTypeDef a, WorkTypeDef b)
-        {
-            int temp = a.naturalPriority;
-            a.naturalPriority = b.naturalPriority;
-            b.naturalPriority = temp;
-        }
-
-        /// <summary>
-        /// Announces the result of a reorder operation in manual mode.
-        /// </summary>
-        private static void AnnounceReorderResult(WorkTypeEntry entry, List<WorkTypeEntry> col, int newIndex, string direction)
-        {
-            string name = entry.WorkType.labelShort;
-
-            // Find last movable index
-            int lastMovableIndex = col.FindIndex(e => e.IsPermanentlyDisabled) - 1;
-            if (lastMovableIndex < 0) lastMovableIndex = col.Count - 1;
-
-            if (newIndex == 0)
-            {
-                TolkHelper.Speak($"{name} moved to the top");
-            }
-            else if (newIndex == lastMovableIndex)
-            {
-                TolkHelper.Speak($"{name} moved to the bottom");
-            }
-            else
-            {
-                // Get neighbors
-                string above = col[newIndex - 1].WorkType.labelShort;
-                string below = col[newIndex + 1].WorkType.labelShort;
-                TolkHelper.Speak($"{name} moved {direction}. Now between {above} and {below}");
-            }
-        }
-
-        /// <summary>
-        /// Announces the result of a reorder operation in basic mode.
-        /// </summary>
-        private static void AnnounceReorderResultBasic(WorkTypeEntry entry, int newIndex, string direction)
-        {
-            string name = entry.WorkType.labelShort;
-
-            if (newIndex == 0)
-            {
-                TolkHelper.Speak($"{name} moved to the top");
-            }
-            else if (newIndex == allEntries.Count - 1)
-            {
-                TolkHelper.Speak($"{name} moved to the bottom");
-            }
-            else
-            {
-                string above = allEntries[newIndex - 1].WorkType.labelShort;
-                string below = allEntries[newIndex + 1].WorkType.labelShort;
-                TolkHelper.Speak($"{name} moved {direction}. Now between {above} and {below}");
-            }
         }
 
         /// <summary>
@@ -1283,6 +1093,102 @@ namespace RimWorldAccess
         #endregion
 
         #region Helpers
+
+        /// <summary>
+        /// Gets a placement context string describing where an item was placed in a column.
+        /// </summary>
+        private static string GetPlacementContext(List<WorkTypeEntry> column, int insertedIndex)
+        {
+            // Count non-permanently-disabled items for context
+            int movableCount = column.Count(e => !e.IsPermanentlyDisabled);
+
+            // If alone, no context needed
+            if (movableCount <= 1)
+            {
+                return "";
+            }
+
+            // Find the boundaries of movable items
+            int lastMovableIndex = column.FindIndex(e => e.IsPermanentlyDisabled) - 1;
+            if (lastMovableIndex < 0) lastMovableIndex = column.Count - 1;
+
+            // If inserted item is permanently disabled, no placement context
+            if (insertedIndex > lastMovableIndex)
+            {
+                return "";
+            }
+
+            bool atLeftEdge = insertedIndex == 0;
+            bool atRightEdge = insertedIndex == lastMovableIndex;
+
+            if (movableCount == 2)
+            {
+                // Two items - say "placed left of X" or "placed right of X"
+                if (atLeftEdge)
+                {
+                    string rightNeighbor = column[1].WorkType.labelShort;
+                    return $"placed left of {rightNeighbor}";
+                }
+                else
+                {
+                    string leftNeighbor = column[0].WorkType.labelShort;
+                    return $"placed right of {leftNeighbor}";
+                }
+            }
+            else
+            {
+                // Three or more items
+                if (atLeftEdge)
+                {
+                    string rightNeighbor = column[1].WorkType.labelShort;
+                    return $"placed first, left of {rightNeighbor}";
+                }
+                else if (atRightEdge)
+                {
+                    string leftNeighbor = column[insertedIndex - 1].WorkType.labelShort;
+                    return $"placed last, right of {leftNeighbor}";
+                }
+                else
+                {
+                    // In the middle - between left and right neighbors
+                    string leftNeighbor = column[insertedIndex - 1].WorkType.labelShort;
+                    string rightNeighbor = column[insertedIndex + 1].WorkType.labelShort;
+                    return $"placed between {leftNeighbor} and {rightNeighbor}";
+                }
+            }
+        }
+
+        /// <summary>
+        /// Finds the correct insertion index for an entry in a column based on naturalPriority.
+        /// Maintains descending naturalPriority order, with permanently disabled at the end.
+        /// </summary>
+        private static int FindInsertionIndex(List<WorkTypeEntry> column, WorkTypeEntry entry)
+        {
+            int entryNaturalPriority = entry.WorkType.naturalPriority;
+            bool entryIsPermanentlyDisabled = entry.IsPermanentlyDisabled;
+
+            for (int i = 0; i < column.Count; i++)
+            {
+                var existing = column[i];
+
+                // Permanently disabled entries go at the end
+                if (!entryIsPermanentlyDisabled && existing.IsPermanentlyDisabled)
+                {
+                    return i;
+                }
+
+                // Within same disabled status, sort by naturalPriority descending
+                if (entryIsPermanentlyDisabled == existing.IsPermanentlyDisabled)
+                {
+                    if (entryNaturalPriority > existing.WorkType.naturalPriority)
+                    {
+                        return i;
+                    }
+                }
+            }
+
+            return column.Count;
+        }
 
         /// <summary>
         /// Gets the currently selected work type entry.

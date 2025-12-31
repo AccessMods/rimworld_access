@@ -92,21 +92,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Shift+Up/Down: Reorder task within column
-            if (key == KeyCode.UpArrow && shift)
-            {
-                WorkMenuState.ReorderUp();
-                Event.current.Use();
-                return;
-            }
-            if (key == KeyCode.DownArrow && shift)
-            {
-                WorkMenuState.ReorderDown();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Up/Down arrows
+            // Handle Up/Down arrows (priority level navigation in manual mode, search navigation otherwise)
             if (key == KeyCode.UpArrow)
             {
                 if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
@@ -134,7 +120,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Left/Right arrows (manual mode column navigation)
+            // Handle Left/Right arrows (task navigation within priority level)
             if (key == KeyCode.LeftArrow)
             {
                 WorkMenuState.MoveLeft();
@@ -274,13 +260,13 @@ namespace RimWorldAccess
 
             if (WorkMenuState.IsManualMode)
             {
-                instructions1 = "Left/Right: Switch columns | Up/Down: Navigate tasks | Shift+Up/Down: Reorder";
+                instructions1 = "Up/Down: Switch priorities | Left/Right: Navigate tasks";
                 instructions2 = "0-4: Set priority | Tab/Shift+Tab: Switch pawn";
                 instructions3 = "Enter: Confirm | Escape: Cancel | Alt+M: Switch to basic mode";
             }
             else
             {
-                instructions1 = "Up/Down: Navigate tasks | Shift+Up/Down: Reorder | Space: Toggle";
+                instructions1 = "Left/Right: Navigate tasks | Space: Toggle";
                 instructions2 = "Tab/Shift+Tab: Switch pawn";
                 instructions3 = "Enter: Confirm | Escape: Cancel | Alt+M: Switch to manual mode";
             }
