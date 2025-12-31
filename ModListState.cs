@@ -774,12 +774,13 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Handle typeahead characters
+            // Handle typeahead characters (but not when Alt is held - those are action keys)
             // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
             bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
             bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+            bool alt = Event.current.alt;
 
-            if (isLetter || isNumber)
+            if ((isLetter || isNumber) && !alt && !ctrl)
             {
                 char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
                 var labels = GetModLabels();
@@ -864,44 +865,44 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Handle other hotkeys
-            if (key == KeyCode.M)
+            // Handle other hotkeys (Alt+key to not conflict with typeahead)
+            if (alt && key == KeyCode.M)
             {
                 OpenSettings();
                 return true;
             }
 
-            if (key == KeyCode.I)
+            if (alt && key == KeyCode.I)
             {
                 ReadInfo();
                 return true;
             }
 
-            if (key == KeyCode.S)
+            if (alt && key == KeyCode.S)
             {
                 SaveChanges();
                 return true;
             }
 
-            if (key == KeyCode.O)
+            if (alt && key == KeyCode.O)
             {
                 OpenModFolder();
                 return true;
             }
 
-            if (key == KeyCode.W)
+            if (alt && key == KeyCode.W)
             {
                 OpenWorkshopPage();
                 return true;
             }
 
-            if (key == KeyCode.U)
+            if (alt && key == KeyCode.U)
             {
                 UploadToWorkshop();
                 return true;
             }
 
-            if (key == KeyCode.R)
+            if (alt && key == KeyCode.R)
             {
                 AutoSortMods();
                 return true;
