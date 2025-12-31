@@ -127,8 +127,13 @@ namespace RimWorldAccess
                     var gizmos = selectable.GetGizmos().ToList();
                     foreach (Gizmo gizmo in gizmos)
                     {
-                        availableGizmos.Add(gizmo);
-                        gizmoOwners[gizmo] = selectable;
+                        // Check Visible NOW while thing is still selected
+                        // (some gizmos like Designator_Install check selection state)
+                        if (gizmo != null && gizmo.Visible)
+                        {
+                            availableGizmos.Add(gizmo);
+                            gizmoOwners[gizmo] = selectable;
+                        }
                     }
                 }
             }
@@ -145,7 +150,6 @@ namespace RimWorldAccess
 
             // Sort by Order property (lower values appear first)
             availableGizmos = availableGizmos
-                .Where(g => g != null && g.Visible)
                 .OrderBy(g => g.Order)
                 .ToList();
 
