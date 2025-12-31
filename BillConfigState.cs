@@ -26,6 +26,7 @@ namespace RimWorldAccess
             RepeatMode,
             RepeatCount,
             TargetCount,
+            PauseWhenSatisfied,
             UnpauseAt,
             StoreMode,
             AllowedSkillRange,
@@ -124,7 +125,11 @@ namespace RimWorldAccess
             {
                 menuItems.Add(new MenuItem(MenuItemType.TargetCount, GetTargetCountLabel(), "Target count", null, true));
 
-                if (bill.unpauseWhenYouHave < bill.targetCount)
+                // Pause when satisfied checkbox
+                menuItems.Add(new MenuItem(MenuItemType.PauseWhenSatisfied, GetPauseWhenSatisfiedLabel(), null, true));
+
+                // Only show unpause threshold if pauseWhenSatisfied is enabled
+                if (bill.pauseWhenSatisfied)
                 {
                     menuItems.Add(new MenuItem(MenuItemType.UnpauseAt, GetUnpauseAtLabel(), "Unpause at", null, true));
                 }
@@ -181,6 +186,11 @@ namespace RimWorldAccess
         private static string GetTargetCountLabel()
         {
             return $"Target count: {bill.targetCount}";
+        }
+
+        private static string GetPauseWhenSatisfiedLabel()
+        {
+            return $"Pause when satisfied: {(bill.pauseWhenSatisfied ? "Yes" : "No")}";
         }
 
         private static string GetUnpauseAtLabel()
@@ -473,6 +483,18 @@ namespace RimWorldAccess
                     AnnounceCurrentSelection();
                     break;
 
+                case MenuItemType.PauseWhenSatisfied:
+                    bill.pauseWhenSatisfied = !bill.pauseWhenSatisfied;
+                    // Ensure unpause threshold is valid
+                    if (bill.pauseWhenSatisfied && bill.unpauseWhenYouHave >= bill.targetCount)
+                    {
+                        bill.unpauseWhenYouHave = bill.targetCount - 1;
+                    }
+                    BuildMenuItems();
+                    TolkHelper.Speak(bill.pauseWhenSatisfied ? "Pause when satisfied enabled" : "Pause when satisfied disabled");
+                    AnnounceCurrentSelection();
+                    break;
+
                 case MenuItemType.StoreMode:
                     OpenStoreModeMenu();
                     break;
@@ -530,10 +552,10 @@ namespace RimWorldAccess
             int step = direction > 0 ? 1 : -1;
             bill.targetCount = Mathf.Max(1, bill.targetCount + step);
 
-            // Ensure unpause threshold doesn't exceed target
-            if (bill.unpauseWhenYouHave > bill.targetCount)
+            // Ensure unpause threshold doesn't exceed target (must be at least 1 less if pauseWhenSatisfied)
+            if (bill.pauseWhenSatisfied && bill.unpauseWhenYouHave >= bill.targetCount)
             {
-                bill.unpauseWhenYouHave = bill.targetCount;
+                bill.unpauseWhenYouHave = bill.targetCount - 1;
             }
 
             menuItems[selectedIndex].label = GetTargetCountLabel();
