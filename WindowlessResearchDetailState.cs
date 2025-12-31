@@ -395,14 +395,34 @@ namespace RimWorldAccess
         /// </summary>
         private static string GetMissingPrerequisites()
         {
-            if (currentProject == null || currentProject.prerequisites == null)
+            if (currentProject == null)
                 return "Unknown";
 
-            var missing = currentProject.prerequisites
-                .Where(p => !p.IsFinished)
-                .Select(p => p.LabelCap.ToString());
+            var parts = new List<string>();
 
-            return string.Join(", ", missing);
+            // Visible prerequisites
+            if (currentProject.prerequisites != null)
+            {
+                var missing = currentProject.prerequisites
+                    .Where(p => !p.IsFinished)
+                    .Select(p => p.LabelCap.ToString());
+                parts.AddRange(missing);
+            }
+
+            // Hidden prerequisites - just mention they exist
+            if (currentProject.hiddenPrerequisites != null)
+            {
+                int missingHiddenCount = currentProject.hiddenPrerequisites.Count(p => !p.IsFinished);
+                if (missingHiddenCount > 0)
+                {
+                    string hiddenText = missingHiddenCount == 1
+                        ? "1 hidden prerequisite"
+                        : $"{missingHiddenCount} hidden prerequisites";
+                    parts.Add(hiddenText);
+                }
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : "Unknown";
         }
 
         /// <summary>
@@ -459,7 +479,7 @@ namespace RimWorldAccess
         {
             var children = new List<DetailNode>();
 
-            // Research prerequisites
+            // Research prerequisites (visible)
             if (project.prerequisites != null && project.prerequisites.Count > 0)
             {
                 foreach (var prereq in project.prerequisites.OrderBy(p => p.LabelCap.ToString()))
@@ -474,6 +494,112 @@ namespace RimWorldAccess
                         IsExpandable = false
                     });
                 }
+            }
+
+            // Hidden prerequisites - just show count without revealing what they are
+            if (project.hiddenPrerequisites != null && project.hiddenPrerequisites.Count > 0)
+            {
+                int missingHiddenCount = project.hiddenPrerequisites.Count(p => !p.IsFinished);
+                int totalHiddenCount = project.hiddenPrerequisites.Count;
+
+                string hiddenStatus = missingHiddenCount == 0 ? "All completed" : $"{missingHiddenCount} incomplete";
+                string hiddenLabel = totalHiddenCount == 1
+                    ? $"1 hidden prerequisite - {hiddenStatus}"
+                    : $"{totalHiddenCount} hidden prerequisites - {hiddenStatus}";
+
+                children.Add(new DetailNode
+                {
+                    Id = "hidden_prereqs",
+                    Type = DetailNodeType.Info,
+                    Label = hiddenLabel,
+                    IsExpandable = false
+                });
+            }
+
+            // Required research building
+            if (project.requiredResearchBuilding != null)
+            {
+                bool hasBench = project.PlayerHasAnyAppropriateResearchBench;
+                string benchStatus = hasBench ? "Available" : "Not available";
+                children.Add(new DetailNode
+                {
+                    Id = "required_bench",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires bench: {project.requiredResearchBuilding.LabelCap} - {benchStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Required research facilities
+            if (project.requiredResearchFacilities != null && project.requiredResearchFacilities.Count > 0)
+            {
+                foreach (var facility in project.requiredResearchFacilities)
+                {
+                    children.Add(new DetailNode
+                    {
+                        Id = $"required_facility_{facility.defName}",
+                        Type = DetailNodeType.Info,
+                        Label = $"Requires facility: {facility.LabelCap}",
+                        IsExpandable = false
+                    });
+                }
+            }
+
+            // Techprint requirement (Royalty DLC)
+            if (project.TechprintCount > 0)
+            {
+                int applied = project.TechprintsApplied;
+                int required = project.TechprintCount;
+                string techprintStatus = applied >= required ? "Complete" : $"{applied}/{required}";
+                children.Add(new DetailNode
+                {
+                    Id = "techprints",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires techprints: {techprintStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Mechanitor requirement (Biotech DLC)
+            if (project.requiresMechanitor)
+            {
+                string mechStatus = project.PlayerMechanitorRequirementMet ? "Met" : "Not met";
+                children.Add(new DetailNode
+                {
+                    Id = "mechanitor",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires mechanitor - {mechStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Required analyzed things (Biotech DLC)
+            if (project.requiredAnalyzed != null && project.requiredAnalyzed.Count > 0)
+            {
+                int completed = project.AnalyzedThingsCompleted;
+                int required = project.RequiredAnalyzedThingCount;
+                string analyzeStatus = completed >= required ? "Complete" : $"{completed}/{required}";
+                string thingNames = string.Join(", ", project.requiredAnalyzed.Select(t => t.LabelCap.ToString()));
+                children.Add(new DetailNode
+                {
+                    Id = "analyzed",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires analyzing: {thingNames} - {analyzeStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Grav engine inspection (Odyssey DLC)
+            if (project.requireGravEngineInspected)
+            {
+                string inspectStatus = project.InspectionRequirementsMet ? "Inspected" : "Not inspected";
+                children.Add(new DetailNode
+                {
+                    Id = "grav_engine",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires grav engine inspection - {inspectStatus}",
+                    IsExpandable = false
+                });
             }
 
             // Even if no prerequisites, show the node with a message
