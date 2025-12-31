@@ -667,8 +667,8 @@ namespace RimWorldAccess
 
                 var item = visibleItems[selectedIndex];
 
-                // Strip XML tags from label
-                string label = item.Label.StripTags();
+                // Strip XML tags from label and trailing punctuation to avoid double periods
+                string label = item.Label.StripTags().TrimEnd('.', '!', '?');
 
                 // Build state indicator (only for expandable items)
                 string stateIndicator = "";

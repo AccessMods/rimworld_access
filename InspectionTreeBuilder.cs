@@ -1487,7 +1487,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             combatLogItem.OnActivate = () => BuildCombatLogEntries(combatLogItem, pawn);
-            parentItem.Children.Add(combatLogItem);
+            AddChild(parentItem, combatLogItem);
 
             // Add Social Log as expandable subcategory
             var socialLogItem = new InspectionTreeItem
@@ -1500,7 +1500,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             socialLogItem.OnActivate = () => BuildSocialLogEntries(socialLogItem, pawn);
-            parentItem.Children.Add(socialLogItem);
+            AddChild(parentItem, socialLogItem);
         }
 
         /// <summary>
@@ -1546,7 +1546,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noEntriesItem);
+                AddChild(parentItem, noEntriesItem);
                 return;
             }
 
@@ -1570,7 +1570,7 @@ namespace RimWorldAccess
                     };
                 }
 
-                parentItem.Children.Add(logItem);
+                AddChild(parentItem, logItem);
             }
         }
 
@@ -1611,7 +1611,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noEntriesItem);
+                AddChild(parentItem, noEntriesItem);
                 return;
             }
 
@@ -1635,7 +1635,7 @@ namespace RimWorldAccess
                     };
                 }
 
-                parentItem.Children.Add(logItem);
+                AddChild(parentItem, logItem);
             }
         }
     }
