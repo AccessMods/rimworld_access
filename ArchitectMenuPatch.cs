@@ -115,6 +115,7 @@ namespace RimWorldAccess
                 else
                 {
                     ArchitectTreeState.Close();
+                    ArchitectState.Reset(); // Also reset ArchitectState so Tab works again
                     TolkHelper.Speak("Architect menu closed");
                 }
                 Event.current.Use();
