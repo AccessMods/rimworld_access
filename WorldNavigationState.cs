@@ -563,18 +563,9 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Filter to enabled options only
-            var enabledOrders = orders.Where(o => !o.Disabled).ToList();
-
-            if (enabledOrders.Count == 0)
-            {
-                TolkHelper.Speak("No valid orders available at this location", SpeechPriority.Normal);
-                return;
-            }
-
-            // Open windowless float menu with caravan orders
-            WindowlessFloatMenuState.Open(enabledOrders, colonistOrders: false);
-            TolkHelper.Speak($"{caravan.Label} orders: {enabledOrders.Count} options available");
+            // Open windowless float menu with caravan orders (includes disabled options)
+            WindowlessFloatMenuState.Open(orders, colonistOrders: false);
+            TolkHelper.Speak($"{caravan.Label} orders: {orders.Count} options available");
         }
 
         /// <summary>

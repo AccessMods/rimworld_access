@@ -27,6 +27,19 @@ namespace RimWorldAccess
                 return "unseen";
             var sb = new StringBuilder();
 
+            // Check visibility from drafted pawn FIRST (if one is selected)
+            bool notVisible = false;
+            Pawn selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
+            if (selectedPawn != null && selectedPawn.Drafted && selectedPawn.Spawned && selectedPawn.Map == map)
+            {
+                // Check if pawn can see this position using line of sight
+                if (!GenSight.LineOfSight(selectedPawn.Position, position, map))
+                {
+                    sb.Append("not visible");
+                    notVisible = true;
+                }
+            }
+
             // Get all things at this position
             List<Thing> things = position.GetThingList(map);
 
@@ -48,7 +61,7 @@ namespace RimWorldAccess
                     items.Add(thing);
             }
 
-            bool addedSomething = false;
+            bool addedSomething = notVisible;
 
             // Add individual pawns (most important)
             foreach (var pawn in pawns.Take(3))
@@ -128,6 +141,15 @@ namespace RimWorldAccess
             if (plants.Count > 0 && !addedSomething)
             {
                 sb.Append(plants[0].LabelShort);
+                addedSomething = true;
+            }
+
+            // Add designation/order information BEFORE terrain (orders are more important)
+            string designationsInfo = GetDesignationsInfo(position, map);
+            if (!string.IsNullOrEmpty(designationsInfo))
+            {
+                if (addedSomething) sb.Append(", ");
+                sb.Append(designationsInfo);
                 addedSomething = true;
             }
 
@@ -726,6 +748,89 @@ namespace RimWorldAccess
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets information about designations/orders at a tile.
+        /// Returns a comma-separated list of active designations.
+        /// </summary>
+        public static string GetDesignationsInfo(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            var designations = map.designationManager.AllDesignationsAt(position);
+            if (designations == null || designations.Count == 0)
+                return null;
+
+            var sb = new StringBuilder();
+            for (int i = 0; i < designations.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(GetDesignationLabel(designations[i]));
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets a human-readable label for a designation using game strings.
+        /// </summary>
+        private static string GetDesignationLabel(Designation designation)
+        {
+            if (designation == null || designation.def == null)
+                return "Unknown order";
+
+            // Get localized label from the Designator that uses this DesignationDef
+            string label = GetLocalizedDesignationLabel(designation.def);
+
+            // For thing-targeted designations, include the thing's label
+            if (designation.target.HasThing && designation.target.Thing != null)
+            {
+                return $"{designation.target.Thing.LabelShort} ({label})";
+            }
+
+            return label;
+        }
+
+        /// <summary>
+        /// Gets the localized label for a DesignationDef by finding its Designator.
+        /// </summary>
+        private static string GetLocalizedDesignationLabel(DesignationDef def)
+        {
+            if (def == null)
+                return "Unknown";
+
+            // Try to find the Designator that uses this DesignationDef
+            var designators = Find.ReverseDesignatorDatabase?.AllDesignators;
+            if (designators != null)
+            {
+                foreach (var designator in designators)
+                {
+                    // Use reflection to get the protected Designation property
+                    var designationProp = designator.GetType().GetProperty("Designation",
+                        System.Reflection.BindingFlags.Instance |
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Public);
+
+                    if (designationProp != null)
+                    {
+                        var designatorDef = designationProp.GetValue(designator) as DesignationDef;
+                        if (designatorDef == def)
+                        {
+                            return designator.Label;
+                        }
+                    }
+                }
+            }
+
+            // Fallback: use LabelCap if available, otherwise format defName
+            string label = def.LabelCap;
+            if (string.IsNullOrEmpty(label))
+            {
+                label = GenText.SplitCamelCase(def.defName);
+            }
+            return label;
         }
     }
 }

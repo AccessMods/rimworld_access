@@ -1244,6 +1244,14 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 4.73: Handle wildlife menu if active =====
+            if (WildlifeMenuState.IsActive)
+            {
+                WildlifeMenuState.HandleInput();
+                Event.current.Use();
+                return;
+            }
+
             // ===== PRIORITY 4.74: Handle animals menu if active =====
             if (AnimalsMenuState.IsActive)
             {

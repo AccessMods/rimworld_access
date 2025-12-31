@@ -33,16 +33,6 @@ namespace RimWorldAccess
             givesColonistOrders = colonistOrders;
             typeahead.ClearSearch();
 
-            // Find first enabled option
-            for (int i = 0; i < options.Count; i++)
-            {
-                if (!options[i].Disabled)
-                {
-                    selectedIndex = i;
-                    break;
-                }
-            }
-
             // Announce the first option
             if (selectedIndex >= 0 && selectedIndex < options.Count)
             {
@@ -67,25 +57,14 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Moves selection to the next enabled option.
+        /// Moves selection to the next option.
         /// </summary>
         public static void SelectNext()
         {
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            int startIndex = selectedIndex;
-            int attempts = 0;
-
-            do
-            {
-                selectedIndex = (selectedIndex + 1) % currentOptions.Count;
-                attempts++;
-
-                if (!currentOptions[selectedIndex].Disabled || attempts >= currentOptions.Count)
-                    break;
-            }
-            while (selectedIndex != startIndex);
+            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
 
             // Announce the new selection
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
@@ -100,25 +79,14 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Moves selection to the previous enabled option.
+        /// Moves selection to the previous option.
         /// </summary>
         public static void SelectPrevious()
         {
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            int startIndex = selectedIndex;
-            int attempts = 0;
-
-            do
-            {
-                selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
-                attempts++;
-
-                if (!currentOptions[selectedIndex].Disabled || attempts >= currentOptions.Count)
-                    break;
-            }
-            while (selectedIndex != startIndex);
+            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
 
             // Announce the new selection
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)

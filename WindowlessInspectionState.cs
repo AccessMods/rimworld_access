@@ -158,6 +158,23 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Rebuilds after an action that modifies the tree structure (e.g., deleting a job).
+        /// </summary>
+        public static void RebuildAfterAction()
+        {
+            if (!IsActive)
+                return;
+
+            RebuildVisibleList();
+
+            // Try to keep selection valid
+            if (selectedIndex >= visibleItems.Count)
+                selectedIndex = Math.Max(0, visibleItems.Count - 1);
+
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Rebuilds the tree (used after actions that modify state).
         /// </summary>
         public static void RebuildTree()
@@ -395,6 +412,30 @@ namespace RimWorldAccess
             // Otherwise, nothing to do
             SoundDefOf.ClickReject.PlayOneShotOnCamera();
             TolkHelper.Speak("No action available for this item.");
+        }
+
+        /// <summary>
+        /// Deletes the currently selected item (Delete key).
+        /// Used for canceling queued jobs.
+        /// </summary>
+        public static void DeleteItem()
+        {
+            if (!IsActive || visibleItems == null || selectedIndex >= visibleItems.Count)
+                return;
+
+            var item = visibleItems[selectedIndex];
+
+            // Check if item has a delete action
+            if (item.OnDelete != null)
+            {
+                item.OnDelete();
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                return;
+            }
+
+            // No delete action available
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Cannot delete this item.");
         }
 
         /// <summary>
@@ -715,6 +756,14 @@ namespace RimWorldAccess
                 if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
                     ActivateAction();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle Delete - delete item
+                if (key == KeyCode.Delete)
+                {
+                    DeleteItem();
                     ev.Use();
                     return true;
                 }
