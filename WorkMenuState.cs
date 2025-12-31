@@ -125,6 +125,7 @@ namespace RimWorldAccess
                 FindFirstPopulatedColumn();
             }
 
+            TolkHelper.Speak("Work menu");
             AnnounceCurrentPosition(true);
         }
 

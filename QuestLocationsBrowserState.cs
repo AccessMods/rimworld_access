@@ -207,8 +207,16 @@ namespace RimWorldAccess
             // Close browser first
             Close();
 
-            // Announce the tile info
-            WorldNavigationState.AnnounceTile();
+            // If we're choosing a destination for caravan, set it directly
+            if (CaravanFormationState.IsChoosingDestination)
+            {
+                CaravanFormationState.SetDestination(selected.Tile);
+            }
+            else
+            {
+                // Announce the tile info
+                WorldNavigationState.AnnounceTile();
+            }
         }
 
         /// <summary>
@@ -278,6 +286,11 @@ namespace RimWorldAccess
 
                 case UnityEngine.KeyCode.Escape:
                     Close();
+                    // If we're in destination selection mode, cancel it and return to caravan dialog
+                    if (CaravanFormationState.IsChoosingDestination)
+                    {
+                        CaravanFormationState.CancelDestinationSelection();
+                    }
                     return true;
 
                 default:

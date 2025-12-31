@@ -36,6 +36,7 @@ namespace RimWorldAccess
             rootNodes = BuildCategoryTree();
             flatNavigationList = BuildFlatNavigationList();
             currentIndex = 0;
+            TolkHelper.Speak("Research menu");
             AnnounceCurrentSelection();
         }
 

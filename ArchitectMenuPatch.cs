@@ -217,6 +217,9 @@ namespace RimWorldAccess
                 Event.current.Use();
                 return;
             }
+
+            // Consume other keys to prevent passthrough
+            Event.current.Use();
         }
 
         /// <summary>

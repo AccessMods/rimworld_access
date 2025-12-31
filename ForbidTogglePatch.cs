@@ -54,7 +54,8 @@ namespace RimWorldAccess
                 StorageSettingsMenuState.IsActive ||
                 PlantSelectionMenuState.IsActive ||
                 WorkMenuState.IsActive ||
-                ModListState.IsActive)
+                ModListState.IsActive ||
+                ArchitectTreeState.IsActive)
                 return;
 
             // Check for F key press (but not Alt+F, which is handled by UnifiedKeyboardPatch)

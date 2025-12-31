@@ -88,6 +88,7 @@ namespace RimWorldAccess
                 }
             }
 
+            TolkHelper.Speak("Schedule");
             UpdateClipboard();
         }
 

@@ -41,6 +41,7 @@ namespace RimWorldAccess
             currentIndex = 0;
             typeahead.ClearSearch();
             RefreshQuestList();
+            TolkHelper.Speak("Quest menu");
             AnnounceCurrentSelection();
         }
 

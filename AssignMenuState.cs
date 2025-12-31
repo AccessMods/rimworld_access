@@ -94,6 +94,7 @@ namespace RimWorldAccess
 
             RebuildActiveColumns();
             LoadAllPolicies();
+            TolkHelper.Speak("Assign menu");
             UpdateClipboard();
         }
 

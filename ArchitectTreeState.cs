@@ -73,7 +73,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            TolkHelper.Speak("Architect menu. Use arrows to navigate, Right to expand, Enter to select");
+            TolkHelper.Speak("Architect menu");
             AnnounceCurrentSelection();
 
             Log.Message($"Opened architect tree menu with {menuItems.Count} items");
