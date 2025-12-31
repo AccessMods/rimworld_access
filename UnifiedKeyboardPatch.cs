@@ -1254,7 +1254,127 @@ namespace RimWorldAccess
             // ===== PRIORITY 4.73: Handle wildlife menu if active =====
             if (WildlifeMenuState.IsActive)
             {
-                WildlifeMenuState.HandleInput();
+                bool handled = false;
+                var typeahead = WildlifeMenuState.Typeahead;
+
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
+                {
+                    WildlifeMenuState.JumpToFirst();
+                    handled = true;
+                }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    WildlifeMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (typeahead.HasActiveSearch)
+                    {
+                        typeahead.ClearSearchAndAnnounce();
+                        WildlifeMenuState.AnnounceWithSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        WildlifeMenuState.Close();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace)
+                {
+                    WildlifeMenuState.HandleBackspace();
+                    handled = true;
+                }
+                // Handle Down arrow - navigate animals (use typeahead if active with matches)
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetNextMatch(WildlifeMenuState.CurrentAnimalIndex);
+                        if (newIndex >= 0)
+                        {
+                            WildlifeMenuState.SetCurrentAnimalIndex(newIndex);
+                            WildlifeMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        WildlifeMenuState.SelectNextAnimal();
+                    }
+                    handled = true;
+                }
+                // Handle Up arrow - navigate animals (use typeahead if active with matches)
+                else if (key == KeyCode.UpArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetPreviousMatch(WildlifeMenuState.CurrentAnimalIndex);
+                        if (newIndex >= 0)
+                        {
+                            WildlifeMenuState.SetCurrentAnimalIndex(newIndex);
+                            WildlifeMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        WildlifeMenuState.SelectPreviousAnimal();
+                    }
+                    handled = true;
+                }
+                // Handle Right arrow - navigate columns
+                else if (key == KeyCode.RightArrow)
+                {
+                    WildlifeMenuState.SelectNextColumn();
+                    handled = true;
+                }
+                // Handle Left arrow - navigate columns
+                else if (key == KeyCode.LeftArrow)
+                {
+                    WildlifeMenuState.SelectPreviousColumn();
+                    handled = true;
+                }
+                // Handle Enter - interact with current cell
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    WildlifeMenuState.InteractWithCurrentCell();
+                    handled = true;
+                }
+                // Handle Alt+S - sort by current column
+                else if (key == KeyCode.S && Event.current.alt)
+                {
+                    WildlifeMenuState.ToggleSortByCurrentColumn();
+                    handled = true;
+                }
+
+                if (handled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle typeahead characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    WildlifeMenuState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Consume other keys to prevent passthrough
                 Event.current.Use();
                 return;
             }
@@ -1262,8 +1382,218 @@ namespace RimWorldAccess
             // ===== PRIORITY 4.74: Handle animals menu if active =====
             if (AnimalsMenuState.IsActive)
             {
-                AnimalsMenuState.HandleInput();
-                // AnimalsMenuState.HandleInput() already consumes events internally
+                bool handled = false;
+                var typeahead = AnimalsMenuState.Typeahead;
+
+                // Check if in submenu
+                if (AnimalsMenuState.IsInSubmenu)
+                {
+                    var submenuTypeahead = AnimalsMenuState.SubmenuTypeahead;
+
+                    // Handle Escape - clear search FIRST, then close submenu
+                    if (key == KeyCode.Escape)
+                    {
+                        if (submenuTypeahead.HasActiveSearch)
+                        {
+                            submenuTypeahead.ClearSearchAndAnnounce();
+                            AnimalsMenuState.AnnounceSubmenuWithSearch();
+                        }
+                        else
+                        {
+                            AnimalsMenuState.SubmenuCancel();
+                        }
+                        handled = true;
+                    }
+                    // Handle Backspace for search
+                    else if (key == KeyCode.Backspace)
+                    {
+                        AnimalsMenuState.SubmenuHandleBackspace();
+                        handled = true;
+                    }
+                    // Handle Down arrow (use typeahead if active with matches)
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        if (submenuTypeahead.HasActiveSearch && !submenuTypeahead.HasNoMatches)
+                        {
+                            int newIndex = submenuTypeahead.GetNextMatch(AnimalsMenuState.SubmenuSelectedIndex);
+                            if (newIndex >= 0)
+                            {
+                                AnimalsMenuState.SetSubmenuSelectedIndex(newIndex);
+                                AnimalsMenuState.AnnounceSubmenuWithSearch();
+                            }
+                        }
+                        else
+                        {
+                            AnimalsMenuState.SubmenuSelectNext();
+                        }
+                        handled = true;
+                    }
+                    // Handle Up arrow (use typeahead if active with matches)
+                    else if (key == KeyCode.UpArrow)
+                    {
+                        if (submenuTypeahead.HasActiveSearch && !submenuTypeahead.HasNoMatches)
+                        {
+                            int newIndex = submenuTypeahead.GetPreviousMatch(AnimalsMenuState.SubmenuSelectedIndex);
+                            if (newIndex >= 0)
+                            {
+                                AnimalsMenuState.SetSubmenuSelectedIndex(newIndex);
+                                AnimalsMenuState.AnnounceSubmenuWithSearch();
+                            }
+                        }
+                        else
+                        {
+                            AnimalsMenuState.SubmenuSelectPrevious();
+                        }
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        AnimalsMenuState.SubmenuApply();
+                        handled = true;
+                    }
+
+                    if (handled)
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Handle typeahead characters in submenu
+                    bool isSubmenuLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isSubmenuNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if (isSubmenuLetter || isSubmenuNumber)
+                    {
+                        char c = isSubmenuLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                        AnimalsMenuState.SubmenuHandleTypeahead(c);
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Consume other keys in submenu
+                    Event.current.Use();
+                    return;
+                }
+
+                // Main menu handling
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
+                {
+                    AnimalsMenuState.JumpToFirst();
+                    handled = true;
+                }
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
+                {
+                    AnimalsMenuState.JumpToLast();
+                    handled = true;
+                }
+                // Handle Escape - clear search FIRST, then close
+                else if (key == KeyCode.Escape)
+                {
+                    if (typeahead.HasActiveSearch)
+                    {
+                        typeahead.ClearSearchAndAnnounce();
+                        AnimalsMenuState.AnnounceWithSearch();
+                        handled = true;
+                    }
+                    else
+                    {
+                        AnimalsMenuState.Close();
+                        handled = true;
+                    }
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace)
+                {
+                    AnimalsMenuState.HandleBackspace();
+                    handled = true;
+                }
+                // Handle Down arrow - navigate animals (use typeahead if active with matches)
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetNextMatch(AnimalsMenuState.CurrentAnimalIndex);
+                        if (newIndex >= 0)
+                        {
+                            AnimalsMenuState.SetCurrentAnimalIndex(newIndex);
+                            AnimalsMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        AnimalsMenuState.SelectNextAnimal();
+                    }
+                    handled = true;
+                }
+                // Handle Up arrow - navigate animals (use typeahead if active with matches)
+                else if (key == KeyCode.UpArrow)
+                {
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                    {
+                        // Navigate through matches only when there ARE matches
+                        int newIndex = typeahead.GetPreviousMatch(AnimalsMenuState.CurrentAnimalIndex);
+                        if (newIndex >= 0)
+                        {
+                            AnimalsMenuState.SetCurrentAnimalIndex(newIndex);
+                            AnimalsMenuState.AnnounceWithSearch();
+                        }
+                    }
+                    else
+                    {
+                        // Navigate normally (either no search active, OR search with no matches)
+                        AnimalsMenuState.SelectPreviousAnimal();
+                    }
+                    handled = true;
+                }
+                // Handle Right arrow - navigate columns
+                else if (key == KeyCode.RightArrow)
+                {
+                    AnimalsMenuState.SelectNextColumn();
+                    handled = true;
+                }
+                // Handle Left arrow - navigate columns
+                else if (key == KeyCode.LeftArrow)
+                {
+                    AnimalsMenuState.SelectPreviousColumn();
+                    handled = true;
+                }
+                // Handle Enter - interact with current cell
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    AnimalsMenuState.InteractWithCurrentCell();
+                    handled = true;
+                }
+                // Handle Alt+S - sort by current column
+                else if (key == KeyCode.S && Event.current.alt)
+                {
+                    AnimalsMenuState.ToggleSortByCurrentColumn();
+                    handled = true;
+                }
+
+                if (handled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle typeahead characters
+                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    AnimalsMenuState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Consume other keys to prevent passthrough
                 Event.current.Use();
                 return;
             }

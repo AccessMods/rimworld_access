@@ -15,9 +15,16 @@ namespace RimWorldAccess
         private static int currentColumnIndex = 0;
         private static int sortColumnIndex = 4; // Default: Body Size (matches PawnTable_Wildlife)
         private static bool sortDescending = true; // Default: descending (matches PawnTable_Wildlife)
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
+        public static TypeaheadSearchHelper Typeahead => typeahead;
+        public static int CurrentAnimalIndex => currentAnimalIndex;
 
         public static void Open()
         {
+            // Prevent double-opening
+            if (IsActive) return;
+
             if (Find.CurrentMap == null)
             {
                 TolkHelper.Speak("No map loaded");
@@ -44,6 +51,7 @@ namespace RimWorldAccess
 
             currentAnimalIndex = 0;
             currentColumnIndex = 0;
+            typeahead.ClearSearch();
             IsActive = true;
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -57,75 +65,45 @@ namespace RimWorldAccess
         {
             IsActive = false;
             wildlifeList.Clear();
+            typeahead.ClearSearch();
             SoundDefOf.TabClose.PlayOneShotOnCamera();
             TolkHelper.Speak("Wildlife menu closed");
         }
 
-        public static void HandleInput()
-        {
-            if (!IsActive) return;
-
-            if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.UpArrow))
-            {
-                SelectPreviousAnimal();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.DownArrow))
-            {
-                SelectNextAnimal();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.LeftArrow))
-            {
-                SelectPreviousColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.RightArrow))
-            {
-                SelectNextColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Return) ||
-                     UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.KeypadEnter))
-            {
-                InteractWithCurrentCell();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.S))
-            {
-                ToggleSortByCurrentColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Escape))
-            {
-                Close();
-            }
-        }
-
-        private static void SelectNextAnimal()
+        public static void SelectNextAnimal()
         {
             if (wildlifeList.Count == 0) return;
 
-            currentAnimalIndex = MenuHelper.SelectNext(currentAnimalIndex, wildlifeList.Count);
+            // Wrap around to first when at end
+            currentAnimalIndex = (currentAnimalIndex + 1) % wildlifeList.Count;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
-        private static void SelectPreviousAnimal()
+        public static void SelectPreviousAnimal()
         {
             if (wildlifeList.Count == 0) return;
 
-            currentAnimalIndex = MenuHelper.SelectPrevious(currentAnimalIndex, wildlifeList.Count);
+            // Wrap around to last when at start
+            currentAnimalIndex = (currentAnimalIndex - 1 + wildlifeList.Count) % wildlifeList.Count;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
-        private static void SelectNextColumn()
+        public static void SelectNextColumn()
         {
             int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
+            // Wrap around to first column when at end
+            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
 
-        private static void SelectPreviousColumn()
+        public static void SelectPreviousColumn()
         {
             int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
+            // Wrap around to last column when at start
+            currentColumnIndex = (currentColumnIndex - 1 + totalColumns) % totalColumns;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -137,12 +115,13 @@ namespace RimWorldAccess
             Pawn currentAnimal = wildlifeList[currentAnimalIndex];
             string columnName = WildlifeMenuHelper.GetColumnName(currentColumnIndex);
             string columnValue = WildlifeMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
+            string position = MenuHelper.FormatPosition(currentAnimalIndex, wildlifeList.Count);
 
             string announcement;
             if (includeAnimalName)
             {
                 string animalName = WildlifeMenuHelper.GetAnimalName(currentAnimal);
-                announcement = $"{animalName} - {columnName}: {columnValue}";
+                announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
             }
             else
             {
@@ -152,7 +131,7 @@ namespace RimWorldAccess
             TolkHelper.Speak(announcement);
         }
 
-        private static void InteractWithCurrentCell()
+        public static void InteractWithCurrentCell()
         {
             if (wildlifeList.Count == 0) return;
 
@@ -220,7 +199,7 @@ namespace RimWorldAccess
             AnnounceCurrentCell(includeAnimalName: false);
         }
 
-        private static void ToggleSortByCurrentColumn()
+        public static void ToggleSortByCurrentColumn()
         {
             if (sortColumnIndex == currentColumnIndex)
             {
@@ -263,5 +242,122 @@ namespace RimWorldAccess
             // Announce current cell after sorting (include animal name since position may have changed)
             AnnounceCurrentCell(includeAnimalName: true);
         }
+
+        #region Typeahead Search
+
+        /// <summary>
+        /// Gets a list of animal names for typeahead search.
+        /// Searches by animal name only, not by column values.
+        /// </summary>
+        public static List<string> GetItemLabels()
+        {
+            return wildlifeList.Select(p => WildlifeMenuHelper.GetAnimalName(p)).ToList();
+        }
+
+        /// <summary>
+        /// Sets the current animal index directly.
+        /// </summary>
+        public static void SetCurrentAnimalIndex(int index)
+        {
+            if (index >= 0 && index < wildlifeList.Count)
+            {
+                currentAnimalIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Handles character input for typeahead search.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentAnimalIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace for typeahead search.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    currentAnimalIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (wildlifeList.Count == 0)
+            {
+                TolkHelper.Speak("No wildlife");
+                return;
+            }
+
+            Pawn currentAnimal = wildlifeList[currentAnimalIndex];
+            string animalName = WildlifeMenuHelper.GetAnimalName(currentAnimal);
+            string columnName = WildlifeMenuHelper.GetColumnName(currentColumnIndex);
+            string columnValue = WildlifeMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
+            string position = MenuHelper.FormatPosition(currentAnimalIndex, wildlifeList.Count);
+
+            string announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
+
+            // Add search context if active
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Jumps to the first animal in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (wildlifeList.Count == 0)
+                return;
+
+            currentAnimalIndex = 0;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        /// <summary>
+        /// Jumps to the last animal in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (wildlifeList.Count == 0)
+                return;
+
+            currentAnimalIndex = wildlifeList.Count - 1;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        #endregion
     }
 }

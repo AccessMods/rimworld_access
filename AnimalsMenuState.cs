@@ -16,15 +16,26 @@ namespace RimWorldAccess
         private static int currentColumnIndex = 0;
         private static int sortColumnIndex = 0; // Column used for sorting (default: Name)
         private static bool sortDescending = false;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         // Submenu state
         private enum SubmenuType { None, Master, AllowedArea, MedicalCare, FoodRestriction }
         private static SubmenuType activeSubmenu = SubmenuType.None;
         private static int submenuSelectedIndex = 0;
         private static List<object> submenuOptions = new List<object>();
+        private static TypeaheadSearchHelper submenuTypeahead = new TypeaheadSearchHelper();
+
+        public static TypeaheadSearchHelper Typeahead => typeahead;
+        public static TypeaheadSearchHelper SubmenuTypeahead => submenuTypeahead;
+        public static int CurrentAnimalIndex => currentAnimalIndex;
+        public static int SubmenuSelectedIndex => submenuSelectedIndex;
+        public static bool IsInSubmenu => activeSubmenu != SubmenuType.None;
 
         public static void Open()
         {
+            // Prevent double-opening
+            if (IsActive) return;
+
             if (Find.CurrentMap == null)
             {
                 TolkHelper.Speak("No map loaded");
@@ -46,9 +57,13 @@ namespace RimWorldAccess
             currentAnimalIndex = 0;
             currentColumnIndex = 0;
             activeSubmenu = SubmenuType.None;
+            typeahead.ClearSearch();
             IsActive = true;
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
+
+            string announcement = $"Animals menu, {animalsList.Count} animals";
+            TolkHelper.Speak(announcement);
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
@@ -57,83 +72,45 @@ namespace RimWorldAccess
             IsActive = false;
             activeSubmenu = SubmenuType.None;
             animalsList.Clear();
+            typeahead.ClearSearch();
             SoundDefOf.TabClose.PlayOneShotOnCamera();
             TolkHelper.Speak("Animals menu closed");
         }
 
-        public static void HandleInput()
-        {
-            if (!IsActive) return;
-
-            // Handle submenu input if active
-            if (activeSubmenu != SubmenuType.None)
-            {
-                HandleSubmenuInput();
-                return;
-            }
-
-            // Main menu input handling
-            if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.UpArrow))
-            {
-                SelectPreviousAnimal();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.DownArrow))
-            {
-                SelectNextAnimal();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.LeftArrow))
-            {
-                SelectPreviousColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.RightArrow))
-            {
-                SelectNextColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Return) ||
-                     UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.KeypadEnter))
-            {
-                InteractWithCurrentCell();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.S))
-            {
-                ToggleSortByCurrentColumn();
-            }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Escape))
-            {
-                Close();
-            }
-        }
-
-        private static void SelectNextAnimal()
+        public static void SelectNextAnimal()
         {
             if (animalsList.Count == 0) return;
 
-            currentAnimalIndex = MenuHelper.SelectNext(currentAnimalIndex, animalsList.Count);
+            // Wrap around to first when at end
+            currentAnimalIndex = (currentAnimalIndex + 1) % animalsList.Count;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
-        private static void SelectPreviousAnimal()
+        public static void SelectPreviousAnimal()
         {
             if (animalsList.Count == 0) return;
 
-            currentAnimalIndex = MenuHelper.SelectPrevious(currentAnimalIndex, animalsList.Count);
+            // Wrap around to last when at start
+            currentAnimalIndex = (currentAnimalIndex - 1 + animalsList.Count) % animalsList.Count;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
-        private static void SelectNextColumn()
+        public static void SelectNextColumn()
         {
             int totalColumns = AnimalsMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
+            // Wrap around to first column when at end
+            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
 
-        private static void SelectPreviousColumn()
+        public static void SelectPreviousColumn()
         {
             int totalColumns = AnimalsMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
+            // Wrap around to last column when at start
+            currentColumnIndex = (currentColumnIndex - 1 + totalColumns) % totalColumns;
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -145,12 +122,13 @@ namespace RimWorldAccess
             Pawn currentAnimal = animalsList[currentAnimalIndex];
             string columnName = AnimalsMenuHelper.GetColumnName(currentColumnIndex);
             string columnValue = AnimalsMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
+            string position = MenuHelper.FormatPosition(currentAnimalIndex, animalsList.Count);
 
             string announcement;
             if (includeAnimalName)
             {
                 string animalName = AnimalsMenuHelper.GetAnimalName(currentAnimal);
-                announcement = $"{animalName} - {columnName}: {columnValue}";
+                announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
             }
             else
             {
@@ -160,7 +138,7 @@ namespace RimWorldAccess
             TolkHelper.Speak(announcement);
         }
 
-        private static void InteractWithCurrentCell()
+        public static void InteractWithCurrentCell()
         {
             if (animalsList.Count == 0) return;
 
@@ -364,6 +342,7 @@ namespace RimWorldAccess
             }
 
             activeSubmenu = SubmenuType.Master;
+            submenuTypeahead.ClearSearch();
             SoundDefOf.Click.PlayOneShotOnCamera();
             AnnounceSubmenuOption();
         }
@@ -392,6 +371,7 @@ namespace RimWorldAccess
             }
 
             activeSubmenu = SubmenuType.AllowedArea;
+            submenuTypeahead.ClearSearch();
             SoundDefOf.Click.PlayOneShotOnCamera();
             AnnounceSubmenuOption();
         }
@@ -418,6 +398,7 @@ namespace RimWorldAccess
             }
 
             activeSubmenu = SubmenuType.MedicalCare;
+            submenuTypeahead.ClearSearch();
             SoundDefOf.Click.PlayOneShotOnCamera();
             AnnounceSubmenuOption();
         }
@@ -444,33 +425,148 @@ namespace RimWorldAccess
             }
 
             activeSubmenu = SubmenuType.FoodRestriction;
+            submenuTypeahead.ClearSearch();
             SoundDefOf.Click.PlayOneShotOnCamera();
             AnnounceSubmenuOption();
         }
 
-        private static void HandleSubmenuInput()
+        public static void SubmenuSelectNext()
         {
-            if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.UpArrow))
+            if (submenuOptions.Count == 0) return;
+            // Wrap around
+            submenuSelectedIndex = (submenuSelectedIndex + 1) % submenuOptions.Count;
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceSubmenuOption();
+        }
+
+        public static void SubmenuSelectPrevious()
+        {
+            if (submenuOptions.Count == 0) return;
+            // Wrap around
+            submenuSelectedIndex = (submenuSelectedIndex - 1 + submenuOptions.Count) % submenuOptions.Count;
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceSubmenuOption();
+        }
+
+        public static void SubmenuApply()
+        {
+            ApplySubmenuSelection();
+        }
+
+        public static void SubmenuCancel()
+        {
+            CloseSubmenu();
+        }
+
+        /// <summary>
+        /// Gets a list of submenu option labels for typeahead search.
+        /// </summary>
+        public static List<string> GetSubmenuOptionLabels()
+        {
+            var labels = new List<string>();
+            foreach (var option in submenuOptions)
             {
-                submenuSelectedIndex = MenuHelper.SelectPrevious(submenuSelectedIndex, submenuOptions.Count);
-                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                AnnounceSubmenuOption();
+                labels.Add(GetSubmenuOptionText(option));
             }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.DownArrow))
+            return labels;
+        }
+
+        /// <summary>
+        /// Gets the display text for a submenu option.
+        /// </summary>
+        private static string GetSubmenuOptionText(object option)
+        {
+            if (option == null)
             {
-                submenuSelectedIndex = MenuHelper.SelectNext(submenuSelectedIndex, submenuOptions.Count);
-                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                AnnounceSubmenuOption();
+                return activeSubmenu == SubmenuType.Master ? "None" : "Unrestricted";
             }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Return) ||
-                     UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.KeypadEnter))
+            else if (option is Pawn colonist)
             {
-                ApplySubmenuSelection();
+                return colonist.Name.ToStringShort;
             }
-            else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.Escape))
+            else if (option is Area area)
             {
-                CloseSubmenu();
+                return area.Label;
             }
+            else if (option is MedicalCareCategory medCare)
+            {
+                return medCare.GetLabel();
+            }
+            else if (option is FoodPolicy foodPolicy)
+            {
+                return foodPolicy.label;
+            }
+            return "Unknown";
+        }
+
+        /// <summary>
+        /// Sets the submenu selected index directly.
+        /// </summary>
+        public static void SetSubmenuSelectedIndex(int index)
+        {
+            if (index >= 0 && index < submenuOptions.Count)
+            {
+                submenuSelectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Handles character input for submenu typeahead search.
+        /// </summary>
+        public static void SubmenuHandleTypeahead(char c)
+        {
+            var labels = GetSubmenuOptionLabels();
+            if (submenuTypeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    submenuSelectedIndex = newIndex;
+                    AnnounceSubmenuWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{submenuTypeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace for submenu typeahead search.
+        /// </summary>
+        public static void SubmenuHandleBackspace()
+        {
+            if (!submenuTypeahead.HasActiveSearch)
+                return;
+
+            var labels = GetSubmenuOptionLabels();
+            if (submenuTypeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    submenuSelectedIndex = newIndex;
+                AnnounceSubmenuWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current submenu selection with search context if active.
+        /// </summary>
+        public static void AnnounceSubmenuWithSearch()
+        {
+            if (submenuOptions.Count == 0) return;
+
+            object selectedOption = submenuOptions[submenuSelectedIndex];
+            string optionText = GetSubmenuOptionText(selectedOption);
+            string position = MenuHelper.FormatPosition(submenuSelectedIndex, submenuOptions.Count);
+
+            string announcement = $"{optionText}. {position}";
+
+            // Add search context if active
+            if (submenuTypeahead.HasActiveSearch)
+            {
+                announcement += $", match {submenuTypeahead.CurrentMatchPosition} of {submenuTypeahead.MatchCount} for '{submenuTypeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(announcement);
         }
 
         private static void AnnounceSubmenuOption()
@@ -554,9 +650,10 @@ namespace RimWorldAccess
             activeSubmenu = SubmenuType.None;
             submenuOptions.Clear();
             submenuSelectedIndex = 0;
+            submenuTypeahead.ClearSearch();
         }
 
-        private static void ToggleSortByCurrentColumn()
+        public static void ToggleSortByCurrentColumn()
         {
             if (sortColumnIndex == currentColumnIndex)
             {
@@ -599,5 +696,122 @@ namespace RimWorldAccess
             // Announce current cell after sorting (include animal name since position may have changed)
             AnnounceCurrentCell(includeAnimalName: true);
         }
+
+        #region Typeahead Search
+
+        /// <summary>
+        /// Gets a list of animal names for typeahead search.
+        /// Searches by animal name only, not by column values.
+        /// </summary>
+        public static List<string> GetItemLabels()
+        {
+            return animalsList.Select(p => AnimalsMenuHelper.GetAnimalName(p)).ToList();
+        }
+
+        /// <summary>
+        /// Sets the current animal index directly.
+        /// </summary>
+        public static void SetCurrentAnimalIndex(int index)
+        {
+            if (index >= 0 && index < animalsList.Count)
+            {
+                currentAnimalIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Handles character input for typeahead search.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentAnimalIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace for typeahead search.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    currentAnimalIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (animalsList.Count == 0)
+            {
+                TolkHelper.Speak("No animals");
+                return;
+            }
+
+            Pawn currentAnimal = animalsList[currentAnimalIndex];
+            string animalName = AnimalsMenuHelper.GetAnimalName(currentAnimal);
+            string columnName = AnimalsMenuHelper.GetColumnName(currentColumnIndex);
+            string columnValue = AnimalsMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
+            string position = MenuHelper.FormatPosition(currentAnimalIndex, animalsList.Count);
+
+            string announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
+
+            // Add search context if active
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Jumps to the first animal in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (animalsList.Count == 0)
+                return;
+
+            currentAnimalIndex = 0;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        /// <summary>
+        /// Jumps to the last animal in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (animalsList.Count == 0)
+                return;
+
+            currentAnimalIndex = animalsList.Count - 1;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        #endregion
     }
 }
