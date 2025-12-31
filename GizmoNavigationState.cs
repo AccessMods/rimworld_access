@@ -18,11 +18,18 @@ namespace RimWorldAccess
         private static Dictionary<Gizmo, ISelectable> gizmoOwners = new Dictionary<Gizmo, ISelectable>();
         private static ISelectable lastAnnouncedOwner = null;
         private static bool pawnJustSelected = false;
+        private static bool isExecutingGizmo = false;
 
         /// <summary>
         /// Gets whether gizmo navigation is currently active.
         /// </summary>
         public static bool IsActive => isActive;
+
+        /// <summary>
+        /// Gets whether a gizmo is currently being executed.
+        /// Used by DialogInterceptionPatch to know when to intercept FloatMenus.
+        /// </summary>
+        public static bool IsExecutingGizmo => isExecutingGizmo;
 
         /// <summary>
         /// Gets or sets whether a pawn was just selected via , or . keys.
@@ -127,8 +134,13 @@ namespace RimWorldAccess
                     var gizmos = selectable.GetGizmos().ToList();
                     foreach (Gizmo gizmo in gizmos)
                     {
-                        availableGizmos.Add(gizmo);
-                        gizmoOwners[gizmo] = selectable;
+                        // Check Visible NOW while thing is still selected
+                        // (some gizmos like Designator_Install check selection state)
+                        if (gizmo != null && gizmo.Visible)
+                        {
+                            availableGizmos.Add(gizmo);
+                            gizmoOwners[gizmo] = selectable;
+                        }
                     }
                 }
             }
@@ -145,7 +157,6 @@ namespace RimWorldAccess
 
             // Sort by Order property (lower values appear first)
             availableGizmos = availableGizmos
-                .Where(g => g != null && g.Visible)
                 .OrderBy(g => g.Order)
                 .ToList();
 
@@ -228,124 +239,145 @@ namespace RimWorldAccess
             Event fakeEvent = new Event();
             fakeEvent.type = EventType.Used;
 
-            // Special handling for different gizmo types
+            // Set flag so DialogInterceptionPatch knows to intercept FloatMenus
+            // (e.g., scanner mineral selection menu)
+            isExecutingGizmo = true;
 
-            // 1. Designator (like Reinstall, Copy) - enters placement mode
-            if (selectedGizmo is Designator designator)
+            try
             {
-                // For Designators opened via cursor objects (not selected pawns),
-                // we need to ensure the correct object is selected
-                // so the Designator has proper context (e.g., Designator_Install needs to know what to reinstall)
+                // Special handling for different gizmo types
+
+                // 1. Designator (like Reinstall, Copy) - enters placement mode
+                if (selectedGizmo is Designator designator)
+                {
+                    // For Designators opened via cursor objects (not selected pawns),
+                    // we need to ensure the correct object is selected
+                    // so the Designator has proper context (e.g., Designator_Install needs to know what to reinstall)
+                    if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo) && Find.Selector != null)
+                    {
+                        // Select ONLY the specific thing that owns this gizmo
+                        ISelectable owner = gizmoOwners[selectedGizmo];
+                        Find.Selector.ClearSelection();
+                        Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                    }
+
+                    try
+                    {
+                        // Call ProcessInput to let the Designator do its preparation work
+                        // (Designator_Install does setup like canceling existing blueprints)
+                        selectedGizmo.ProcessInput(fakeEvent);
+
+                        // Validate that the designator was actually selected
+                        if (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null)
+                        {
+                            // Announce placement mode
+                            TolkHelper.Speak($"{gizmoLabel} - Use arrow keys to position, R to rotate, Space to place, Escape to cancel");
+                        }
+                        else
+                        {
+                            TolkHelper.Speak($"Error: {gizmoLabel} could not be activated. Check if the item can be placed.", SpeechPriority.High);
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        ModLogger.Error($"Exception in Designator execution: {ex.Message}");
+                        TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
+                    }
+
+                    // Close the gizmo menu AFTER announcing
+                    Close();
+                    return;
+                }
+
+                // For non-Designator gizmos, also select the owner so FloatMenu actions work correctly
+                // (some actions check Find.Selector.SelectedObjects)
                 if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo) && Find.Selector != null)
                 {
-                    // Select ONLY the specific thing that owns this gizmo
                     ISelectable owner = gizmoOwners[selectedGizmo];
                     Find.Selector.ClearSelection();
                     Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
                 }
 
-                try
-                {
-                    // Call ProcessInput to let the Designator do its preparation work
-                    // (Designator_Install does setup like canceling existing blueprints)
-                    selectedGizmo.ProcessInput(fakeEvent);
-
-                    // Validate that the designator was actually selected
-                    if (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null)
-                    {
-                        // Announce placement mode
-                        TolkHelper.Speak($"{gizmoLabel} - Use arrow keys to position, R to rotate, Space to place, Escape to cancel");
-                    }
-                    else
-                    {
-                        TolkHelper.Speak($"Error: {gizmoLabel} could not be activated. Check if the item can be placed.", SpeechPriority.High);
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    ModLogger.Error($"Exception in Designator execution: {ex.Message}");
-                    TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
-                }
-
-                // Close the gizmo menu AFTER announcing
-                Close();
-                return;
-            }
-
-            // 2. Command_Toggle - toggle and announce state
-            if (selectedGizmo is Command_Toggle toggle)
-            {
-                try
-                {
-                    // Execute the toggle
-                    selectedGizmo.ProcessInput(fakeEvent);
-
-                    // Announce the new state
-                    bool toggleActive = toggle.isActive?.Invoke() ?? false;
-                    string state = toggleActive ? "ON" : "OFF";
-                    string label = GetGizmoLabel(toggle);
-                    TolkHelper.Speak($"{label}: {state}");
-                }
-                catch (System.Exception ex)
-                {
-                    ModLogger.Error($"Exception in Command_Toggle execution: {ex.Message}");
-                    TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
-                }
-            }
-            else
-            {
-                // 3. Command_VerbTarget (weapon attacks) - announce targeting mode
-                if (selectedGizmo is Command_VerbTarget verbTarget)
+                // 2. Command_Toggle - toggle and announce state
+                if (selectedGizmo is Command_Toggle toggle)
                 {
                     try
                     {
-                        // Execute the command
+                        // Execute the toggle
                         selectedGizmo.ProcessInput(fakeEvent);
 
-                        string weaponName = verbTarget.ownerThing?.LabelCap ?? "weapon";
-                        string verbLabel = verbTarget.verb?.ReportLabel ?? "attack";
-                        TolkHelper.Speak($"{weaponName} {verbLabel} - Use map navigation to select target, then press Enter");
+                        // Announce the new state
+                        bool toggleActive = toggle.isActive?.Invoke() ?? false;
+                        string state = toggleActive ? "ON" : "OFF";
+                        string label = GetGizmoLabel(toggle);
+                        TolkHelper.Speak($"{label}: {state}");
                     }
                     catch (System.Exception ex)
                     {
-                        ModLogger.Error($"Exception in Command_VerbTarget execution: {ex.Message}");
+                        ModLogger.Error($"Exception in Command_Toggle execution: {ex.Message}");
                         TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
                     }
                 }
-                // 4. Command_Target - announce targeting mode
-                else if (selectedGizmo is Command_Target)
-                {
-                    try
-                    {
-                        // Execute the command
-                        selectedGizmo.ProcessInput(fakeEvent);
-
-                        TolkHelper.Speak($"{gizmoLabel} - Use map navigation to select target, then press Enter");
-                    }
-                    catch (System.Exception ex)
-                    {
-                        ModLogger.Error($"Exception in Command_Target execution: {ex.Message}");
-                        TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
-                    }
-                }
-                // 5. Generic Command
                 else
                 {
-                    try
+                    // 3. Command_VerbTarget (weapon attacks) - announce targeting mode
+                    if (selectedGizmo is Command_VerbTarget verbTarget)
                     {
-                        // Execute the command
-                        selectedGizmo.ProcessInput(fakeEvent);
+                        try
+                        {
+                            // Execute the command
+                            selectedGizmo.ProcessInput(fakeEvent);
+
+                            string weaponName = verbTarget.ownerThing?.LabelCap ?? "weapon";
+                            string verbLabel = verbTarget.verb?.ReportLabel ?? "attack";
+                            TolkHelper.Speak($"{weaponName} {verbLabel} - Use map navigation to select target, then press Enter");
+                        }
+                        catch (System.Exception ex)
+                        {
+                            ModLogger.Error($"Exception in Command_VerbTarget execution: {ex.Message}");
+                            TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
+                        }
                     }
-                    catch (System.Exception ex)
+                    // 4. Command_Target - announce targeting mode
+                    else if (selectedGizmo is Command_Target)
                     {
-                        ModLogger.Error($"Exception in generic Command execution: {ex.Message}");
-                        TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
+                        try
+                        {
+                            // Execute the command
+                            selectedGizmo.ProcessInput(fakeEvent);
+
+                            TolkHelper.Speak($"{gizmoLabel} - Use map navigation to select target, then press Enter");
+                        }
+                        catch (System.Exception ex)
+                        {
+                            ModLogger.Error($"Exception in Command_Target execution: {ex.Message}");
+                            TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
+                        }
+                    }
+                    // 5. Generic Command
+                    else
+                    {
+                        try
+                        {
+                            // Execute the command
+                            selectedGizmo.ProcessInput(fakeEvent);
+                        }
+                        catch (System.Exception ex)
+                        {
+                            ModLogger.Error($"Exception in generic Command execution: {ex.Message}");
+                            TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
+                        }
                     }
                 }
-            }
 
-            // Always close after executing (per user requirement)
-            Close();
+                // Always close after executing (per user requirement)
+                Close();
+            }
+            finally
+            {
+                // Clear flag after gizmo execution completes
+                isExecutingGizmo = false;
+            }
         }
 
         /// <summary>
