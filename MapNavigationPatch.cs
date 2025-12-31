@@ -2,8 +2,6 @@ using HarmonyLib;
 using UnityEngine;
 using Verse;
 using RimWorld;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace RimWorldAccess
 {
@@ -233,10 +231,6 @@ namespace RimWorldAccess
                     // Get the new cursor position
                     IntVec3 newPosition = MapNavigationState.CurrentCursorPosition;
 
-                    // Sync Find.Selector to match keyboard cursor position
-                    // This ensures selection-dependent systems (like gizmo visibility) work correctly
-                    SyncSelectionToCursor(newPosition, Find.CurrentMap);
-
                     // Move camera to center on new cursor position
                     __instance.JumpToCurrentMapLoc(newPosition);
 
@@ -341,37 +335,6 @@ namespace RimWorldAccess
                 // Reset velocity to prevent any accumulated movement
                 Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
                 Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
-            }
-        }
-
-        /// <summary>
-        /// Syncs Find.Selector to match the keyboard cursor position.
-        /// This ensures selection-dependent systems (like gizmo visibility) work correctly
-        /// with keyboard navigation.
-        /// </summary>
-        public static void SyncSelectionToCursor(IntVec3 position, Map map)
-        {
-            if (Find.Selector == null || map == null)
-                return;
-
-            if (!position.IsValid || !position.InBounds(map))
-                return;
-
-            // Get things at the cursor position
-            List<Thing> thingsAtPosition = position.GetThingList(map);
-
-            // Filter to selectable things (exclude filth, motes, etc.)
-            var selectableThings = thingsAtPosition
-                .Where(t => t != null && ThingSelectionUtility.SelectableByMapClick(t))
-                .ToList();
-
-            // Clear current selection
-            Find.Selector.ClearSelection();
-
-            // Select things at cursor (silently, no sound, no designator deselect)
-            foreach (var thing in selectableThings)
-            {
-                Find.Selector.Select(thing, playSound: false, forceDesignatorDeselect: false);
             }
         }
     }

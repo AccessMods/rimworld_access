@@ -1448,18 +1448,16 @@ namespace RimWorldAccess
                     Event.current.Use();
 
                     // Decide whether to open gizmos for selected objects or for objects at cursor
-                    // With synced selection (arrow keys auto-select things at cursor), we can use
-                    // Open() whenever there's a selection. OpenAtCursor is only needed as fallback
-                    // for empty tiles.
-                    if (Find.Selector != null && Find.Selector.NumSelected > 0)
+                    // Use selected pawn gizmos ONLY if a pawn was just selected with , or .
+                    // Otherwise, use objects at the cursor position
+                    if (GizmoNavigationState.PawnJustSelected && Find.Selector != null && Find.Selector.NumSelected > 0)
                     {
-                        // Open gizmos for whatever is currently selected
-                        // (either via pawn cycling, arrow key navigation, or mouse)
+                        // Open gizmos for the pawn that was just selected with , or .
                         GizmoNavigationState.Open();
                     }
                     else
                     {
-                        // Fallback: try to get gizmos at cursor position (handles empty tiles)
+                        // Open gizmos for objects at the cursor position
                         IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
                         GizmoNavigationState.OpenAtCursor(cursorPosition, Find.CurrentMap);
                     }
