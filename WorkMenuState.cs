@@ -1,14 +1,20 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Verse;
 using RimWorld;
 
 namespace RimWorldAccess
 {
     /// <summary>
-    /// Manages the state and navigation for the interactive work assignment menu.
-    /// Tracks work types, their priority values (0-4), and pending changes.
-    /// Supports both simple mode (toggle on/off) and manual priority mode (1-4).
+    /// Manages the state and navigation for the grid-based work assignment menu.
+    ///
+    /// Manual Mode: 5-column virtual grid (Priority 1, 2, 3, 4, Disabled)
+    /// Basic Mode: Single column of all tasks with enable/disable toggle
+    ///
+    /// Navigation preserves row position when moving between columns.
+    /// Shift+Up/Down reorders tasks within their column for execution priority.
     /// </summary>
     public static class WorkMenuState
     {
@@ -16,17 +22,67 @@ namespace RimWorldAccess
         private static Pawn currentPawn = null;
         private static int currentPawnIndex = 0;
         private static List<Pawn> allPawns = new List<Pawn>();
-        private static int selectedIndex = 0;
-        private static List<WorkTypeEntry> workEntries = new List<WorkTypeEntry>();
+
+        // Grid navigation state (manual mode)
+        private static int currentColumn = 0; // 0-4: Priority 1-4, then Disabled
+        private static int currentRow = 0;
+
+        // Basic mode navigation state
+        private static int basicModeIndex = 0;
+
+        // Work entries organized by priority column
+        // Index 0 = Priority 1, Index 1 = Priority 2, etc., Index 4 = Disabled (0)
+        private static List<List<WorkTypeEntry>> columns = new List<List<WorkTypeEntry>>();
+
+        // Flat list for basic mode and searching
+        private static List<WorkTypeEntry> allEntries = new List<WorkTypeEntry>();
+
+        // Original priorities for tracking changes
+        private static Dictionary<WorkTypeDef, int> originalPriorities = new Dictionary<WorkTypeDef, int>();
+
+        // Original order for each priority level (for revert)
+        private static Dictionary<WorkTypeDef, int> originalNaturalPriorities = new Dictionary<WorkTypeDef, int>();
+
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+        private static bool searchJumpPending = false;
+        private static int searchTargetColumn = -1;
+        private static int searchTargetRow = -1;
+
+        // Skill level descriptors (game's 21 levels)
+        private static readonly string[] SkillDescriptors = new string[]
+        {
+            "Barely heard of it",
+            "Utter beginner",
+            "Beginner",
+            "Basic familiarity",
+            "Some familiarity",
+            "Significant familiarity",
+            "Capable amateur",
+            "Weak professional",
+            "Employable professional",
+            "Solid professional",
+            "Skilled professional",
+            "Very skilled professional",
+            "Expert",
+            "Strong expert",
+            "Master",
+            "Strong master",
+            "Region-known master",
+            "Region-leading master",
+            "Planet-known master",
+            "Planet-leading master",
+            "Legendary master"
+        };
 
         public static bool IsActive => isActive;
-        public static int SelectedIndex => selectedIndex;
-        public static List<WorkTypeEntry> WorkEntries => workEntries;
         public static Pawn CurrentPawn => currentPawn;
         public static int CurrentPawnIndex => currentPawnIndex;
         public static int TotalPawns => allPawns.Count;
         public static TypeaheadSearchHelper Typeahead => typeahead;
+        public static int CurrentColumn => currentColumn;
+        public static int CurrentRow => currentRow;
+        public static bool IsManualMode => Find.PlaySettings.useWorkPriorities;
+        public static bool SearchJumpPending => searchJumpPending;
 
         /// <summary>
         /// Opens the work menu for the specified pawn.
@@ -38,77 +94,157 @@ namespace RimWorldAccess
 
             isActive = true;
             currentPawn = pawn;
-            selectedIndex = 0;
+            currentColumn = 0;
+            currentRow = 0;
+            basicModeIndex = 0;
             typeahead.ClearSearch();
+            searchJumpPending = false;
 
             // Build list of all colonists
             allPawns.Clear();
             if (Find.CurrentMap != null)
             {
-                allPawns = Find.CurrentMap.mapPawns.FreeColonists.ToList();
+                allPawns = Find.CurrentMap.mapPawns.FreeColonists
+                    .Where(p => !p.DevelopmentalStage.Baby())
+                    .ToList();
                 currentPawnIndex = allPawns.IndexOf(pawn);
                 if (currentPawnIndex < 0)
                     currentPawnIndex = 0;
             }
 
             LoadWorkTypesForCurrentPawn();
+
+            // Position cursor at first populated column in manual mode
+            if (IsManualMode)
+            {
+                FindFirstPopulatedColumn();
+            }
+
+            AnnounceCurrentPosition(true);
         }
 
         /// <summary>
-        /// Loads work types for the current pawn.
+        /// Loads work types for the current pawn and organizes them into columns.
         /// </summary>
         private static void LoadWorkTypesForCurrentPawn()
         {
             if (currentPawn == null || currentPawn.workSettings == null)
                 return;
 
+            // Clear previous state
+            columns.Clear();
+            for (int i = 0; i < 5; i++)
+                columns.Add(new List<WorkTypeEntry>());
+
+            allEntries.Clear();
+            originalPriorities.Clear();
+            originalNaturalPriorities.Clear();
+
             // Build the list of work types
-            workEntries.Clear();
-            var allWorkTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading;
+            var allWorkTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading
+                .Where(w => w.visible)
+                .OrderByDescending(w => w.naturalPriority)
+                .ToList();
 
             foreach (var workType in allWorkTypes)
             {
-                if (workType.visible)
-                {
-                    bool isDisabled = currentPawn.WorkTypeIsDisabled(workType);
-                    int priority = isDisabled ? 0 : currentPawn.workSettings.GetPriority(workType);
+                bool isPermanentlyDisabled = currentPawn.WorkTypeIsDisabled(workType);
+                int priority = isPermanentlyDisabled ? 0 : currentPawn.workSettings.GetPriority(workType);
 
-                    workEntries.Add(new WorkTypeEntry
-                    {
-                        WorkType = workType,
-                        IsDisabled = isDisabled,
-                        CurrentPriority = priority,
-                        OriginalPriority = priority
-                    });
-                }
+                var entry = new WorkTypeEntry
+                {
+                    WorkType = workType,
+                    IsPermanentlyDisabled = isPermanentlyDisabled,
+                    CurrentPriority = priority
+                };
+
+                allEntries.Add(entry);
+                originalPriorities[workType] = priority;
+                originalNaturalPriorities[workType] = workType.naturalPriority;
+
+                // Add to appropriate column
+                int columnIndex = PriorityToColumnIndex(priority);
+                columns[columnIndex].Add(entry);
             }
 
-            // Sort by naturalPriority (descending = higher priority first)
-            // This matches the execution order when priority numbers are equal
-            workEntries = workEntries.OrderByDescending(e => e.WorkType.naturalPriority).ToList();
-
-            // Announce menu opened
-            UpdateClipboard();
+            // Sort disabled column: voluntarily disabled first, then permanently disabled
+            columns[4] = columns[4]
+                .OrderBy(e => e.IsPermanentlyDisabled ? 1 : 0)
+                .ThenByDescending(e => e.WorkType.naturalPriority)
+                .ToList();
         }
 
         /// <summary>
-        /// Closes the menu without applying changes.
+        /// Converts priority value (0-4) to column index (0-4).
+        /// Priority 1 = column 0, Priority 2 = column 1, etc.
+        /// Priority 0 (disabled) = column 4.
+        /// </summary>
+        private static int PriorityToColumnIndex(int priority)
+        {
+            if (priority == 0) return 4; // Disabled
+            return priority - 1; // Priority 1-4 -> column 0-3
+        }
+
+        /// <summary>
+        /// Converts column index (0-4) to priority value (0-4).
+        /// </summary>
+        private static int ColumnIndexToPriority(int columnIndex)
+        {
+            if (columnIndex == 4) return 0; // Disabled
+            return columnIndex + 1; // Column 0-3 -> Priority 1-4
+        }
+
+        /// <summary>
+        /// Finds the first non-empty column and positions cursor there.
+        /// </summary>
+        private static void FindFirstPopulatedColumn()
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                if (columns[i].Count > 0)
+                {
+                    currentColumn = i;
+                    currentRow = 0;
+                    return;
+                }
+            }
+            // All columns empty (shouldn't happen)
+            currentColumn = 0;
+            currentRow = 0;
+        }
+
+        /// <summary>
+        /// Closes the menu without applying changes (reverts all).
         /// </summary>
         public static void Cancel()
         {
-            isActive = false;
-            currentPawn = null;
-            currentPawnIndex = 0;
-            allPawns.Clear();
-            selectedIndex = 0;
-            workEntries.Clear();
-            typeahead.ClearSearch();
+            // Revert all priorities to original
+            if (currentPawn != null && currentPawn.workSettings != null)
+            {
+                foreach (var kvp in originalPriorities)
+                {
+                    if (!currentPawn.WorkTypeIsDisabled(kvp.Key))
+                    {
+                        currentPawn.workSettings.SetPriority(kvp.Key, kvp.Value);
+                    }
+                }
 
-            TolkHelper.Speak("Work menu cancelled");
+                // Revert natural priorities (execution order)
+                foreach (var kvp in originalNaturalPriorities)
+                {
+                    kvp.Key.naturalPriority = kvp.Value;
+                }
+
+                // Refresh work givers cache
+                currentPawn.workSettings.Notify_UseWorkPrioritiesChanged();
+            }
+
+            CleanupState();
+            TolkHelper.Speak("Work menu cancelled, changes discarded");
         }
 
         /// <summary>
-        /// Closes the menu and applies all pending changes to the pawn's work settings.
+        /// Closes the menu and applies all pending changes.
         /// </summary>
         public static void Confirm()
         {
@@ -118,532 +254,1076 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Apply final changes
-            int changesApplied = ApplyPendingChanges();
+            string pawnName = currentPawn.LabelShort;
 
-            string message = changesApplied > 0
-                ? $"Applied {changesApplied} work assignment changes for {currentPawn.LabelShort}"
-                : $"No changes made for {currentPawn.LabelShort}";
+            // Changes are already applied in real-time, just need to finalize
+            // Force refresh of work givers cache
+            currentPawn.workSettings.Notify_UseWorkPrioritiesChanged();
 
-            TolkHelper.Speak(message);
+            // Refresh all pawns if natural priorities changed
+            RefreshAllPawnsWorkGivers();
 
+            CleanupState();
+            TolkHelper.Speak($"{pawnName}'s work preferences saved");
+        }
+
+        /// <summary>
+        /// Saves changes for current pawn and switches to another pawn.
+        /// </summary>
+        private static void SaveAndSwitchPawn(int newPawnIndex)
+        {
+            string previousPawnName = currentPawn?.LabelShort ?? "Unknown";
+
+            if (currentPawn != null && currentPawn.workSettings != null)
+            {
+                // Changes are applied in real-time, just refresh
+                currentPawn.workSettings.Notify_UseWorkPrioritiesChanged();
+            }
+
+            currentPawnIndex = newPawnIndex;
+            currentPawn = allPawns[currentPawnIndex];
+            currentColumn = 0;
+            currentRow = 0;
+            basicModeIndex = 0;
+            typeahead.ClearSearch();
+            searchJumpPending = false;
+
+            LoadWorkTypesForCurrentPawn();
+
+            if (IsManualMode)
+            {
+                FindFirstPopulatedColumn();
+            }
+
+            TolkHelper.Speak($"{previousPawnName}'s work preferences saved. Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
+            AnnounceCurrentPosition(true);
+        }
+
+        private static void CleanupState()
+        {
             isActive = false;
             currentPawn = null;
             currentPawnIndex = 0;
             allPawns.Clear();
-            selectedIndex = 0;
-            workEntries.Clear();
+            columns.Clear();
+            allEntries.Clear();
+            originalPriorities.Clear();
+            originalNaturalPriorities.Clear();
             typeahead.ClearSearch();
+            searchJumpPending = false;
         }
 
-        /// <summary>
-        /// Applies all pending changes to the current pawn's work settings.
-        /// Returns the number of changes applied.
-        /// </summary>
-        private static int ApplyPendingChanges()
+        private static void RefreshAllPawnsWorkGivers()
         {
-            if (currentPawn == null || currentPawn.workSettings == null)
-                return 0;
-
-            int changesApplied = 0;
-
-            foreach (var entry in workEntries)
+            if (Find.CurrentMap != null)
             {
-                if (!entry.IsDisabled && entry.CurrentPriority != entry.OriginalPriority)
+                foreach (Pawn pawn in Find.CurrentMap.mapPawns.FreeColonists)
                 {
-                    currentPawn.workSettings.SetPriority(entry.WorkType, entry.CurrentPriority);
-                    changesApplied++;
+                    if (pawn.workSettings != null)
+                    {
+                        pawn.workSettings.Notify_UseWorkPrioritiesChanged();
+                    }
                 }
             }
-
-            return changesApplied;
         }
 
+        #region Navigation
+
         /// <summary>
-        /// Moves selection up in the list (stops at top).
+        /// Moves cursor up within current column (manual) or list (basic).
         /// </summary>
         public static void MoveUp()
         {
-            if (workEntries.Count == 0)
-                return;
-
-            if (selectedIndex > 0)
+            if (IsManualMode)
             {
-                selectedIndex--;
-                UpdateClipboard();
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
+
+                if (currentRow > 0)
+                {
+                    currentRow--;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At top");
+                }
             }
             else
             {
-                TolkHelper.Speak("At top of list");
+                // Basic mode
+                if (allEntries.Count == 0) return;
+
+                if (basicModeIndex > 0)
+                {
+                    basicModeIndex--;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At top");
+                }
             }
         }
 
         /// <summary>
-        /// Moves selection down in the list (stops at bottom).
+        /// Moves cursor down within current column (manual) or list (basic).
         /// </summary>
         public static void MoveDown()
         {
-            if (workEntries.Count == 0)
-                return;
-
-            if (selectedIndex < workEntries.Count - 1)
+            if (IsManualMode)
             {
-                selectedIndex++;
-                UpdateClipboard();
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
+
+                if (currentRow < col.Count - 1)
+                {
+                    currentRow++;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At bottom");
+                }
             }
             else
             {
-                TolkHelper.Speak("At bottom of list");
-            }
-        }
+                // Basic mode
+                if (allEntries.Count == 0) return;
 
-        /// <summary>
-        /// Toggles the enabled state of the currently selected work type.
-        /// In simple mode: toggles between 0 (disabled) and 3 (default).
-        /// In manual priority mode: toggles between 0 (disabled) and 3 (medium).
-        /// Only works if the work type is not permanently disabled.
-        /// </summary>
-        public static void ToggleSelected()
-        {
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-                return;
-
-            var entry = workEntries[selectedIndex];
-
-            if (entry.IsDisabled)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: Disabled - cannot toggle", SpeechPriority.High);
-                return;
-            }
-
-            // Toggle between 0 (disabled) and 3 (default enabled)
-            entry.CurrentPriority = (entry.CurrentPriority == 0) ? 3 : 0;
-            UpdateClipboard();
-        }
-
-        /// <summary>
-        /// Sets the priority of the currently selected work type to a specific value (0-4).
-        /// Only works in manual priority mode and if the work type is not permanently disabled.
-        /// </summary>
-        public static void SetPriority(int priority)
-        {
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-                return;
-
-            var entry = workEntries[selectedIndex];
-
-            if (entry.IsDisabled)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: Disabled - cannot change priority", SpeechPriority.High);
-                return;
-            }
-
-            // Validate priority range
-            if (priority < 0 || priority > 4)
-                return;
-
-            entry.CurrentPriority = priority;
-            UpdateClipboard();
-        }
-
-        /// <summary>
-        /// Switches to the next pawn in the list (does not wrap).
-        /// Automatically applies any pending changes before switching.
-        /// </summary>
-        public static void SwitchToNextPawn()
-        {
-            if (allPawns.Count == 0)
-                return;
-
-            // Apply pending changes for current pawn before switching
-            ApplyPendingChanges();
-
-            currentPawnIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
-            currentPawn = allPawns[currentPawnIndex];
-            selectedIndex = 0;
-            typeahead.ClearSearch();
-            LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
-        }
-
-        /// <summary>
-        /// Switches to the previous pawn in the list (does not wrap).
-        /// Automatically applies any pending changes before switching.
-        /// </summary>
-        public static void SwitchToPreviousPawn()
-        {
-            if (allPawns.Count == 0)
-                return;
-
-            // Apply pending changes for current pawn before switching
-            ApplyPendingChanges();
-
-            currentPawnIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
-
-            currentPawn = allPawns[currentPawnIndex];
-            selectedIndex = 0;
-            typeahead.ClearSearch();
-            LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
-        }
-
-        /// <summary>
-        /// Moves the selected work type up in the column order (left in UI).
-        /// This affects execution order when priority numbers are equal by swapping naturalPriority values.
-        /// Only works in manual priority mode.
-        /// </summary>
-        public static void ReorderWorkTypeUp()
-        {
-            if (!Find.PlaySettings.useWorkPriorities)
-            {
-                TolkHelper.Speak("Column reordering only available in manual priorities mode");
-                return;
-            }
-
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-                return;
-
-            var entry = workEntries[selectedIndex];
-
-            // Get all work types sorted by naturalPriority (descending = higher priority first)
-            var allWorkTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading
-                .Where(w => w.visible)
-                .OrderByDescending(w => w.naturalPriority)
-                .ToList();
-
-            int currentIndex = allWorkTypes.IndexOf(entry.WorkType);
-            if (currentIndex <= 0)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: Already at highest priority");
-                return;
-            }
-
-            // Swap naturalPriority values with the work type that has higher priority
-            var higherWorkType = allWorkTypes[currentIndex - 1];
-            int temp = entry.WorkType.naturalPriority;
-            entry.WorkType.naturalPriority = higherWorkType.naturalPriority;
-            higherWorkType.naturalPriority = temp;
-
-            // Also update column order for visual consistency
-            var workTableDef = PawnTableDefOf.Work;
-            var columns = workTableDef.columns;
-            var column = columns.FirstOrDefault(c => c.workType == entry.WorkType);
-            if (column != null)
-            {
-                int columnIndex = columns.IndexOf(column);
-                if (columnIndex > 0)
+                if (basicModeIndex < allEntries.Count - 1)
                 {
-                    columns.RemoveAt(columnIndex);
-                    columns.Insert(columnIndex - 1, column);
+                    basicModeIndex++;
+                    AnnounceCurrentPosition(false);
+                }
+                else
+                {
+                    TolkHelper.Speak("At bottom");
                 }
             }
-
-            // Force table refresh if work tab is open
-            var workTab = Find.WindowStack.WindowOfType<MainTabWindow_Work>();
-            if (workTab != null)
-            {
-                workTab.Notify_ResolutionChanged();
-            }
-
-            // Force all pawns to recache their work givers so execution order updates
-            if (Find.CurrentMap != null)
-            {
-                foreach (Pawn pawn in Find.CurrentMap.mapPawns.FreeColonists)
-                {
-                    if (pawn.workSettings != null)
-                    {
-                        pawn.workSettings.Notify_UseWorkPrioritiesChanged();
-                    }
-                }
-            }
-
-            // Re-sort the workEntries list to reflect the new order
-            var selectedWorkType = entry.WorkType;
-            workEntries = workEntries.OrderByDescending(e => e.WorkType.naturalPriority).ToList();
-
-            // Update selectedIndex to follow the moved item
-            selectedIndex = workEntries.FindIndex(e => e.WorkType == selectedWorkType);
-            if (selectedIndex < 0)
-                selectedIndex = 0;
-
-            TolkHelper.Speak($"{entry.WorkType.labelShort}: Moved up in priority order (will execute earlier when priorities are equal)");
         }
 
         /// <summary>
-        /// Moves the selected work type down in the column order (right in UI).
-        /// This affects execution order when priority numbers are equal by swapping naturalPriority values.
-        /// Only works in manual priority mode.
-        /// </summary>
-        public static void ReorderWorkTypeDown()
-        {
-            if (!Find.PlaySettings.useWorkPriorities)
-            {
-                TolkHelper.Speak("Column reordering only available in manual priorities mode");
-                return;
-            }
-
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-                return;
-
-            var entry = workEntries[selectedIndex];
-
-            // Get all work types sorted by naturalPriority (descending = higher priority first)
-            var allWorkTypes = DefDatabase<WorkTypeDef>.AllDefsListForReading
-                .Where(w => w.visible)
-                .OrderByDescending(w => w.naturalPriority)
-                .ToList();
-
-            int currentIndex = allWorkTypes.IndexOf(entry.WorkType);
-            if (currentIndex >= allWorkTypes.Count - 1)
-            {
-                TolkHelper.Speak($"{entry.WorkType.labelShort}: Already at lowest priority");
-                return;
-            }
-
-            // Swap naturalPriority values with the work type that has lower priority
-            var lowerWorkType = allWorkTypes[currentIndex + 1];
-            int temp = entry.WorkType.naturalPriority;
-            entry.WorkType.naturalPriority = lowerWorkType.naturalPriority;
-            lowerWorkType.naturalPriority = temp;
-
-            // Also update column order for visual consistency
-            var workTableDef = PawnTableDefOf.Work;
-            var columns = workTableDef.columns;
-            var column = columns.FirstOrDefault(c => c.workType == entry.WorkType);
-            if (column != null)
-            {
-                int columnIndex = columns.IndexOf(column);
-                if (columnIndex < columns.Count - 1)
-                {
-                    columns.RemoveAt(columnIndex);
-                    columns.Insert(columnIndex + 1, column);
-                }
-            }
-
-            // Force table refresh if work tab is open
-            var workTab = Find.WindowStack.WindowOfType<MainTabWindow_Work>();
-            if (workTab != null)
-            {
-                workTab.Notify_ResolutionChanged();
-            }
-
-            // Force all pawns to recache their work givers so execution order updates
-            if (Find.CurrentMap != null)
-            {
-                foreach (Pawn pawn in Find.CurrentMap.mapPawns.FreeColonists)
-                {
-                    if (pawn.workSettings != null)
-                    {
-                        pawn.workSettings.Notify_UseWorkPrioritiesChanged();
-                    }
-                }
-            }
-
-            // Re-sort the workEntries list to reflect the new order
-            var selectedWorkType = entry.WorkType;
-            workEntries = workEntries.OrderByDescending(e => e.WorkType.naturalPriority).ToList();
-
-            // Update selectedIndex to follow the moved item
-            selectedIndex = workEntries.FindIndex(e => e.WorkType == selectedWorkType);
-            if (selectedIndex < 0)
-                selectedIndex = 0;
-
-            TolkHelper.Speak($"{entry.WorkType.labelShort}: Moved down in priority order (will execute later when priorities are equal)");
-        }
-
-        /// <summary>
-        /// Toggles between simple mode and manual priority mode.
-        /// </summary>
-        public static void ToggleMode()
-        {
-            bool wasUsingPriorities = Find.PlaySettings.useWorkPriorities;
-            Find.PlaySettings.useWorkPriorities = !wasUsingPriorities;
-
-            // Convert priorities when switching modes
-            foreach (var entry in workEntries)
-            {
-                if (!entry.IsDisabled)
-                {
-                    if (wasUsingPriorities)
-                    {
-                        // Switching from manual to simple: convert any non-zero priority to "enabled" (3)
-                        entry.CurrentPriority = (entry.CurrentPriority > 0) ? 3 : 0;
-                    }
-                    // When switching from simple to manual, priorities stay as they are (0 or 3)
-                }
-            }
-
-            string mode = Find.PlaySettings.useWorkPriorities ? "manual priorities" : "simple";
-            TolkHelper.Speak($"Switched to {mode} mode");
-            UpdateClipboard();
-        }
-
-        /// <summary>
-        /// Gets the current selection as a formatted string for screen reader.
-        /// Announces differently based on whether manual priorities mode is active.
-        /// </summary>
-        private static void UpdateClipboard()
-        {
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-            {
-                TolkHelper.Speak("No work types available");
-                return;
-            }
-
-            var entry = workEntries[selectedIndex];
-            string message;
-
-            if (entry.IsDisabled)
-            {
-                message = $"{entry.WorkType.labelShort}: Permanently disabled";
-            }
-            else if (Find.PlaySettings.useWorkPriorities)
-            {
-                // Manual priority mode: announce priority number
-                string priorityDesc = GetPriorityDescription(entry.CurrentPriority);
-                string changed = (entry.CurrentPriority != entry.OriginalPriority) ? " (pending)" : "";
-                message = $"{entry.WorkType.labelShort}: {priorityDesc}{changed}";
-            }
-            else
-            {
-                // Simple mode: announce enabled/disabled
-                bool isEnabled = (entry.CurrentPriority > 0);
-                bool wasEnabled = (entry.OriginalPriority > 0);
-                string status = isEnabled ? "Enabled" : "Disabled";
-                string changed = (isEnabled != wasEnabled) ? " (pending)" : "";
-                message = $"{entry.WorkType.labelShort}: {status}{changed}";
-            }
-
-            TolkHelper.Speak(message);
-        }
-
-        /// <summary>
-        /// Gets a human-readable description of a priority value.
-        /// </summary>
-        private static string GetPriorityDescription(int priority)
-        {
-            switch (priority)
-            {
-                case 0: return "Disabled";
-                case 1: return "Priority 1 (highest)";
-                case 2: return "Priority 2 (high)";
-                case 3: return "Priority 3 (medium)";
-                case 4: return "Priority 4 (low)";
-                default: return $"Priority {priority}";
-            }
-        }
-
-        /// <summary>
-        /// Jumps to the first item in the list.
+        /// Jumps to the first item in the current column (manual) or list (basic).
         /// </summary>
         public static void JumpToFirst()
         {
-            if (workEntries.Count == 0)
-                return;
-
-            selectedIndex = MenuHelper.JumpToFirst();
-            typeahead.ClearSearch();
-            UpdateClipboard();
-        }
-
-        /// <summary>
-        /// Jumps to the last item in the list.
-        /// </summary>
-        public static void JumpToLast()
-        {
-            if (workEntries.Count == 0)
-                return;
-
-            selectedIndex = MenuHelper.JumpToLast(workEntries.Count);
-            typeahead.ClearSearch();
-            UpdateClipboard();
-        }
-
-        /// <summary>
-        /// Gets a list of labels for all work entries for typeahead search.
-        /// </summary>
-        public static List<string> GetItemLabels()
-        {
-            List<string> labels = new List<string>();
-            foreach (var entry in workEntries)
+            if (IsManualMode)
             {
-                labels.Add(entry.WorkType.labelShort);
-            }
-            return labels;
-        }
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
 
-        /// <summary>
-        /// Sets the selected index directly.
-        /// </summary>
-        public static void SetSelectedIndex(int index)
-        {
-            if (index >= 0 && index < workEntries.Count)
-            {
-                selectedIndex = index;
-            }
-        }
+                if (currentRow == 0)
+                {
+                    TolkHelper.Speak("Already at top");
+                    return;
+                }
 
-        /// <summary>
-        /// Announces the current selection with search context if active.
-        /// </summary>
-        public static void AnnounceWithSearch()
-        {
-            if (workEntries.Count == 0 || selectedIndex < 0 || selectedIndex >= workEntries.Count)
-            {
-                TolkHelper.Speak("No work types available");
-                return;
-            }
-
-            var entry = workEntries[selectedIndex];
-            string message;
-
-            if (entry.IsDisabled)
-            {
-                message = $"{entry.WorkType.labelShort}: Permanently disabled";
-            }
-            else if (Find.PlaySettings.useWorkPriorities)
-            {
-                string priorityDesc = GetPriorityDescription(entry.CurrentPriority);
-                string changed = (entry.CurrentPriority != entry.OriginalPriority) ? " (pending)" : "";
-                message = $"{entry.WorkType.labelShort}: {priorityDesc}{changed}";
+                currentRow = 0;
+                AnnounceCurrentPosition(false);
             }
             else
             {
-                bool isEnabled = (entry.CurrentPriority > 0);
-                bool wasEnabled = (entry.OriginalPriority > 0);
-                string status = isEnabled ? "Enabled" : "Disabled";
-                string changed = (isEnabled != wasEnabled) ? " (pending)" : "";
-                message = $"{entry.WorkType.labelShort}: {status}{changed}";
-            }
+                if (allEntries.Count == 0) return;
 
-            // Add search context if active
-            if (typeahead.HasActiveSearch)
-            {
-                message += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
-            }
+                if (basicModeIndex == 0)
+                {
+                    TolkHelper.Speak("Already at top");
+                    return;
+                }
 
-            TolkHelper.Speak(message);
+                basicModeIndex = 0;
+                AnnounceCurrentPosition(false);
+            }
         }
 
         /// <summary>
-        /// Announces the current selection (same as UpdateClipboard but public).
+        /// Jumps to the last item in the current column (manual) or list (basic).
         /// </summary>
-        public static void AnnounceCurrentSelection()
+        public static void JumpToLast()
         {
-            UpdateClipboard();
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak(GetColumnName(currentColumn) + ": empty");
+                    return;
+                }
+
+                if (currentRow == col.Count - 1)
+                {
+                    TolkHelper.Speak("Already at bottom");
+                    return;
+                }
+
+                currentRow = col.Count - 1;
+                AnnounceCurrentPosition(false);
+            }
+            else
+            {
+                if (allEntries.Count == 0) return;
+
+                if (basicModeIndex == allEntries.Count - 1)
+                {
+                    TolkHelper.Speak("Already at bottom");
+                    return;
+                }
+
+                basicModeIndex = allEntries.Count - 1;
+                AnnounceCurrentPosition(false);
+            }
         }
+
+        /// <summary>
+        /// Moves cursor left to previous column (manual mode only).
+        /// Maintains row position.
+        /// </summary>
+        public static void MoveLeft()
+        {
+            if (!IsManualMode)
+            {
+                TolkHelper.Speak("Left/Right navigation only in manual mode. Press Alt+M to switch.");
+                return;
+            }
+
+            if (currentColumn > 0)
+            {
+                currentColumn--;
+                ClampRowToColumn();
+                AnnounceCurrentPosition(true);
+            }
+            else
+            {
+                TolkHelper.Speak("At leftmost column");
+            }
+        }
+
+        /// <summary>
+        /// Moves cursor right to next column (manual mode only).
+        /// Maintains row position.
+        /// </summary>
+        public static void MoveRight()
+        {
+            if (!IsManualMode)
+            {
+                TolkHelper.Speak("Left/Right navigation only in manual mode. Press Alt+M to switch.");
+                return;
+            }
+
+            if (currentColumn < 4)
+            {
+                currentColumn++;
+                ClampRowToColumn();
+                AnnounceCurrentPosition(true);
+            }
+            else
+            {
+                TolkHelper.Speak("At rightmost column");
+            }
+        }
+
+        /// <summary>
+        /// Clamps current row to valid range for current column.
+        /// </summary>
+        private static void ClampRowToColumn()
+        {
+            var col = columns[currentColumn];
+            if (col.Count == 0)
+            {
+                currentRow = 0;
+            }
+            else if (currentRow >= col.Count)
+            {
+                currentRow = col.Count - 1;
+            }
+        }
+
+        /// <summary>
+        /// Switches to next pawn, saving current changes.
+        /// </summary>
+        public static void SwitchToNextPawn()
+        {
+            if (allPawns.Count == 0) return;
+
+            int newIndex = (currentPawnIndex + 1) % allPawns.Count;
+            SaveAndSwitchPawn(newIndex);
+        }
+
+        /// <summary>
+        /// Switches to previous pawn, saving current changes.
+        /// </summary>
+        public static void SwitchToPreviousPawn()
+        {
+            if (allPawns.Count == 0) return;
+
+            int newIndex = (currentPawnIndex - 1 + allPawns.Count) % allPawns.Count;
+            SaveAndSwitchPawn(newIndex);
+        }
+
+        #endregion
+
+        #region Task Operations
+
+        /// <summary>
+        /// Sets priority for current task (manual mode) or toggles (basic mode).
+        /// In manual mode: moves task to specified priority column.
+        /// </summary>
+        public static void SetPriority(int priority)
+        {
+            if (priority < 0 || priority > 4) return;
+
+            WorkTypeEntry entry = GetCurrentEntry();
+            if (entry == null) return;
+
+            if (entry.IsPermanentlyDisabled)
+            {
+                AnnounceCannotEnable(entry);
+                return;
+            }
+
+            if (IsManualMode)
+            {
+                int newColumnIndex = PriorityToColumnIndex(priority);
+
+                if (newColumnIndex == currentColumn)
+                {
+                    // Already in this column
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} already at {GetColumnName(newColumnIndex)}");
+                    return;
+                }
+
+                // Remove from current column
+                var oldColumn = columns[currentColumn];
+                oldColumn.Remove(entry);
+
+                // Update priority
+                entry.CurrentPriority = priority;
+                currentPawn.workSettings.SetPriority(entry.WorkType, priority);
+
+                // Add to new column (at bottom for enabled, above permanently disabled for disabled)
+                var newColumn = columns[newColumnIndex];
+                if (newColumnIndex == 4) // Disabled column
+                {
+                    // Insert above permanently disabled entries
+                    int insertIndex = newColumn.FindIndex(e => e.IsPermanentlyDisabled);
+                    if (insertIndex < 0) insertIndex = newColumn.Count;
+                    newColumn.Insert(insertIndex, entry);
+                }
+                else
+                {
+                    newColumn.Add(entry);
+                }
+
+                // Announce the move
+                if (newColumnIndex == 4) // Disabled
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} disabled");
+                }
+                else
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} set to {GetColumnName(newColumnIndex)}");
+                }
+
+                if (oldColumn.Count == 0)
+                {
+                    TolkHelper.Speak($"{GetColumnName(currentColumn)}: empty");
+                }
+                else
+                {
+                    // Stay in current column, move to next item (or clamp to last)
+                    if (currentRow >= oldColumn.Count)
+                        currentRow = oldColumn.Count - 1;
+                    AnnounceCursorMovedTo();
+                }
+            }
+            else
+            {
+                // Basic mode: just set the priority directly
+                entry.CurrentPriority = priority;
+                currentPawn.workSettings.SetPriority(entry.WorkType, priority);
+                AnnounceCurrentPosition(false);
+            }
+        }
+
+        /// <summary>
+        /// Toggles current task between enabled (priority 3) and disabled (priority 0).
+        /// </summary>
+        public static void ToggleSelected()
+        {
+            WorkTypeEntry entry = GetCurrentEntry();
+            if (entry == null) return;
+
+            if (entry.IsPermanentlyDisabled)
+            {
+                AnnounceCannotEnable(entry);
+                return;
+            }
+
+            int newPriority = (entry.CurrentPriority == 0) ? 3 : 0;
+            SetPriority(newPriority);
+        }
+
+        /// <summary>
+        /// Reorders current task up within its column (executes earlier).
+        /// </summary>
+        public static void ReorderUp()
+        {
+            WorkTypeEntry entry = GetCurrentEntry();
+            if (entry == null) return;
+
+            if (entry.IsPermanentlyDisabled)
+            {
+                TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder permanently disabled task");
+                return;
+            }
+
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+
+                // Count movable items (exclude permanently disabled)
+                int movableCount = col.Count(e => !e.IsPermanentlyDisabled);
+
+                if (movableCount <= 1)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
+                    return;
+                }
+
+                if (currentRow <= 0)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the top");
+                    return;
+                }
+
+                var other = col[currentRow - 1];
+
+                if (other.IsPermanentlyDisabled)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder");
+                    return;
+                }
+
+                col[currentRow - 1] = entry;
+                col[currentRow] = other;
+                SwapNaturalPriorities(entry.WorkType, other.WorkType);
+                currentRow--;
+
+                AnnounceReorderResult(entry, col, currentRow, "up");
+            }
+            else
+            {
+                // Basic mode
+                if (allEntries.Count <= 1)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
+                    return;
+                }
+
+                if (basicModeIndex <= 0)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the top");
+                    return;
+                }
+
+                var other = allEntries[basicModeIndex - 1];
+                allEntries[basicModeIndex - 1] = entry;
+                allEntries[basicModeIndex] = other;
+                SwapNaturalPriorities(entry.WorkType, other.WorkType);
+                basicModeIndex--;
+
+                AnnounceReorderResultBasic(entry, basicModeIndex, "up");
+            }
+
+            RefreshAllPawnsWorkGivers();
+        }
+
+        /// <summary>
+        /// Reorders current task down within its column (executes later).
+        /// </summary>
+        public static void ReorderDown()
+        {
+            WorkTypeEntry entry = GetCurrentEntry();
+            if (entry == null) return;
+
+            if (entry.IsPermanentlyDisabled)
+            {
+                TolkHelper.Speak($"{entry.WorkType.labelShort}: cannot reorder permanently disabled task");
+                return;
+            }
+
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+
+                // Count movable items (exclude permanently disabled)
+                int movableCount = col.Count(e => !e.IsPermanentlyDisabled);
+
+                if (movableCount <= 1)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
+                    return;
+                }
+
+                // Find the last movable index (before permanently disabled section)
+                int lastMovableIndex = col.FindIndex(e => e.IsPermanentlyDisabled) - 1;
+                if (lastMovableIndex < 0) lastMovableIndex = col.Count - 1;
+
+                if (currentRow >= lastMovableIndex)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
+                    return;
+                }
+
+                var other = col[currentRow + 1];
+
+                if (other.IsPermanentlyDisabled)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
+                    return;
+                }
+
+                col[currentRow + 1] = entry;
+                col[currentRow] = other;
+                SwapNaturalPriorities(entry.WorkType, other.WorkType);
+                currentRow++;
+
+                AnnounceReorderResult(entry, col, currentRow, "down");
+            }
+            else
+            {
+                // Basic mode
+                if (allEntries.Count <= 1)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is by itself and can't be moved up or down");
+                    return;
+                }
+
+                if (basicModeIndex >= allEntries.Count - 1)
+                {
+                    TolkHelper.Speak($"{entry.WorkType.labelShort} is already at the bottom");
+                    return;
+                }
+
+                var other = allEntries[basicModeIndex + 1];
+                allEntries[basicModeIndex + 1] = entry;
+                allEntries[basicModeIndex] = other;
+                SwapNaturalPriorities(entry.WorkType, other.WorkType);
+                basicModeIndex++;
+
+                AnnounceReorderResultBasic(entry, basicModeIndex, "down");
+            }
+
+            RefreshAllPawnsWorkGivers();
+        }
+
+        private static void SwapNaturalPriorities(WorkTypeDef a, WorkTypeDef b)
+        {
+            int temp = a.naturalPriority;
+            a.naturalPriority = b.naturalPriority;
+            b.naturalPriority = temp;
+        }
+
+        /// <summary>
+        /// Announces the result of a reorder operation in manual mode.
+        /// </summary>
+        private static void AnnounceReorderResult(WorkTypeEntry entry, List<WorkTypeEntry> col, int newIndex, string direction)
+        {
+            string name = entry.WorkType.labelShort;
+
+            // Find last movable index
+            int lastMovableIndex = col.FindIndex(e => e.IsPermanentlyDisabled) - 1;
+            if (lastMovableIndex < 0) lastMovableIndex = col.Count - 1;
+
+            if (newIndex == 0)
+            {
+                TolkHelper.Speak($"{name} moved to the top");
+            }
+            else if (newIndex == lastMovableIndex)
+            {
+                TolkHelper.Speak($"{name} moved to the bottom");
+            }
+            else
+            {
+                // Get neighbors
+                string above = col[newIndex - 1].WorkType.labelShort;
+                string below = col[newIndex + 1].WorkType.labelShort;
+                TolkHelper.Speak($"{name} moved {direction}. Now between {above} and {below}");
+            }
+        }
+
+        /// <summary>
+        /// Announces the result of a reorder operation in basic mode.
+        /// </summary>
+        private static void AnnounceReorderResultBasic(WorkTypeEntry entry, int newIndex, string direction)
+        {
+            string name = entry.WorkType.labelShort;
+
+            if (newIndex == 0)
+            {
+                TolkHelper.Speak($"{name} moved to the top");
+            }
+            else if (newIndex == allEntries.Count - 1)
+            {
+                TolkHelper.Speak($"{name} moved to the bottom");
+            }
+            else
+            {
+                string above = allEntries[newIndex - 1].WorkType.labelShort;
+                string below = allEntries[newIndex + 1].WorkType.labelShort;
+                TolkHelper.Speak($"{name} moved {direction}. Now between {above} and {below}");
+            }
+        }
+
+        /// <summary>
+        /// Toggles between basic and manual priority modes.
+        /// </summary>
+        public static void ToggleMode()
+        {
+            Find.PlaySettings.useWorkPriorities = !Find.PlaySettings.useWorkPriorities;
+
+            // Rebuild columns since priorities may have changed meaning
+            LoadWorkTypesForCurrentPawn();
+
+            if (IsManualMode)
+            {
+                // Find column containing the previously selected entry
+                FindFirstPopulatedColumn();
+                string mode = "Manual priority mode";
+                TolkHelper.Speak(mode);
+            }
+            else
+            {
+                basicModeIndex = 0;
+                string mode = "Basic mode";
+                TolkHelper.Speak(mode);
+            }
+
+            AnnounceCurrentPosition(true);
+        }
+
+        #endregion
+
+        #region Type-ahead Search
+
+        /// <summary>
+        /// Processes a character input for type-ahead search.
+        /// Searches ALL columns/entries regardless of current position.
+        /// </summary>
+        public static bool ProcessSearchCharacter(char c)
+        {
+            var labels = allEntries.Select(e => e.WorkType.labelShort).ToList();
+
+            if (typeahead.ProcessCharacterInput(c, labels, out int matchIndex))
+            {
+                if (matchIndex >= 0)
+                {
+                    // Find which column and row this entry is in
+                    var entry = allEntries[matchIndex];
+                    FindEntryPosition(entry, out int col, out int row);
+
+                    searchJumpPending = true;
+                    searchTargetColumn = col;
+                    searchTargetRow = row;
+
+                    string colName = GetColumnName(col);
+                    string taskAnnouncement = BuildTaskAnnouncement(entry, false);
+
+                    TolkHelper.Speak($"{taskAnnouncement}, {colName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}, press Enter to jump to this task");
+                }
+                return true;
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Navigates to next search match.
+        /// </summary>
+        public static void NextSearchMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches) return;
+
+            var labels = allEntries.Select(e => e.WorkType.labelShort).ToList();
+            int currentIndex = GetCurrentEntryIndex();
+            int matchIndex = typeahead.GetNextMatch(currentIndex);
+
+            if (matchIndex >= 0)
+            {
+                var entry = allEntries[matchIndex];
+                FindEntryPosition(entry, out int col, out int row);
+
+                searchJumpPending = true;
+                searchTargetColumn = col;
+                searchTargetRow = row;
+
+                string colName = GetColumnName(col);
+                string taskAnnouncement = BuildTaskAnnouncement(entry, false);
+
+                TolkHelper.Speak($"{taskAnnouncement}, {colName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}, press Enter to jump to this task");
+            }
+        }
+
+        /// <summary>
+        /// Navigates to previous search match.
+        /// </summary>
+        public static void PreviousSearchMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches) return;
+
+            int currentIndex = GetCurrentEntryIndex();
+            int matchIndex = typeahead.GetPreviousMatch(currentIndex);
+
+            if (matchIndex >= 0)
+            {
+                var entry = allEntries[matchIndex];
+                FindEntryPosition(entry, out int col, out int row);
+
+                searchJumpPending = true;
+                searchTargetColumn = col;
+                searchTargetRow = row;
+
+                string colName = GetColumnName(col);
+                string taskAnnouncement = BuildTaskAnnouncement(entry, false);
+
+                TolkHelper.Speak($"{taskAnnouncement}, {colName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}, press Enter to jump to this task");
+            }
+        }
+
+        /// <summary>
+        /// Jumps cursor to the search result position.
+        /// </summary>
+        public static void JumpToSearchResult()
+        {
+            if (!searchJumpPending) return;
+
+            if (IsManualMode)
+            {
+                currentColumn = searchTargetColumn;
+                currentRow = searchTargetRow;
+            }
+            else
+            {
+                // Find the entry and set basicModeIndex
+                var entry = columns[searchTargetColumn][searchTargetRow];
+                basicModeIndex = allEntries.IndexOf(entry);
+            }
+
+            searchJumpPending = false;
+            typeahead.ClearSearch();
+            AnnounceCurrentPosition(true);
+        }
+
+        /// <summary>
+        /// Handles backspace in search.
+        /// </summary>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            var labels = allEntries.Select(e => e.WorkType.labelShort).ToList();
+            if (typeahead.ProcessBackspace(labels, out int matchIndex))
+            {
+                if (typeahead.HasActiveSearch && matchIndex >= 0)
+                {
+                    var entry = allEntries[matchIndex];
+                    FindEntryPosition(entry, out int col, out int row);
+
+                    searchJumpPending = true;
+                    searchTargetColumn = col;
+                    searchTargetRow = row;
+
+                    string colName = GetColumnName(col);
+                    string taskAnnouncement = BuildTaskAnnouncement(entry, false);
+
+                    TolkHelper.Speak($"{taskAnnouncement}, {colName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}, press Enter to jump to this task");
+                }
+                else if (!typeahead.HasActiveSearch)
+                {
+                    searchJumpPending = false;
+                    AnnounceCurrentPosition(true);
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Clears search and announces if search was active.
+        /// </summary>
+        public static bool ClearSearchIfActive()
+        {
+            if (typeahead.HasActiveSearch)
+            {
+                typeahead.ClearSearchAndAnnounce();
+                searchJumpPending = false;
+                AnnounceCurrentPosition(true);
+                return true;
+            }
+            return false;
+        }
+
+        private static void FindEntryPosition(WorkTypeEntry entry, out int column, out int row)
+        {
+            for (int c = 0; c < 5; c++)
+            {
+                int r = columns[c].IndexOf(entry);
+                if (r >= 0)
+                {
+                    column = c;
+                    row = r;
+                    return;
+                }
+            }
+            column = 0;
+            row = 0;
+        }
+
+        private static int GetCurrentEntryIndex()
+        {
+            var entry = GetCurrentEntry();
+            return entry != null ? allEntries.IndexOf(entry) : 0;
+        }
+
+        #endregion
+
+        #region Announcements
+
+        /// <summary>
+        /// Announces that the cursor has moved to a new position after an item was moved away.
+        /// </summary>
+        private static void AnnounceCursorMovedTo()
+        {
+            WorkTypeEntry entry = GetCurrentEntry();
+            if (entry == null) return;
+
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+                string taskAnnouncement = BuildTaskAnnouncement(entry, true);
+                string position = MenuHelper.FormatPosition(currentRow, col.Count);
+                TolkHelper.Speak($"Your cursor is now at: {taskAnnouncement} {position}");
+            }
+            else
+            {
+                string taskAnnouncement = BuildTaskAnnouncement(entry, true);
+                string position = MenuHelper.FormatPosition(basicModeIndex, allEntries.Count);
+                string status = entry.CurrentPriority > 0 ? "enabled" : "disabled";
+                TolkHelper.Speak($"Your cursor is now at: {taskAnnouncement} {status}, {position}");
+            }
+        }
+
+        /// <summary>
+        /// Announces the current position with full context.
+        /// </summary>
+        /// <param name="includeColumnName">Whether to include column name (for column changes)</param>
+        private static void AnnounceCurrentPosition(bool includeColumnName)
+        {
+            WorkTypeEntry entry = GetCurrentEntry();
+
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+                if (col.Count == 0)
+                {
+                    TolkHelper.Speak($"{GetColumnName(currentColumn)}: empty");
+                    return;
+                }
+
+                string taskAnnouncement = BuildTaskAnnouncement(entry, true);
+                string position = MenuHelper.FormatPosition(currentRow, col.Count);
+
+                if (includeColumnName)
+                {
+                    TolkHelper.Speak($"{GetColumnName(currentColumn)}, {taskAnnouncement} {position}");
+                }
+                else
+                {
+                    TolkHelper.Speak($"{taskAnnouncement} {position}");
+                }
+            }
+            else
+            {
+                // Basic mode
+                if (allEntries.Count == 0)
+                {
+                    TolkHelper.Speak("No work types available");
+                    return;
+                }
+
+                string taskAnnouncement = BuildTaskAnnouncement(entry, true);
+                string position = MenuHelper.FormatPosition(basicModeIndex, allEntries.Count);
+                string status = entry.CurrentPriority > 0 ? "enabled" : "disabled";
+
+                TolkHelper.Speak($"{taskAnnouncement} {status}, {position}");
+            }
+        }
+
+        /// <summary>
+        /// Builds the task announcement string with skills and passions.
+        /// </summary>
+        private static string BuildTaskAnnouncement(WorkTypeEntry entry, bool includeFullDetails)
+        {
+            if (entry == null) return "No task selected";
+
+            var workType = entry.WorkType;
+            var sb = new StringBuilder();
+
+            sb.Append(workType.labelShort);
+
+            if (entry.IsPermanentlyDisabled)
+            {
+                sb.Append(". Permanently disabled: ");
+                var reasons = currentPawn.GetReasonsForDisabledWorkType(workType);
+                sb.Append(string.Join(", ", reasons.Select(r => r.ToString())));
+                return sb.ToString();
+            }
+
+            if (!includeFullDetails)
+            {
+                return sb.ToString();
+            }
+
+            // Get relevant skills
+            var relevantSkills = workType.relevantSkills;
+
+            if (relevantSkills == null || relevantSkills.Count == 0)
+            {
+                sb.Append(". No relevant skills or passions.");
+                return sb.ToString();
+            }
+
+            // Check if skill names are redundant with task name
+            bool skillNamesRedundant = relevantSkills.Count == 1 &&
+                string.Equals(relevantSkills[0].skillLabel, workType.labelShort, StringComparison.OrdinalIgnoreCase);
+
+            if (!skillNamesRedundant && relevantSkills.Count > 0)
+            {
+                sb.Append(". Uses ");
+                if (relevantSkills.Count == 1)
+                {
+                    sb.Append(relevantSkills[0].skillLabel);
+                }
+                else
+                {
+                    for (int i = 0; i < relevantSkills.Count; i++)
+                    {
+                        if (i > 0)
+                        {
+                            sb.Append(i == relevantSkills.Count - 1 ? " and " : ", ");
+                        }
+                        sb.Append(relevantSkills[i].skillLabel);
+                    }
+                }
+            }
+
+            // Get skill level (average of relevant skills)
+            float avgSkill = currentPawn.skills.AverageOfRelevantSkillsFor(workType);
+            int skillLevel = Math.Min(20, Math.Max(0, (int)Math.Round(avgSkill)));
+            string descriptor = SkillDescriptors[skillLevel];
+
+            sb.Append($". Skill level: {skillLevel}, {descriptor}");
+
+            // Get passion
+            Passion passion = currentPawn.skills.MaxPassionOfRelevantSkillsFor(workType);
+            string passionText;
+            switch (passion)
+            {
+                case Passion.Major:
+                    passionText = "Burning passion";
+                    break;
+                case Passion.Minor:
+                    passionText = "Passion";
+                    break;
+                default:
+                    passionText = "No passion";
+                    break;
+            }
+            sb.Append($". {passionText}.");
+
+            return sb.ToString();
+        }
+
+        private static void AnnounceCannotEnable(WorkTypeEntry entry)
+        {
+            var reasons = currentPawn.GetReasonsForDisabledWorkType(entry.WorkType);
+            string reasonText = string.Join(", ", reasons.Select(r => r.ToString()));
+            TolkHelper.Speak($"Cannot enable - permanently disabled due to: {reasonText}", SpeechPriority.High);
+        }
+
+        private static string GetColumnName(int columnIndex)
+        {
+            switch (columnIndex)
+            {
+                case 0: return "Priority 1";
+                case 1: return "Priority 2";
+                case 2: return "Priority 3";
+                case 3: return "Priority 4";
+                case 4: return "Disabled";
+                default: return "Unknown";
+            }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        /// <summary>
+        /// Gets the currently selected work type entry.
+        /// </summary>
+        public static WorkTypeEntry GetCurrentEntry()
+        {
+            if (IsManualMode)
+            {
+                var col = columns[currentColumn];
+                if (col.Count == 0 || currentRow < 0 || currentRow >= col.Count)
+                    return null;
+                return col[currentRow];
+            }
+            else
+            {
+                if (allEntries.Count == 0 || basicModeIndex < 0 || basicModeIndex >= allEntries.Count)
+                    return null;
+                return allEntries[basicModeIndex];
+            }
+        }
+
+        /// <summary>
+        /// Gets all entries as a flat list (for overlay display).
+        /// </summary>
+        public static List<WorkTypeEntry> GetAllEntries() => allEntries;
+
+        /// <summary>
+        /// Gets the columns (for overlay display).
+        /// </summary>
+        public static List<List<WorkTypeEntry>> GetColumns() => columns;
+
+        #endregion
 
         /// <summary>
         /// Represents a work type entry in the menu.
-        /// Tracks priority values (0-4) where:
-        /// 0 = Disabled, 1 = Highest, 2 = High, 3 = Medium, 4 = Low
         /// </summary>
         public class WorkTypeEntry
         {
             public WorkTypeDef WorkType { get; set; }
-            public bool IsDisabled { get; set; }      // Permanently disabled (cannot be changed)
-            public int CurrentPriority { get; set; }  // Current priority in the menu (0-4)
-            public int OriginalPriority { get; set; } // Original priority when menu opened (0-4)
+            public bool IsPermanentlyDisabled { get; set; }
+            public int CurrentPriority { get; set; }
         }
     }
 }

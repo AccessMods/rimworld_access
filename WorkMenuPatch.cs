@@ -6,7 +6,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Harmony patch that intercepts keyboard input when the work menu is active.
-    /// Handles navigation (Up/Down arrows), toggling (Space), and confirmation (Enter/Escape).
+    /// Supports grid-based navigation in manual mode and list navigation in basic mode.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -14,48 +14,27 @@ namespace RimWorldAccess
     {
         /// <summary>
         /// Prefix patch that intercepts keyboard events when work menu is active.
-        /// Returns false to prevent game from processing the event if we handle it.
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPriority(Priority.First)]
         public static void Prefix()
         {
-            // Only process if work menu is active
             if (!WorkMenuState.IsActive)
                 return;
 
-            // Only process keyboard events
             if (Event.current.type != EventType.KeyDown)
                 return;
 
-            bool handled = false;
             KeyCode key = Event.current.keyCode;
             bool shift = Event.current.shift;
+            bool alt = Event.current.alt;
             var typeahead = WorkMenuState.Typeahead;
 
-            // Handle Home - jump to first
-            if (key == KeyCode.Home)
-            {
-                WorkMenuState.JumpToFirst();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle End - jump to last
-            if (key == KeyCode.End)
-            {
-                WorkMenuState.JumpToLast();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Escape - clear search FIRST, then close
+            // Handle Escape - clear search first, then cancel
             if (key == KeyCode.Escape)
             {
-                if (typeahead.HasActiveSearch)
+                if (WorkMenuState.ClearSearchIfActive())
                 {
-                    typeahead.ClearSearchAndAnnounce();
-                    WorkMenuState.AnnounceCurrentSelection();
                     Event.current.Use();
                     return;
                 }
@@ -64,201 +43,209 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Backspace for search
-            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            // Handle Enter/Return
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
-                var labels = WorkMenuState.GetItemLabels();
-                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                if (WorkMenuState.SearchJumpPending)
                 {
-                    if (newIndex >= 0) WorkMenuState.SetSelectedIndex(newIndex);
-                    WorkMenuState.AnnounceWithSearch();
+                    // Jump to the search result
+                    WorkMenuState.JumpToSearchResult();
+                }
+                else
+                {
+                    // Confirm and close
+                    WorkMenuState.Confirm();
                 }
                 Event.current.Use();
                 return;
             }
 
-            // Handle * key - consume to prevent passthrough
-            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace)
+            {
+                if (WorkMenuState.ProcessBackspace())
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // Handle Alt+M: Toggle between basic and manual mode
+            if (alt && key == KeyCode.M)
+            {
+                WorkMenuState.ToggleMode();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Tab: Switch pawns (saves current changes)
+            if (key == KeyCode.Tab && !shift)
+            {
+                WorkMenuState.SwitchToNextPawn();
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.Tab && shift)
+            {
+                WorkMenuState.SwitchToPreviousPawn();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Shift+Up/Down: Reorder task within column
+            if (key == KeyCode.UpArrow && shift)
+            {
+                WorkMenuState.ReorderUp();
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.DownArrow && shift)
+            {
+                WorkMenuState.ReorderDown();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down arrows
+            if (key == KeyCode.UpArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    WorkMenuState.PreviousSearchMatch();
+                }
+                else
+                {
+                    WorkMenuState.MoveUp();
+                }
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.DownArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    WorkMenuState.NextSearchMatch();
+                }
+                else
+                {
+                    WorkMenuState.MoveDown();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Left/Right arrows (manual mode column navigation)
+            if (key == KeyCode.LeftArrow)
+            {
+                WorkMenuState.MoveLeft();
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.RightArrow)
+            {
+                WorkMenuState.MoveRight();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Home/End: Jump to top/bottom of current column/list
+            if (key == KeyCode.Home)
+            {
+                WorkMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.End)
+            {
+                WorkMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle number keys 0-4: Set priority (manual mode) or toggle (basic mode)
+            if (!alt && !shift)
+            {
+                if (key == KeyCode.Alpha0 || key == KeyCode.Keypad0)
+                {
+                    WorkMenuState.SetPriority(0);
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1)
+                {
+                    WorkMenuState.SetPriority(1);
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2)
+                {
+                    WorkMenuState.SetPriority(2);
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Alpha3 || key == KeyCode.Keypad3)
+                {
+                    WorkMenuState.SetPriority(3);
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Alpha4 || key == KeyCode.Keypad4)
+                {
+                    WorkMenuState.SetPriority(4);
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // Handle Space: Toggle selected work type (basic mode only)
+            if (key == KeyCode.Space && !WorkMenuState.IsManualMode)
+            {
+                WorkMenuState.ToggleSelected();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle type-ahead search characters (letters only, not numbers since 0-4 are for priorities)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            if (isLetter && !alt && !shift)
+            {
+                char c = (char)('a' + (key - KeyCode.A));
+                WorkMenuState.ProcessSearchCharacter(c);
+                Event.current.Use();
+                return;
+            }
+
+            // Consume * to prevent passthrough
+            bool isStar = key == KeyCode.KeypadMultiply || (shift && key == KeyCode.Alpha8);
             if (isStar)
             {
                 Event.current.Use();
                 return;
             }
-
-            // Handle typeahead characters
-            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-            // Exclude keys used for other purposes: 0-4 for priority, M for mode toggle
-            bool isExcludedNumber = key == KeyCode.Alpha0 || key == KeyCode.Alpha1 ||
-                key == KeyCode.Alpha2 || key == KeyCode.Alpha3 || key == KeyCode.Alpha4 ||
-                key == KeyCode.Keypad0 || key == KeyCode.Keypad1 || key == KeyCode.Keypad2 ||
-                key == KeyCode.Keypad3 || key == KeyCode.Keypad4;
-            bool isExcludedLetter = key == KeyCode.M;
-
-            if ((isLetter || isNumber) && !shift && !isExcludedNumber && !isExcludedLetter)
-            {
-                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                var labels = WorkMenuState.GetItemLabels();
-                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
-                {
-                    if (newIndex >= 0) { WorkMenuState.SetSelectedIndex(newIndex); WorkMenuState.AnnounceWithSearch(); }
-                }
-                else
-                {
-                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
-                }
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Shift+Up: Reorder work type up (manual priority mode only)
-            if (key == KeyCode.UpArrow && shift)
-            {
-                WorkMenuState.ReorderWorkTypeUp();
-                handled = true;
-            }
-            // Handle Shift+Down: Reorder work type down (manual priority mode only)
-            else if (key == KeyCode.DownArrow && shift)
-            {
-                WorkMenuState.ReorderWorkTypeDown();
-                handled = true;
-            }
-            // Handle Arrow Up: Navigate up (use typeahead if active with matches)
-            else if (key == KeyCode.UpArrow)
-            {
-                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
-                {
-                    // Navigate through matches only when there ARE matches
-                    int newIndex = typeahead.GetPreviousMatch(WorkMenuState.SelectedIndex);
-                    if (newIndex >= 0)
-                    {
-                        WorkMenuState.SetSelectedIndex(newIndex);
-                        WorkMenuState.AnnounceWithSearch();
-                    }
-                }
-                else
-                {
-                    // Navigate normally (either no search active, OR search with no matches)
-                    WorkMenuState.MoveUp();
-                }
-                handled = true;
-            }
-            // Handle Arrow Down: Navigate down (use typeahead if active with matches)
-            else if (key == KeyCode.DownArrow)
-            {
-                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
-                {
-                    // Navigate through matches only when there ARE matches
-                    int newIndex = typeahead.GetNextMatch(WorkMenuState.SelectedIndex);
-                    if (newIndex >= 0)
-                    {
-                        WorkMenuState.SetSelectedIndex(newIndex);
-                        WorkMenuState.AnnounceWithSearch();
-                    }
-                }
-                else
-                {
-                    // Navigate normally (either no search active, OR search with no matches)
-                    WorkMenuState.MoveDown();
-                }
-                handled = true;
-            }
-            // Handle Tab: Switch to next pawn
-            else if (key == KeyCode.Tab && !shift)
-            {
-                WorkMenuState.SwitchToNextPawn();
-                handled = true;
-            }
-            // Handle Shift+Tab: Switch to previous pawn
-            else if (key == KeyCode.Tab && shift)
-            {
-                WorkMenuState.SwitchToPreviousPawn();
-                handled = true;
-            }
-            // Handle M: Toggle manual priority mode
-            else if (key == KeyCode.M)
-            {
-                WorkMenuState.ToggleMode();
-                handled = true;
-            }
-            // Handle number keys 0-4: Set priority directly (manual priority mode)
-            else if (key == KeyCode.Alpha0 || key == KeyCode.Keypad0)
-            {
-                WorkMenuState.SetPriority(0);
-                handled = true;
-            }
-            else if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1)
-            {
-                WorkMenuState.SetPriority(1);
-                handled = true;
-            }
-            else if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2)
-            {
-                WorkMenuState.SetPriority(2);
-                handled = true;
-            }
-            else if (key == KeyCode.Alpha3 || key == KeyCode.Keypad3)
-            {
-                WorkMenuState.SetPriority(3);
-                handled = true;
-            }
-            else if (key == KeyCode.Alpha4 || key == KeyCode.Keypad4)
-            {
-                WorkMenuState.SetPriority(4);
-                handled = true;
-            }
-            // Handle Space: Toggle selected work type
-            else if (key == KeyCode.Space)
-            {
-                WorkMenuState.ToggleSelected();
-                handled = true;
-            }
-            // Handle Enter/Return: Confirm and apply changes
-            else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-            {
-                WorkMenuState.Confirm();
-                handled = true;
-            }
-            // Note: Escape is handled above with typeahead check
-
-            // Consume the event if we handled it
-            if (handled)
-            {
-                Event.current.Use();
-            }
         }
 
         /// <summary>
         /// Postfix patch that draws visual feedback for the work menu.
-        /// Shows a highlighted overlay for the currently selected work type.
         /// </summary>
         [HarmonyPostfix]
         public static void Postfix()
         {
-            // Only draw if work menu is active
             if (!WorkMenuState.IsActive)
                 return;
 
-            // Draw a semi-transparent overlay to indicate menu is active
             DrawMenuOverlay();
         }
 
         /// <summary>
         /// Draws a visual overlay indicating the work menu is active.
-        /// Shows instructions and current selection.
         /// </summary>
         private static void DrawMenuOverlay()
         {
-            // Get screen dimensions
             float screenWidth = UI.screenWidth;
             float screenHeight = UI.screenHeight;
 
-            // Create a rect for the overlay (top-center of screen)
-            float overlayWidth = 700f;
-            float overlayHeight = 140f;
+            float overlayWidth = 750f;
+            float overlayHeight = 160f;
             float overlayX = (screenWidth - overlayWidth) / 2f;
             float overlayY = 20f;
 
@@ -279,26 +266,79 @@ namespace RimWorldAccess
             string pawnName = WorkMenuState.CurrentPawn != null ? WorkMenuState.CurrentPawn.LabelShort : "Unknown";
             int pawnIndex = WorkMenuState.CurrentPawnIndex + 1;
             int totalPawns = WorkMenuState.TotalPawns;
-            string mode = Find.PlaySettings.useWorkPriorities ? "Manual Priorities" : "Simple Mode";
+            string mode = WorkMenuState.IsManualMode ? "Manual Priority Mode" : "Basic Mode";
 
-            string title = $"Work Assignment Menu - {pawnName} ({pawnIndex}/{totalPawns}) - {mode}";
+            string title = $"Work Menu - {pawnName} ({pawnIndex}/{totalPawns}) - {mode}";
 
-            string instructions1 = "Arrows: Navigate | Tab/Shift+Tab: Switch Pawn | M: Toggle Mode";
-            string instructions2 = Find.PlaySettings.useWorkPriorities
-                ? "0-4: Set Priority | Shift+Arrows: Reorder | Space: Toggle | Enter: Confirm"
-                : "Space: Toggle | Enter: Confirm | Escape: Cancel";
+            string instructions1, instructions2, instructions3;
 
-            Rect titleRect = new Rect(overlayX, overlayY + 10f, overlayWidth, 30f);
-            Rect instructions1Rect = new Rect(overlayX, overlayY + 45f, overlayWidth, 25f);
-            Rect instructions2Rect = new Rect(overlayX, overlayY + 75f, overlayWidth, 25f);
+            if (WorkMenuState.IsManualMode)
+            {
+                instructions1 = "Left/Right: Switch columns | Up/Down: Navigate tasks | Shift+Up/Down: Reorder";
+                instructions2 = "0-4: Set priority | Tab/Shift+Tab: Switch pawn";
+                instructions3 = "Enter: Confirm | Escape: Cancel | Alt+M: Switch to basic mode";
+            }
+            else
+            {
+                instructions1 = "Up/Down: Navigate tasks | Shift+Up/Down: Reorder | Space: Toggle";
+                instructions2 = "Tab/Shift+Tab: Switch pawn";
+                instructions3 = "Enter: Confirm | Escape: Cancel | Alt+M: Switch to manual mode";
+            }
+
+            // Show current position info
+            string positionInfo = "";
+            var entry = WorkMenuState.GetCurrentEntry();
+            if (entry != null)
+            {
+                if (WorkMenuState.IsManualMode)
+                {
+                    var columns = WorkMenuState.GetColumns();
+                    int colIndex = WorkMenuState.CurrentColumn;
+                    string colName;
+                    switch (colIndex)
+                    {
+                        case 0: colName = "Priority 1"; break;
+                        case 1: colName = "Priority 2"; break;
+                        case 2: colName = "Priority 3"; break;
+                        case 3: colName = "Priority 4"; break;
+                        case 4: colName = "Disabled"; break;
+                        default: colName = "Unknown"; break;
+                    }
+                    int colCount = columns[colIndex].Count;
+                    positionInfo = $"[{colName}: {WorkMenuState.CurrentRow + 1}/{colCount}] {entry.WorkType.labelShort}";
+                }
+                else
+                {
+                    int totalEntries = WorkMenuState.GetAllEntries().Count;
+                    string status = entry.CurrentPriority > 0 ? "Enabled" : "Disabled";
+                    positionInfo = $"[{status}] {entry.WorkType.labelShort}";
+                }
+            }
+
+            // Search info
+            var typeahead = WorkMenuState.Typeahead;
+            if (typeahead.HasActiveSearch)
+            {
+                positionInfo = $"Search: '{typeahead.SearchBuffer}' - {typeahead.CurrentMatchPosition}/{typeahead.MatchCount} matches";
+            }
+
+            Rect titleRect = new Rect(overlayX, overlayY + 10f, overlayWidth, 25f);
+            Rect positionRect = new Rect(overlayX, overlayY + 35f, overlayWidth, 25f);
+            Rect instructions1Rect = new Rect(overlayX, overlayY + 65f, overlayWidth, 22f);
+            Rect instructions2Rect = new Rect(overlayX, overlayY + 90f, overlayWidth, 22f);
+            Rect instructions3Rect = new Rect(overlayX, overlayY + 115f, overlayWidth, 22f);
 
             Widgets.Label(titleRect, title);
 
             Text.Font = GameFont.Tiny;
+            GUI.color = new Color(0.8f, 0.9f, 1.0f);
+            Widgets.Label(positionRect, positionInfo);
+            GUI.color = Color.white;
+
             Widgets.Label(instructions1Rect, instructions1);
             Widgets.Label(instructions2Rect, instructions2);
+            Widgets.Label(instructions3Rect, instructions3);
 
-            // Reset text anchor
             Text.Anchor = TextAnchor.UpperLeft;
             Text.Font = GameFont.Small;
         }
