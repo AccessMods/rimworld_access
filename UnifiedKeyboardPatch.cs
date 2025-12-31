@@ -211,55 +211,16 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
-
-                // === Handle Home/End for menu navigation ===
-                if (key == KeyCode.Home)
-                {
-                    CaravanFormationState.JumpToFirst();
-                    Event.current.Use();
-                    return;
-                }
-                if (key == KeyCode.End)
-                {
-                    CaravanFormationState.JumpToLast();
-                    Event.current.Use();
-                    return;
-                }
-
-                // === Handle Backspace for typeahead ===
-                if (key == KeyCode.Backspace)
-                {
-                    CaravanFormationState.HandleBackspace();
-                    Event.current.Use();
-                    return;
-                }
-
-                // === Consume ALL alphanumeric + * for typeahead ===
-                // This MUST be at the end to catch any unhandled characters
-                // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-                bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
-
-                if (isLetter || isNumber || isStar)
-                {
-                    if (isStar)
-                    {
-                        // Reserved for future "expand all at level" in tree views
-                        Event.current.Use();
-                        return;
-                    }
-                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                    CaravanFormationState.HandleTypeahead(c);
-                    Event.current.Use();
-                    return;  // CRITICAL: Don't fall through to other handlers
-                }
             }
 
-            // ===== PRIORITY 0.5: Handle world navigation special keys (Home/End/PageUp/PageDown/Comma/Period) =====
+            // ===== PRIORITY 0.5: Handle world navigation special keys (Home/End/PageUp/PageDown/Comma/Period/S/Q) =====
             // Allow these keys when choosing destination, but not when in the formation dialog itself
-            // BUT: Skip if windowless dialog is active - dialogs take absolute priority
-            if (WorldNavigationState.IsActive && !SettlementBrowserState.IsActive &&
+            // BUT: Skip if any world-map menu is active - they handle their own input
+            if (WorldNavigationState.IsActive &&
+                !SettlementBrowserState.IsActive &&
+                !QuestLocationsBrowserState.IsActive &&
+                !CaravanStatsState.IsActive &&
+                !QuestMenuState.IsActive &&
                 (!CaravanFormationState.IsActive || CaravanFormationState.IsChoosingDestination) &&
                 !WindowlessDialogState.IsActive)
             {
@@ -295,6 +256,16 @@ namespace RimWorldAccess
                     WorldNavigationState.CycleToPreviousCaravan();
                     handled = true;
                 }
+                else if (key == KeyCode.S && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                {
+                    WorldNavigationState.OpenSettlementBrowser();
+                    handled = true;
+                }
+                else if (key == KeyCode.Q && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                {
+                    WorldNavigationState.OpenQuestLocationsBrowser();
+                    handled = true;
+                }
 
                 if (handled)
                 {
@@ -306,7 +277,14 @@ namespace RimWorldAccess
             // ===== EARLY BLOCK: If in world view, block most map-specific keys =====
             // Don't block when choosing destination (allow map interaction)
             // Don't block Enter/Escape when menus are active (need them for menu navigation)
-            if (WorldNavigationState.IsActive && !CaravanFormationState.IsActive && !WindowlessFloatMenuState.IsActive)
+            // Skip this block if any world-map menu is active (they need their own input handling)
+            if (WorldNavigationState.IsActive &&
+                !CaravanFormationState.IsActive &&
+                !WindowlessFloatMenuState.IsActive &&
+                !QuestMenuState.IsActive &&
+                !QuestLocationsBrowserState.IsActive &&
+                !SettlementBrowserState.IsActive &&
+                !CaravanStatsState.IsActive)
             {
                 // Block all map-specific keys (settlement browser is handled in WorldNavigationPatch with High priority)
                 if (key == KeyCode.I || key == KeyCode.A || key == KeyCode.Z ||
@@ -2616,10 +2594,15 @@ namespace RimWorldAccess
                 // 1. We're in gameplay (not at main menu)
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
+                // 4. No accessibility menus are active (they handle their own Escape)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                    !ZoneCreationState.IsInCreationMode)
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive() &&
+                    !QuestLocationsBrowserState.IsActive &&
+                    !SettlementBrowserState.IsActive &&
+                    !CaravanStatsState.IsActive)
                 {
                     // Prevent the default escape behavior (opening game's pause menu)
                     Event.current.Use();

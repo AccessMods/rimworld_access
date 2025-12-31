@@ -39,11 +39,11 @@ namespace RimWorldAccess
                 || WindowlessFoodPolicyState.IsActive
                 || WindowlessDrugPolicyState.IsActive
                 // Main gameplay menus
-                || SettlementBrowserState.IsActive
-                || CaravanFormationState.IsActive
-                || CaravanStatsState.IsActive
+                // Note: SettlementBrowserState, CaravanStatsState, and QuestLocationsBrowserState are
+                // intentionally NOT included here - they're world-view-specific and handle their own
+                // input in WorldNavigationPatch (which runs after this check)
+                || (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination)
                 || QuestMenuState.IsActive
-                || QuestLocationsBrowserState.IsActive
                 || NotificationMenuState.IsActive
                 || AssignMenuState.IsActive
                 || WorkMenuState.IsActive

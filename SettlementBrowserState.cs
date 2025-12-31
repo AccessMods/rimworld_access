@@ -380,7 +380,7 @@ namespace RimWorldAccess
             }
 
             // Build announcement
-            string announcement = $"{MenuHelper.FormatPosition(currentIndex, filteredSettlements.Count)}: {settlement.Label}, {settlement.Faction.Name}, {relationship}, {distance:F1} tiles";
+            string announcement = $"{settlement.Label}, {settlement.Faction.Name}, {relationship}, {distance:F1} tiles. {MenuHelper.FormatPosition(currentIndex, filteredSettlements.Count)}";
 
             TolkHelper.Speak(announcement);
         }

@@ -247,7 +247,7 @@ namespace RimWorldAccess
             // Get tile summary for additional context
             string tileSummary = WorldInfoHelper.GetTileSummary(entry.Tile);
 
-            string announcement = $"{MenuHelper.FormatPosition(currentIndex, questLocations.Count)}: {questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}";
+            string announcement = $"{questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}. {MenuHelper.FormatPosition(currentIndex, questLocations.Count)}";
 
             TolkHelper.Speak(announcement);
         }

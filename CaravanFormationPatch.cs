@@ -85,9 +85,9 @@ namespace RimWorldAccess
             Text.Font = GameFont.Tiny;
             Text.Anchor = TextAnchor.UpperLeft;
 
-            string instructions = "Left/Right: Switch tabs | Up/Down: Navigate\n" +
-                                "Enter or +/-: Adjust quantity | D: Choose destination (then arrows + Enter)\n" +
-                                "T: Send caravan | R: Reset | Escape: Cancel";
+            string instructions = "Tabs: Pawns, Items, Travel Supplies, Stats | Left/Right: Switch tabs\n" +
+                                "Up/Down: Navigate | Enter or +/-: Adjust quantity\n" +
+                                "Alt+D: Destination | Alt+T: Send | Alt+R: Reset | Escape: Cancel";
 
             Widgets.Label(instructionsRect, instructions);
 

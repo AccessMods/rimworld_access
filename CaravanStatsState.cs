@@ -315,7 +315,7 @@ namespace RimWorldAccess
 
             string line = infoLines[currentLineIndex];
 
-            TolkHelper.Speak($"{MenuHelper.FormatPosition(currentLineIndex, infoLines.Count)}: {line}");
+            TolkHelper.Speak($"{line}. {MenuHelper.FormatPosition(currentLineIndex, infoLines.Count)}");
         }
 
         /// <summary>
