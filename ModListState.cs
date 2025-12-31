@@ -794,7 +794,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
                 }
                 return true;
             }

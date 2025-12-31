@@ -39,7 +39,9 @@ namespace RimWorldAccess
 
             lastAnnouncedLevels[menuKey] = currentLevel;
 
-            if (skipLevelOne && displayLevel == 1)
+            // Skip level 1 only on initial announcement (lastLevel == -1)
+            // If returning from a deeper level, announce level 1 so user knows they're back at root
+            if (skipLevelOne && displayLevel == 1 && lastLevel == -1)
                 return "";
 
             return $"level {displayLevel}. ";

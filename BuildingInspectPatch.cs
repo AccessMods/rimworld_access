@@ -244,7 +244,7 @@ namespace RimWorldAccess
                 char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
                 if (!BillsMenuState.ProcessTypeaheadCharacter(c))
                 {
-                    TolkHelper.Speak($"No matches for '{BillsMenuState.GetSearchBuffer()}'");
+                    TolkHelper.Speak($"No matches for '{BillsMenuState.GetLastFailedSearch()}'");
                 }
                 Event.current.Use();
                 return;

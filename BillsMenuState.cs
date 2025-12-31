@@ -299,6 +299,14 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the last failed search string for no-match announcements.
+        /// </summary>
+        public static string GetLastFailedSearch()
+        {
+            return typeahead.LastFailedSearch;
+        }
+
+        /// <summary>
         /// Gets a list of labels for all menu items for typeahead search.
         /// </summary>
         private static List<string> GetItemLabels()

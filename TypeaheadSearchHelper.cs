@@ -19,6 +19,7 @@ namespace RimWorldAccess
 
         // State
         private string searchBuffer = "";
+        private string lastFailedSearch = "";  // Stores the search that had no matches (for announcement)
         private float lastInputTime = 0f;
         private List<int> matchingIndices = new List<int>();
         private int currentMatchIndex = 0;
@@ -37,6 +38,11 @@ namespace RimWorldAccess
         /// Gets the current search string.
         /// </summary>
         public string SearchBuffer => searchBuffer;
+
+        /// <summary>
+        /// Gets the last search string that had no matches (for announcement after auto-clear).
+        /// </summary>
+        public string LastFailedSearch => lastFailedSearch;
 
         /// <summary>
         /// Gets the number of current matches.
@@ -94,7 +100,9 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // No matches - keep buffer intact so user can backspace and try again
+            // No matches - store the failed search for announcement, then auto-clear
+            lastFailedSearch = searchBuffer;
+            ClearSearch();
             return false;
         }
 

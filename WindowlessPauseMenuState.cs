@@ -229,7 +229,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak($"No matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
                 }
                 Event.current.Use();
                 return true;
@@ -271,7 +271,7 @@ namespace RimWorldAccess
             {
                 if (typeahead.HasNoMatches)
                 {
-                    TolkHelper.Speak($"{label}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}. No matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"{label}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}. No matches for '{typeahead.LastFailedSearch}'");
                 }
                 else
                 {
