@@ -768,6 +768,54 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem currentItem = menuItems[selectedIndex];
+            MenuItem parent = currentItem.parent; // null means root level
+
+            // Find all collapsed sibling categories
+            int expandedCount = 0;
+            foreach (var item in menuItems)
+            {
+                // Must be same parent (sibling) and be a collapsed category
+                if (item.parent == parent && item.type == MenuItemType.Category && !item.isExpanded)
+                {
+                    var node = item.data as TreeNode_ThingCategory;
+                    if (node != null)
+                    {
+                        expandedCategories.Add(node.catDef.defName);
+                        expandedCount++;
+                    }
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildMenu();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any sibling categories at all
+                bool hasAnySiblingCategories = menuItems.Any(m => m.parent == parent && m.type == MenuItemType.Category);
+                if (hasAnySiblingCategories)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
+            }
+        }
+
+        /// <summary>
         /// Jumps to the first item in the navigation list.
         /// </summary>
         public static void JumpToFirst()

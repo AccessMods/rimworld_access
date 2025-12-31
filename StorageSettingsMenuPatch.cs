@@ -117,12 +117,11 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle * key - consume to prevent passthrough (reserved for future expand-all)
-            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            // Handle * key - expand all sibling categories (WCAG tree view pattern)
             bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
             if (isStar)
             {
-                // TODO: Future - ExpandAllAtLevel() for tree views
+                StorageSettingsMenuState.ExpandAllSiblings();
                 Event.current.Use();
                 return;
             }

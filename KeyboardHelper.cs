@@ -80,6 +80,7 @@ namespace RimWorldAccess
                 || ThingFilterNavigationState.IsActive
                 // Other menus
                 || ArchitectState.IsActive
+                || ArchitectTreeState.IsActive
                 || AnimalsMenuState.IsActive
                 || WildlifeMenuState.IsActive
                 || ModListState.IsActive

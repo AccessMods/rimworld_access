@@ -527,6 +527,87 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flattenedNodes == null || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            NavigationNode currentNode = flattenedNodes[selectedIndex];
+            int currentIndent = currentNode.IndentLevel;
+            int parentIndex = FindParentIndex(currentNode);
+
+            // Find the range of siblings (nodes at same indent level under same parent)
+            int startIndex = 0;
+            int endIndex = flattenedNodes.Count - 1;
+
+            // If we have a parent, siblings are bounded by parent's scope
+            if (parentIndex >= 0)
+            {
+                startIndex = parentIndex + 1;
+                // Find end: scan forwards from parent until we hit a node at parent's level or lower
+                for (int i = parentIndex + 1; i < flattenedNodes.Count; i++)
+                {
+                    if (flattenedNodes[i].IndentLevel <= flattenedNodes[parentIndex].IndentLevel)
+                    {
+                        endIndex = i - 1;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // At root level, siblings extend until we hit a different root-level parent section
+                // For root level, we consider all root-level items as siblings
+                startIndex = 0;
+                endIndex = flattenedNodes.Count - 1;
+            }
+
+            // Find all collapsed sibling categories at the current indent level
+            int expandedCount = 0;
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                var node = flattenedNodes[i];
+                // Must be at same indent level (sibling) and be a collapsed category
+                if (node.IndentLevel == currentIndent && node.Type == NodeType.Category && !node.IsExpanded)
+                {
+                    node.IsExpanded = true;
+                    expandedCount++;
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildNavigationList();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any sibling categories at all
+                bool hasAnySiblingCategories = false;
+                for (int i = startIndex; i <= endIndex; i++)
+                {
+                    if (flattenedNodes[i].IndentLevel == currentIndent && flattenedNodes[i].Type == NodeType.Category)
+                    {
+                        hasAnySiblingCategories = true;
+                        break;
+                    }
+                }
+
+                if (hasAnySiblingCategories)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
+            }
+        }
+
+        /// <summary>
         /// Gets the position of the current node among its siblings (same indent level, same parent).
         /// Returns (position, total) where position is 1-based.
         /// </summary>

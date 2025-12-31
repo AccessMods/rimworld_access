@@ -981,6 +981,12 @@ namespace RimWorldAccess
                     WindowlessResearchDetailState.Collapse();
                     handled = true;
                 }
+                // Handle * key - expand all sibling categories (WCAG tree view pattern)
+                else if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
+                {
+                    WindowlessResearchDetailState.ExpandAllSiblings();
+                    handled = true;
+                }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
                     WindowlessResearchDetailState.ExecuteCurrentItem();
@@ -1044,10 +1050,10 @@ namespace RimWorldAccess
                     WindowlessResearchMenuState.ProcessBackspace();
                     handled = true;
                 }
-                // Handle * key - consume to prevent passthrough (reserved for future expand-all)
-                else if (Event.current.character == '*')
+                // Handle * key - expand all sibling categories (WCAG tree view pattern)
+                else if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
                 {
-                    // TODO: Future - ExpandAllAtLevel() for tree views
+                    WindowlessResearchMenuState.ExpandAllSiblings();
                     handled = true;
                 }
                 // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)

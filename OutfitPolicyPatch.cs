@@ -142,6 +142,12 @@ namespace RimWorldAccess
                         ThingFilterNavigationState.Expand();
                         handled = true;
                     }
+                    // Handle * key - expand all sibling categories (WCAG tree view pattern)
+                    else if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
+                    {
+                        ThingFilterNavigationState.ExpandAllSiblings();
+                        handled = true;
+                    }
                     else if (key == KeyCode.A && Event.current.control)
                     {
                         ThingFilterNavigationState.AllowAll();

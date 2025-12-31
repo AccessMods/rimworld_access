@@ -314,6 +314,101 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (!IsActive || visibleItems == null || selectedIndex >= visibleItems.Count)
+                return;
+
+            // Clear search when expanding
+            typeahead.ClearSearch();
+
+            var currentItem = visibleItems[selectedIndex];
+
+            // Get siblings - items with the same parent
+            List<InspectionTreeItem> siblings;
+            if (currentItem.Parent == null || currentItem.Parent == rootItem)
+            {
+                siblings = rootItem.Children;
+            }
+            else
+            {
+                siblings = currentItem.Parent.Children;
+            }
+
+            // Find all collapsed sibling nodes that can be expanded
+            var collapsedSiblings = new List<InspectionTreeItem>();
+            foreach (var sibling in siblings)
+            {
+                if (sibling.IsExpandable && !sibling.IsExpanded)
+                {
+                    collapsedSiblings.Add(sibling);
+                }
+            }
+
+            // Check if there are any expandable items at this level at all
+            bool hasExpandableItems = false;
+            foreach (var sibling in siblings)
+            {
+                if (sibling.IsExpandable)
+                {
+                    hasExpandableItems = true;
+                    break;
+                }
+            }
+
+            if (!hasExpandableItems)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("No categories to expand at this level.");
+                return;
+            }
+
+            if (collapsedSiblings.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("All categories already expanded at this level.");
+                return;
+            }
+
+            // Expand all collapsed siblings
+            int expandedCount = 0;
+            foreach (var sibling in collapsedSiblings)
+            {
+                // Trigger lazy loading if needed
+                if (sibling.OnActivate != null && sibling.Children.Count == 0)
+                {
+                    sibling.OnActivate();
+                }
+
+                // Only count as expanded if there are children to show
+                if (sibling.Children.Count > 0)
+                {
+                    sibling.IsExpanded = true;
+                    expandedCount++;
+                }
+            }
+
+            // Rebuild the visible items list
+            RebuildVisibleList();
+
+            // Announce result
+            if (expandedCount == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("No categories to expand at this level.");
+            }
+            else
+            {
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                string categoryWord = expandedCount == 1 ? "category" : "categories";
+                TolkHelper.Speak($"Expanded {expandedCount} {categoryWord}.");
+            }
+        }
+
+        /// <summary>
         /// Collapses the selected item (Left arrow).
         /// WCAG behavior:
         /// - On open node: Close node, focus stays on current item
@@ -745,6 +840,15 @@ namespace RimWorldAccess
                 if (key == KeyCode.Delete)
                 {
                     DeleteItem();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle * key - expand all sibling categories (WCAG tree view pattern)
+                bool isStar = key == KeyCode.KeypadMultiply || (ev.shift && key == KeyCode.Alpha8);
+                if (isStar)
+                {
+                    ExpandAllSiblings();
                     ev.Use();
                     return true;
                 }

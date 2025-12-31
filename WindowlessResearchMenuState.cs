@@ -145,6 +145,72 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            var current = flatNavigationList[currentIndex];
+
+            // Get siblings (nodes at the same level with the same parent)
+            List<ResearchMenuNode> siblings;
+            if (current.Parent == null)
+            {
+                // Top level - siblings are root nodes
+                siblings = rootNodes;
+            }
+            else
+            {
+                // Inside a category - siblings are parent's children
+                siblings = current.Parent.Children;
+            }
+
+            // Find all collapsed category siblings
+            var collapsedCategories = siblings
+                .Where(n => n.Type == ResearchMenuNodeType.Category && !expandedNodes.Contains(n.Id))
+                .ToList();
+
+            // Check if there are any expandable items at this level
+            var allCategories = siblings.Where(n => n.Type == ResearchMenuNodeType.Category).ToList();
+            if (allCategories.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("No categories to expand at this level", SpeechPriority.High);
+                return;
+            }
+
+            // Check if all are already expanded
+            if (collapsedCategories.Count == 0)
+            {
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                TolkHelper.Speak("All categories already expanded at this level", SpeechPriority.High);
+                return;
+            }
+
+            // Expand all collapsed siblings
+            foreach (var node in collapsedCategories)
+            {
+                expandedNodes.Add(node.Id);
+                node.IsExpanded = true;
+            }
+
+            // Clear typeahead search
+            typeahead.ClearSearch();
+
+            // Rebuild the flat navigation list
+            flatNavigationList = BuildFlatNavigationList();
+
+            // Announce result
+            string message = collapsedCategories.Count == 1
+                ? "Expanded 1 category"
+                : $"Expanded {collapsedCategories.Count} categories";
+            SoundDefOf.Click.PlayOneShotOnCamera();
+            TolkHelper.Speak(message, SpeechPriority.High);
+        }
+
+        /// <summary>
         /// Collapses the currently selected category (left arrow).
         /// WCAG behavior:
         /// - On open node: Close node, focus stays

@@ -378,6 +378,15 @@ namespace RimWorldAccess
                 return true;
             }
 
+            // Handle * key - expand all sibling categories (WCAG tree view pattern)
+            bool isStar = key == KeyCode.KeypadMultiply || (ev.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                ExpandAllSiblings();
+                ev.Use();
+                return true;
+            }
+
             // Enter - activate current node
             if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
@@ -587,6 +596,63 @@ namespace RimWorldAccess
                     SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
                     AnnounceCurrentSelection();
                 }
+            }
+        }
+
+        /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flattenedVisibleNodes.Count == 0 || selectedIndex >= flattenedVisibleNodes.Count)
+                return;
+
+            TreeNode currentItem = flattenedVisibleNodes[selectedIndex];
+            TreeNode parent = currentItem.Parent; // null means root level
+
+            // Get siblings list (either from parent's children or root nodes)
+            List<TreeNode> siblings = parent != null ? parent.Children : rootNodes;
+
+            // Find all collapsed sibling nodes that can be expanded
+            int expandedCount = 0;
+            foreach (TreeNode sibling in siblings)
+            {
+                // Must be expandable and currently collapsed
+                if (sibling.CanExpand && !sibling.IsExpanded)
+                {
+                    sibling.IsExpanded = true;
+                    expandedCount++;
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildFlattenedList();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any expandable sibling nodes at all
+                bool hasAnyExpandableSiblings = false;
+                foreach (TreeNode sibling in siblings)
+                {
+                    if (sibling.CanExpand)
+                    {
+                        hasAnyExpandableSiblings = true;
+                        break;
+                    }
+                }
+
+                if (hasAnyExpandableSiblings)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
             }
         }
 

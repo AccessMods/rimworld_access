@@ -158,6 +158,64 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            // Clear search when expanding to avoid navigation confusion
+            typeahead.ClearSearch();
+
+            var current = flatNavigationList[currentIndex];
+
+            // Get siblings (nodes with the same parent)
+            var siblings = current.Parent?.Children ?? rootNodes;
+
+            // Find all collapsed expandable siblings
+            var collapsedSiblings = siblings
+                .Where(s => s.IsExpandable && s.Children != null && s.Children.Count > 0 && !s.IsExpanded)
+                .ToList();
+
+            // Check if there are any expandable items at this level
+            var expandableSiblings = siblings
+                .Where(s => s.IsExpandable && s.Children != null && s.Children.Count > 0)
+                .ToList();
+
+            if (expandableSiblings.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("No categories to expand at this level");
+                return;
+            }
+
+            if (collapsedSiblings.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("All categories already expanded at this level");
+                return;
+            }
+
+            // Expand all collapsed siblings
+            foreach (var sibling in collapsedSiblings)
+            {
+                sibling.IsExpanded = true;
+                expandedNodes.Add(sibling.Id);
+            }
+
+            // Rebuild the navigation list
+            flatNavigationList = BuildFlatNavigationList();
+
+            // Play success sound
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            // Announce result
+            string categoryWord = collapsedSiblings.Count == 1 ? "category" : "categories";
+            TolkHelper.Speak($"Expanded {collapsedSiblings.Count} {categoryWord}");
+        }
+
+        /// <summary>
         /// Collapses the current category or navigates to parent (Left arrow).
         /// WCAG behavior:
         /// - On open node: Close node, focus stays on current item

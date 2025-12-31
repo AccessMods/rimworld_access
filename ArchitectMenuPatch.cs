@@ -8,7 +8,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Harmony patch to add Tab key for opening the accessible architect menu.
-    /// Handles category selection, tool selection, and material selection.
+    /// Handles category selection (treeview), tool selection, and material selection.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -18,12 +18,22 @@ namespace RimWorldAccess
         private const float ArchitectKeyCooldown = 0.3f;
 
         /// <summary>
-        /// Prefix patch to check for A key press at GUI event level.
+        /// Prefix patch to handle keyboard input for architect tree menu and Tab key.
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPriority(Priority.High)]
         public static void Prefix()
         {
+            // Handle architect tree menu keyboard input first
+            if (ArchitectTreeState.IsActive)
+            {
+                if (Event.current.type == EventType.KeyDown)
+                {
+                    HandleArchitectTreeInput();
+                }
+                return;
+            }
+
             // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
             if (KeyboardHelper.IsAnyAccessibilityMenuActive())
                 return;
@@ -81,70 +91,145 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Open the architect category menu
-            OpenCategoryMenu();
+            // Open the architect tree menu
+            OpenArchitectTreeMenu();
 
             // Consume the event
             Event.current.Use();
         }
 
         /// <summary>
-        /// Opens the category selection menu.
+        /// Handles keyboard input when the architect tree menu is active.
         /// </summary>
-        private static void OpenCategoryMenu()
+        private static void HandleArchitectTreeInput()
         {
-            // Get all visible categories
-            List<DesignationCategoryDef> categories = ArchitectHelper.GetAllCategories();
+            KeyCode key = Event.current.keyCode;
 
-            if (categories.Count == 0)
+            // Handle Escape - clear search first, then close
+            if (key == KeyCode.Escape)
             {
-                TolkHelper.Speak("No architect categories available");
+                if (ArchitectTreeState.HasActiveSearch)
+                {
+                    ArchitectTreeState.ClearTypeaheadSearch();
+                }
+                else
+                {
+                    ArchitectTreeState.Close();
+                    TolkHelper.Speak("Architect menu closed");
+                }
+                Event.current.Use();
                 return;
             }
 
-            // Create menu options
-            List<FloatMenuOption> options = ArchitectHelper.CreateCategoryOptions(
-                categories,
-                OnCategorySelected
-            );
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                ArchitectTreeState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
 
-            // Enter category selection mode
-            ArchitectState.EnterCategorySelection();
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                ArchitectTreeState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
 
-            // Open the windowless menu
-            WindowlessFloatMenuState.Open(options, false); // false = doesn't give colonist orders
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && ArchitectTreeState.HasActiveSearch)
+            {
+                ArchitectTreeState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
 
-            Log.Message("Opened architect category menu");
+            // Handle * key - expand all sibling categories
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                ArchitectTreeState.ExpandAllSiblings();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down with typeahead filtering
+            if (key == KeyCode.UpArrow)
+            {
+                if (ArchitectTreeState.HasActiveSearch && !ArchitectTreeState.HasNoMatches)
+                {
+                    ArchitectTreeState.SelectPreviousMatch();
+                }
+                else
+                {
+                    ArchitectTreeState.SelectPrevious();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            if (key == KeyCode.DownArrow)
+            {
+                if (ArchitectTreeState.HasActiveSearch && !ArchitectTreeState.HasNoMatches)
+                {
+                    ArchitectTreeState.SelectNextMatch();
+                }
+                else
+                {
+                    ArchitectTreeState.SelectNext();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Right arrow - expand or move to first child
+            if (key == KeyCode.RightArrow)
+            {
+                ArchitectTreeState.ExpandCurrent();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Left arrow - collapse or move to parent
+            if (key == KeyCode.LeftArrow)
+            {
+                ArchitectTreeState.CollapseCurrent();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Enter - activate current item
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ArchitectTreeState.ActivateCurrent();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle typeahead search characters (letters only)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            if (isLetter && !Event.current.alt && !Event.current.shift)
+            {
+                char c = (char)('a' + (key - KeyCode.A));
+                ArchitectTreeState.ProcessTypeaheadCharacter(c);
+                Event.current.Use();
+                return;
+            }
         }
 
         /// <summary>
-        /// Called when a category is selected from the menu.
+        /// Opens the architect tree menu with categories and tools.
         /// </summary>
-        private static void OnCategorySelected(DesignationCategoryDef category)
+        private static void OpenArchitectTreeMenu()
         {
-            // Get all designators in this category
-            List<Designator> designators = ArchitectHelper.GetDesignatorsForCategory(category);
+            // Enter category selection mode in ArchitectState
+            ArchitectState.EnterCategorySelection();
 
-            if (designators.Count == 0)
-            {
-                TolkHelper.Speak($"No tools available in {category.LabelCap}");
-                ArchitectState.Reset();
-                return;
-            }
+            // Open the tree menu with callback for when a designator is selected
+            ArchitectTreeState.Open(OnDesignatorSelected);
 
-            // Enter tool selection mode
-            ArchitectState.EnterToolSelection(category);
-
-            // Create menu options for designators
-            List<FloatMenuOption> options = ArchitectHelper.CreateDesignatorOptions(
-                designators,
-                OnDesignatorSelected
-            );
-
-            // Open the windowless menu
-            WindowlessFloatMenuState.Open(options, false);
-
-            Log.Message($"Opened tool menu for category: {category.defName}");
+            Log.Message("Opened architect tree menu");
         }
 
         /// <summary>
