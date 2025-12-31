@@ -19,7 +19,6 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static StorageSettings currentSettings = null;
         private static HashSet<string> expandedCategories = new HashSet<string>(); // Track which categories are expanded
-        private static int lastAnnouncedLevel = -1; // Track last announced level for WCAG announcements
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         private enum MenuItemType
@@ -73,7 +72,7 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
-            lastAnnouncedLevel = -1; // Reset level tracking on open
+            MenuHelper.ResetLevel("StorageSettings");
             typeahead.ClearSearch();
 
             BuildMenuItems();
@@ -92,7 +91,7 @@ namespace RimWorldAccess
             isActive = false;
             currentSettings = null;
             expandedCategories.Clear();
-            lastAnnouncedLevel = -1; // Reset level tracking on close
+            MenuHelper.ResetLevel("StorageSettings");
             typeahead.ClearSearch();
         }
 
@@ -221,7 +220,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -230,7 +229,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -676,21 +675,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the level suffix for announcements.
-        /// Only announces level when it changes from the last announced level.
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            int displayLevel = currentLevel + 1; // 1-based for users
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}";
-            }
-            return "";
-        }
-
-        /// <summary>
         /// Moves focus to the first child of the current item.
         /// Returns true if a child was found and focus moved, false otherwise.
         /// </summary>
@@ -758,8 +742,9 @@ namespace RimWorldAccess
                 // Get sibling position
                 var (position, total) = GetSiblingPosition(item);
 
-                // Build announcement in WCAG format: "{name} {state}. {X of Y}[. level N]. {allowed}."
-                string announcement = item.label;
+                // Build announcement in WCAG format: "[level N. ]{name} {state}. {X of Y}. {allowed}."
+                string prefix = MenuHelper.GetLevelPrefix("StorageSettings", item.indentLevel);
+                string announcement = prefix + item.label;
 
                 // Add expand/collapse state for categories
                 if (item.type == MenuItemType.Category)
@@ -769,10 +754,7 @@ namespace RimWorldAccess
                 }
 
                 // Add period after label+state, then sibling position
-                announcement += $". {position} of {total}";
-
-                // Add level suffix (only when level changes)
-                announcement += GetLevelSuffix(item.indentLevel);
+                announcement += $". {MenuHelper.FormatPosition(position - 1, total)}";
 
                 // Add allowed/disallowed state at the end for context with period
                 if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)

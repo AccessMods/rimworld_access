@@ -16,6 +16,17 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.VeryHigh)] // Run before other patches
         public static void Prefix()
         {
+            // If any accessibility menu OTHER than the ones we handle is active, don't intercept
+            // This prevents conflicts when other menus are open
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive() &&
+                !ZoneRenameState.IsActive &&
+                !ZoneSettingsMenuState.IsActive &&
+                !PlaySettingsMenuState.IsActive &&
+                !StorageSettingsMenuState.IsActive &&
+                !PlantSelectionMenuState.IsActive &&
+                !RangeEditMenuState.IsActive)
+                return;
+
             // Handle zone rename text input (process both KeyDown and normal character input)
             if (ZoneRenameState.IsActive)
             {
@@ -169,19 +180,6 @@ namespace RimWorldAccess
                 Event.current.Use();
                 return;
             }
-
-            // Handle typeahead characters
-            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-            if (isLetter || isNumber)
-            {
-                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                StorageSettingsMenuState.ProcessTypeaheadCharacter(c);
-                Event.current.Use();
-                return;
-            }
         }
 
         private static void HandleRangeEditInput()
@@ -268,34 +266,6 @@ namespace RimWorldAccess
                     Event.current.Use();
                     break;
 
-                // === Handle Backspace for typeahead ===
-                case KeyCode.Backspace:
-                    PlantSelectionMenuState.HandleBackspace();
-                    Event.current.Use();
-                    break;
-
-                default:
-                    // === Consume ALL alphanumeric + * for typeahead ===
-                    // This MUST be at the end to catch any unhandled characters
-                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-                    bool isLetterPlant = key >= KeyCode.A && key <= KeyCode.Z;
-                    bool isNumberPlant = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-                    bool isStarPlant = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
-
-                    if (isLetterPlant || isNumberPlant || isStarPlant)
-                    {
-                        if (isStarPlant)
-                        {
-                            // Reserved for future "expand all at level" in tree views
-                            Event.current.Use();
-                            return;
-                        }
-                        char c = isLetterPlant ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                        PlantSelectionMenuState.HandleTypeahead(c);
-                        Event.current.Use();
-                        return;  // CRITICAL: Don't fall through to other handlers
-                    }
-                    break;
             }
         }
 
@@ -378,19 +348,6 @@ namespace RimWorldAccess
             if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
                 ZoneSettingsMenuState.ExecuteSelected();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle typeahead characters
-            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-            if (isLetter || isNumber)
-            {
-                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                ZoneSettingsMenuState.ProcessTypeaheadCharacter(c);
                 Event.current.Use();
                 return;
             }

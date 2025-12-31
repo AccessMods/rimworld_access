@@ -22,7 +22,6 @@ namespace RimWorldAccess
         private static HashSet<string> expandedNodes = new HashSet<string>();
         private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
         private static Stack<ResearchProjectDef> navigationStack = new Stack<ResearchProjectDef>();
-        private static int lastAnnouncedLevel = -1;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
@@ -38,7 +37,7 @@ namespace RimWorldAccess
             isActive = true;
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ResearchDetail");
             typeahead.ClearSearch();
             rootNodes = BuildDetailTree(project);
             flatNavigationList = BuildFlatNavigationList();
@@ -78,7 +77,7 @@ namespace RimWorldAccess
                 expandedNodes.Clear();
                 lastChildIdPerParent.Clear();
                 navigationStack.Clear();
-                lastAnnouncedLevel = -1;
+                MenuHelper.ResetLevel("ResearchDetail");
                 typeahead.ClearSearch();
                 TolkHelper.Speak("Returned to research menu");
             }
@@ -91,7 +90,7 @@ namespace RimWorldAccess
         {
             if (flatNavigationList.Count == 0) return;
 
-            currentIndex = (currentIndex + 1) % flatNavigationList.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, flatNavigationList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
@@ -103,9 +102,7 @@ namespace RimWorldAccess
         {
             if (flatNavigationList.Count == 0) return;
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = flatNavigationList.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, flatNavigationList.Count);
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
@@ -703,27 +700,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the level suffix for announcement (only if level changed).
-        /// Don't announce level 1 - it's implied at the top of an isolated menu.
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            int displayLevel = currentLevel + 1; // 1-based for users
-            // Don't announce level 1 - it's implied at the top of an isolated menu
-            if (displayLevel == 1)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return ".";
-            }
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}.";
-            }
-            return ".";  // Always end with period
-        }
-
-        /// <summary>
         /// Moves focus to the first child of the current item.
         /// </summary>
         private static void MoveToFirstChild()
@@ -743,7 +719,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the current selection using WCAG-compliant format.
-        /// Format: "{name} {state} {X of Y}[, level N]"
+        /// Format: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
         /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
@@ -760,8 +736,12 @@ namespace RimWorldAccess
             var (position, total) = GetSiblingPosition(current);
             int currentLevel = GetNodeLevel(current);
 
-            // Build announcement: "{name} {state}. {X of Y}{levelSuffix}"
+            // Get level prefix (only announced when level changes)
+            string levelPrefix = MenuHelper.GetLevelPrefix("ResearchDetail", currentLevel);
+
+            // Build announcement: "level N. {name} {state}. {X of Y}."
             var sb = new StringBuilder();
+            sb.Append(levelPrefix);
             sb.Append(current.Label);
 
             // Add expand/collapse state for expandable categories
@@ -770,14 +750,8 @@ namespace RimWorldAccess
                 sb.Append(current.IsExpanded ? " expanded" : " collapsed");
             }
 
-            // Add period after label+state for screen reader pause
-            sb.Append(". ");
-
             // Add position
-            sb.Append($"{position} of {total}");
-
-            // Add level suffix (includes period at end)
-            sb.Append(GetLevelSuffix(currentLevel));
+            sb.Append($". {MenuHelper.FormatPosition(position - 1, total)}.");
 
             // For info nodes, append content after main announcement
             if (current.Type == DetailNodeType.Info && !string.IsNullOrEmpty(current.Content))

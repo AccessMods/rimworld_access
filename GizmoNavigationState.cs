@@ -188,7 +188,7 @@ namespace RimWorldAccess
             if (!isActive || availableGizmos.Count == 0)
                 return;
 
-            selectedGizmoIndex = (selectedGizmoIndex + 1) % availableGizmos.Count;
+            selectedGizmoIndex = MenuHelper.SelectNext(selectedGizmoIndex, availableGizmos.Count);
             AnnounceCurrentGizmo();
         }
 
@@ -200,7 +200,7 @@ namespace RimWorldAccess
             if (!isActive || availableGizmos.Count == 0)
                 return;
 
-            selectedGizmoIndex = (selectedGizmoIndex - 1 + availableGizmos.Count) % availableGizmos.Count;
+            selectedGizmoIndex = MenuHelper.SelectPrevious(selectedGizmoIndex, availableGizmos.Count);
             AnnounceCurrentGizmo();
         }
 
@@ -360,7 +360,7 @@ namespace RimWorldAccess
             if (!isActive || availableGizmos.Count == 0)
                 return;
 
-            selectedGizmoIndex = 0;
+            selectedGizmoIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentGizmo();
         }
@@ -373,7 +373,7 @@ namespace RimWorldAccess
             if (!isActive || availableGizmos.Count == 0)
                 return;
 
-            selectedGizmoIndex = availableGizmos.Count - 1;
+            selectedGizmoIndex = MenuHelper.JumpToLast(availableGizmos.Count);
             typeahead.ClearSearch();
             AnnounceCurrentGizmo();
         }

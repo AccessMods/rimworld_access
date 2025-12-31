@@ -18,7 +18,6 @@ namespace RimWorldAccess
         private static List<TreeNode> flattenedVisibleNodes = new List<TreeNode>();
         private static int selectedIndex = 0;
         private static Dictionary<TreeNode, TreeNode> lastChildPerParent = new Dictionary<TreeNode, TreeNode>();
-        private static int lastAnnouncedLevel = -1;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
@@ -90,7 +89,7 @@ namespace RimWorldAccess
             isActive = true;
             selectedIndex = 0;
             lastChildPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("Inventory");
             typeahead.ClearSearch();
 
             // Collect all stored items
@@ -258,7 +257,7 @@ namespace RimWorldAccess
             flattenedVisibleNodes.Clear();
             selectedIndex = 0;
             lastChildPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("Inventory");
             typeahead.ClearSearch();
 
             TolkHelper.Speak("Inventory menu closed.");
@@ -514,11 +513,7 @@ namespace RimWorldAccess
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-            {
-                selectedIndex = flattenedVisibleNodes.Count - 1; // Wrap to bottom
-            }
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, flattenedVisibleNodes.Count);
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
@@ -531,11 +526,7 @@ namespace RimWorldAccess
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
-            selectedIndex++;
-            if (selectedIndex >= flattenedVisibleNodes.Count)
-            {
-                selectedIndex = 0; // Wrap to top
-            }
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, flattenedVisibleNodes.Count);
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
@@ -688,22 +679,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the level suffix for announcements (only when level changes)
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            int displayLevel = currentLevel + 1; // 1-based for users
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}.";
-            }
-            return ".";  // Always end with period
-        }
-
-        /// <summary>
         /// Announces the currently selected item via screen reader
-        /// Format: "{name} {state}. {X of Y}. level N." or "{name}. {X of Y}. level N."
+        /// Format: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -719,27 +696,17 @@ namespace RimWorldAccess
             string stateInfo = "";
             if (current.CanExpand)
             {
-                stateInfo = current.IsExpanded ? "expanded" : "collapsed";
+                stateInfo = current.IsExpanded ? " expanded" : " collapsed";
             }
 
             // Get sibling position
             var (position, total) = GetSiblingPosition(current);
-            string positionInfo = $"{position} of {total}";
 
-            // Get level suffix (only announced when level changes)
-            string levelSuffix = GetLevelSuffix(current.Depth);
+            // Get level prefix (only announced when level changes)
+            string levelPrefix = MenuHelper.GetLevelPrefix("Inventory", current.Depth);
 
-            // Build announcement: "{name} {state}. {X of Y}{levelSuffix}" or "{name}. {X of Y}{levelSuffix}"
-            string announcement;
-            if (string.IsNullOrEmpty(stateInfo))
-            {
-                // End node (action) - no state
-                announcement = $"{current.Label}. {positionInfo}{levelSuffix}";
-            }
-            else
-            {
-                announcement = $"{current.Label} {stateInfo}. {positionInfo}{levelSuffix}";
-            }
+            // Build announcement: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
+            string announcement = $"{levelPrefix}{current.Label}{stateInfo}. {MenuHelper.FormatPosition(position - 1, total)}.";
 
             TolkHelper.Speak(announcement.Trim());
         }

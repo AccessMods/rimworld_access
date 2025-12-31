@@ -89,7 +89,7 @@ namespace RimWorldAccess
             if (maxIndex < 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % (maxIndex + 1);
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, maxIndex + 1);
             AnnounceCurrentState();
         }
 
@@ -108,7 +108,7 @@ namespace RimWorldAccess
             if (maxIndex < 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + (maxIndex + 1)) % (maxIndex + 1);
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, maxIndex + 1);
             AnnounceCurrentState();
         }
 
@@ -273,17 +273,17 @@ namespace RimWorldAccess
                 // Index 0 is "Create New Save", indices 1+ are existing files
                 if (selectedIndex == 0)
                 {
-                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}");
+                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}");
                 }
                 else if (saveFiles != null && selectedIndex > 0 && selectedIndex <= saveFiles.Count)
                 {
                     SaveFileInfo file = saveFiles[selectedIndex - 1]; // Adjust for "Create New Save" at index 0
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {totalCount}");
+                    TolkHelper.Speak($"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}");
                 }
                 else
                 {
-                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}");
+                    TolkHelper.Speak($"Create New Save: {typedSaveName}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}");
                 }
             }
             else // Load mode
@@ -292,7 +292,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {saveFiles.Count}");
+                    TolkHelper.Speak($"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}");
                 }
                 else
                 {
@@ -318,7 +318,7 @@ namespace RimWorldAccess
             if (saveFiles == null)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentState();
         }
@@ -335,7 +335,7 @@ namespace RimWorldAccess
             if (maxIndex < 0)
                 return;
 
-            selectedIndex = maxIndex;
+            selectedIndex = MenuHelper.JumpToLast(maxIndex + 1);
             typeahead.ClearSearch();
             AnnounceCurrentState();
         }
@@ -496,17 +496,17 @@ namespace RimWorldAccess
 
                 if (selectedIndex == 0)
                 {
-                    return $"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}";
+                    return $"Create New Save: {typedSaveName}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}";
                 }
                 else if (saveFiles != null && selectedIndex > 0 && selectedIndex <= saveFiles.Count)
                 {
                     SaveFileInfo file = saveFiles[selectedIndex - 1];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    return $"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {totalCount}";
+                    return $"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}";
                 }
                 else
                 {
-                    return $"Create New Save: {typedSaveName}. {selectedIndex + 1} of {totalCount}";
+                    return $"Create New Save: {typedSaveName}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}";
                 }
             }
             else // Load mode
@@ -515,7 +515,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    return $"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {selectedIndex + 1} of {saveFiles.Count}";
+                    return $"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}";
                 }
                 else
                 {

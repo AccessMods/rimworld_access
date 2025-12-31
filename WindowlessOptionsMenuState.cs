@@ -79,14 +79,14 @@ namespace RimWorldAccess
         {
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
-                selectedCategoryIndex = (selectedCategoryIndex + 1) % categories.Count;
+                selectedCategoryIndex = MenuHelper.SelectNext(selectedCategoryIndex, categories.Count);
             }
             else // SettingsList
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
                 {
-                    selectedSettingIndex = (selectedSettingIndex + 1) % settings.Count;
+                    selectedSettingIndex = MenuHelper.SelectNext(selectedSettingIndex, settings.Count);
                 }
             }
 
@@ -100,14 +100,14 @@ namespace RimWorldAccess
         {
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
-                selectedCategoryIndex = (selectedCategoryIndex - 1 + categories.Count) % categories.Count;
+                selectedCategoryIndex = MenuHelper.SelectPrevious(selectedCategoryIndex, categories.Count);
             }
             else // SettingsList
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
                 {
-                    selectedSettingIndex = (selectedSettingIndex - 1 + settings.Count) % settings.Count;
+                    selectedSettingIndex = MenuHelper.SelectPrevious(selectedSettingIndex, settings.Count);
                 }
             }
 
@@ -231,13 +231,13 @@ namespace RimWorldAccess
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 if (categories.Count > 0)
-                    selectedCategoryIndex = 0;
+                    selectedCategoryIndex = MenuHelper.JumpToFirst();
             }
             else
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
-                    selectedSettingIndex = 0;
+                    selectedSettingIndex = MenuHelper.JumpToFirst();
             }
             AnnounceCurrentState();
         }
@@ -251,13 +251,13 @@ namespace RimWorldAccess
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 if (categories.Count > 0)
-                    selectedCategoryIndex = categories.Count - 1;
+                    selectedCategoryIndex = MenuHelper.JumpToLast(categories.Count);
             }
             else
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
-                    selectedSettingIndex = settings.Count - 1;
+                    selectedSettingIndex = MenuHelper.JumpToLast(settings.Count);
             }
             AnnounceCurrentState();
         }
@@ -350,13 +350,13 @@ namespace RimWorldAccess
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 string categoryName = categories[selectedCategoryIndex].Name;
-                TolkHelper.Speak($"Category: {categoryName}. {selectedCategoryIndex + 1} of {categories.Count}");
+                TolkHelper.Speak($"Category: {categoryName}. {MenuHelper.FormatPosition(selectedCategoryIndex, categories.Count)}");
             }
             else // SettingsList
             {
                 var setting = categories[selectedCategoryIndex].Settings[selectedSettingIndex];
                 var currentSettings = categories[selectedCategoryIndex].Settings;
-                TolkHelper.Speak($"{setting.GetAnnouncement()}. {selectedSettingIndex + 1} of {currentSettings.Count}");
+                TolkHelper.Speak($"{setting.GetAnnouncement()}. {MenuHelper.FormatPosition(selectedSettingIndex, currentSettings.Count)}");
             }
         }
 

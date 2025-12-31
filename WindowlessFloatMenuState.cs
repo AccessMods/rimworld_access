@@ -41,7 +41,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {options.Count}");
+                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, options.Count)}");
             }
         }
 
@@ -64,7 +64,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
 
             // Announce the new selection
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
@@ -74,7 +74,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
+                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
             }
         }
 
@@ -86,7 +86,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
 
             // Announce the new selection
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
@@ -96,7 +96,7 @@ namespace RimWorldAccess
                 {
                     optionText += " (unavailable)";
                 }
-                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
+                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
             }
         }
 
@@ -135,7 +135,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -148,7 +148,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = currentOptions.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(currentOptions.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -389,7 +389,7 @@ namespace RimWorldAccess
             {
                 optionText += " (unavailable)";
             }
-            TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
+            TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
         }
 
         /// <summary>
@@ -415,7 +415,7 @@ namespace RimWorldAccess
             }
             else
             {
-                TolkHelper.Speak($"{optionText}. {selectedIndex + 1} of {currentOptions.Count}");
+                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
             }
         }
     }

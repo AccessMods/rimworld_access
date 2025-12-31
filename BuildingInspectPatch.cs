@@ -17,6 +17,10 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.VeryHigh)] // Run before other patches
         public static void Prefix()
         {
+            // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
+                return;
+
             // Only process keyboard events
             if (Event.current.type != EventType.KeyDown)
                 return;

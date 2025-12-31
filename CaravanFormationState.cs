@@ -273,11 +273,9 @@ namespace RimWorldAccess
             }
 
             TransferableOneWay transferable = transferables[selectedIndex];
-            int position = selectedIndex + 1;
-            int total = transferables.Count;
 
             StringBuilder announcement = new StringBuilder();
-            announcement.Append($"{position} of {total}: ");
+            announcement.Append($"{MenuHelper.FormatPosition(selectedIndex, transferables.Count)}: ");
 
             if (transferable.AnyThing is Pawn pawn)
             {
@@ -348,9 +346,7 @@ namespace RimWorldAccess
             }
 
             // Navigate normally (either no search active, OR search with no matches)
-            selectedIndex++;
-            if (selectedIndex >= transferables.Count)
-                selectedIndex = 0;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, transferables.Count);
 
             AnnounceCurrentItem();
         }
@@ -381,9 +377,7 @@ namespace RimWorldAccess
             }
 
             // Navigate normally (either no search active, OR search with no matches)
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = transferables.Count - 1;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, transferables.Count);
 
             AnnounceCurrentItem();
         }
@@ -401,7 +395,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             AnnounceCurrentItem();
         }
 
@@ -418,7 +412,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedIndex = transferables.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(transferables.Count);
             AnnounceCurrentItem();
         }
 

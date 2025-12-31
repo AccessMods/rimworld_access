@@ -18,7 +18,6 @@ namespace RimWorldAccess
         private static ThingFilter currentFilter = null;
         private static HashSet<string> expandedCategories = new HashSet<string>();
         private static string menuTitle = "";
-        private static int lastAnnouncedLevel = -1;
 
         private enum MenuItemType
         {
@@ -71,7 +70,7 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ThingFilterMenu");
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -89,7 +88,7 @@ namespace RimWorldAccess
             isActive = false;
             currentFilter = null;
             expandedCategories.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ThingFilterMenu");
         }
 
         private static void BuildMenuItems()
@@ -189,7 +188,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -198,7 +197,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -458,8 +457,9 @@ namespace RimWorldAccess
             {
                 MenuItem item = menuItems[selectedIndex];
 
-                // WCAG format: "{name} {state} {X of Y}[, level N]"
-                string announcement = item.label;
+                // WCAG format: "[level N. ]{name} {state}. {X of Y}"
+                string prefix = MenuHelper.GetLevelPrefix("ThingFilterMenu", item.indentLevel);
+                string announcement = prefix + item.label;
 
                 // Add expanded/collapsed state for categories
                 if (item.type == MenuItemType.Category)
@@ -470,11 +470,7 @@ namespace RimWorldAccess
 
                 // Add sibling position (X of Y)
                 var (position, total) = GetSiblingPosition(item);
-                announcement += $". {position} of {total}";
-
-                // Add level suffix only when level changes
-                string levelSuffix = GetLevelSuffix(item.indentLevel);
-                announcement += levelSuffix;
+                announcement += $". {MenuHelper.FormatPosition(position - 1, total)}";
 
                 TolkHelper.Speak(announcement);
             }
@@ -497,20 +493,6 @@ namespace RimWorldAccess
 
             int position = siblings.IndexOf(item) + 1;
             return (position, siblings.Count);
-        }
-
-        /// <summary>
-        /// Returns a level suffix string only when the level has changed since the last announcement.
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            int displayLevel = currentLevel + 1; // 1-based for users
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}.";
-            }
-            return ".";  // Always end with period
         }
 
         /// <summary>

@@ -34,7 +34,9 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Patch for DoWindowContents to handle keyboard input and draw visual indicators.
+        /// Patch for DoWindowContents to draw visual indicators.
+        /// Keyboard input is handled by UnifiedKeyboardPatch at Normal priority on UIRootOnGUI,
+        /// which runs BEFORE DoWindowContents for proper input handling.
         /// </summary>
         [HarmonyPatch("DoWindowContents")]
         [HarmonyPostfix]
@@ -42,23 +44,6 @@ namespace RimWorldAccess
         {
             if (!CaravanFormationState.IsActive)
                 return;
-
-            // Defer to WindowlessDialogState if a higher-priority dialog is active (e.g., confirmations)
-            if (WindowlessDialogState.IsActive)
-                return;
-
-            // Handle keyboard input
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode != KeyCode.None)
-            {
-                bool shift = Event.current.shift;
-                bool ctrl = Event.current.control;
-                bool alt = Event.current.alt;
-
-                if (CaravanFormationState.HandleInput(Event.current.keyCode, shift, ctrl, alt))
-                {
-                    Event.current.Use();
-                }
-            }
 
             // Draw visual indicator that keyboard mode is active
             DrawKeyboardModeIndicator(inRect);

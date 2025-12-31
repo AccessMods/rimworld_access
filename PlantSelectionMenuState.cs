@@ -208,7 +208,7 @@ namespace RimWorldAccess
             if (availablePlants == null || availablePlants.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % availablePlants.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, availablePlants.Count);
             AnnounceCurrentSelection();
         }
 
@@ -220,7 +220,7 @@ namespace RimWorldAccess
             if (availablePlants == null || availablePlants.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + availablePlants.Count) % availablePlants.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, availablePlants.Count);
             AnnounceCurrentSelection();
         }
 
@@ -264,7 +264,7 @@ namespace RimWorldAccess
             if (availablePlants == null || availablePlants.Count == 0)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -277,7 +277,7 @@ namespace RimWorldAccess
             if (availablePlants == null || availablePlants.Count == 0)
                 return;
 
-            selectedIndex = availablePlants.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(availablePlants.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }

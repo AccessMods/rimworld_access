@@ -108,7 +108,7 @@ namespace RimWorldAccess
         {
             if (animalsList.Count == 0) return;
 
-            currentAnimalIndex = (currentAnimalIndex + 1) % animalsList.Count;
+            currentAnimalIndex = MenuHelper.SelectNext(currentAnimalIndex, animalsList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -117,11 +117,7 @@ namespace RimWorldAccess
         {
             if (animalsList.Count == 0) return;
 
-            currentAnimalIndex--;
-            if (currentAnimalIndex < 0)
-            {
-                currentAnimalIndex = animalsList.Count - 1;
-            }
+            currentAnimalIndex = MenuHelper.SelectPrevious(currentAnimalIndex, animalsList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -129,7 +125,7 @@ namespace RimWorldAccess
         private static void SelectNextColumn()
         {
             int totalColumns = AnimalsMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
+            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -137,11 +133,7 @@ namespace RimWorldAccess
         private static void SelectPreviousColumn()
         {
             int totalColumns = AnimalsMenuHelper.GetTotalColumnCount();
-            currentColumnIndex--;
-            if (currentColumnIndex < 0)
-            {
-                currentColumnIndex = totalColumns - 1;
-            }
+            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -460,17 +452,13 @@ namespace RimWorldAccess
         {
             if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.UpArrow))
             {
-                submenuSelectedIndex--;
-                if (submenuSelectedIndex < 0)
-                {
-                    submenuSelectedIndex = submenuOptions.Count - 1;
-                }
+                submenuSelectedIndex = MenuHelper.SelectPrevious(submenuSelectedIndex, submenuOptions.Count);
                 SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
                 AnnounceSubmenuOption();
             }
             else if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.DownArrow))
             {
-                submenuSelectedIndex = (submenuSelectedIndex + 1) % submenuOptions.Count;
+                submenuSelectedIndex = MenuHelper.SelectNext(submenuSelectedIndex, submenuOptions.Count);
                 SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
                 AnnounceSubmenuOption();
             }
@@ -514,7 +502,7 @@ namespace RimWorldAccess
                 optionText = foodPolicy.label;
             }
 
-            string announcement = $"{optionText} ({submenuSelectedIndex + 1}/{submenuOptions.Count})";
+            string announcement = $"{optionText} ({MenuHelper.FormatPosition(submenuSelectedIndex, submenuOptions.Count)})";
             TolkHelper.Speak(announcement);
         }
 

@@ -219,7 +219,7 @@ namespace RimWorldAccess
             if (elements.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % elements.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, elements.Count);
             AnnounceCurrentElement();
         }
 
@@ -228,10 +228,7 @@ namespace RimWorldAccess
             if (elements.Count == 0)
                 return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = elements.Count - 1;
-
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, elements.Count);
             AnnounceCurrentElement();
         }
 
@@ -266,7 +263,7 @@ namespace RimWorldAccess
                 return;
 
             DialogElement element = elements[selectedIndex];
-            string announcement = $"{selectedIndex + 1} of {elements.Count}. {element.GetAnnouncement()}";
+            string announcement = $"{MenuHelper.FormatPosition(selectedIndex, elements.Count)}. {element.GetAnnouncement()}";
             TolkHelper.Speak(announcement);
         }
 

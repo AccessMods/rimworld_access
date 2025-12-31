@@ -1263,11 +1263,13 @@ namespace RimWorldAccess
 
             // ===== PRIORITY 4.75: Handle scanner keys (always available during map navigation) =====
             // Only process scanner keys if in gameplay with map navigation initialized
+            // IMPORTANT: Don't process scanner keys when any accessibility menu is active
             if (Current.ProgramState == ProgramState.Playing &&
                 Find.CurrentMap != null &&
                 MapNavigationState.IsInitialized &&
                 (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                !ZoneCreationState.IsInCreationMode)
+                !ZoneCreationState.IsInCreationMode &&
+                !KeyboardHelper.IsAnyAccessibilityMenuActive())
             {
                 bool handled = false;
                 bool ctrl = Event.current.control;
@@ -1461,6 +1463,95 @@ namespace RimWorldAccess
                         Event.current.Use();
                         return;
                     }
+                }
+            }
+
+            // ===== PRIORITY 4.779: Handle assign menu typeahead if active =====
+            if (AssignMenuState.IsActive)
+            {
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    AssignMenuState.ProcessTypeaheadCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                if (key == KeyCode.Backspace)
+                {
+                    AssignMenuState.ProcessBackspace();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 4.7791: Handle storage settings menu typeahead if active =====
+            // Note: StorageSettingsMenuPatch handles navigation at higher priority, but letters fall through here
+            if (StorageSettingsMenuState.IsActive)
+            {
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    StorageSettingsMenuState.ProcessTypeaheadCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                if (key == KeyCode.Backspace)
+                {
+                    StorageSettingsMenuState.ProcessBackspace();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 4.7792: Handle zone settings menu typeahead if active =====
+            if (ZoneSettingsMenuState.IsActive)
+            {
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    ZoneSettingsMenuState.ProcessTypeaheadCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                if (key == KeyCode.Backspace)
+                {
+                    ZoneSettingsMenuState.ProcessBackspace();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 4.7793: Handle plant selection menu typeahead if active =====
+            if (PlantSelectionMenuState.IsActive)
+            {
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    PlantSelectionMenuState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                if (key == KeyCode.Backspace)
+                {
+                    PlantSelectionMenuState.HandleBackspace();
+                    Event.current.Use();
+                    return;
                 }
             }
 
@@ -2289,6 +2380,14 @@ namespace RimWorldAccess
 
                 // Consume the event
                 Event.current.Use();
+            }
+
+            // CATCH-ALL: If any accessibility menu is active, consume ALL remaining key events
+            // This prevents ANY keys from leaking to the game when a menu has focus
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive() && Event.current.isKey)
+            {
+                Event.current.Use();
+                return;
             }
         }
 

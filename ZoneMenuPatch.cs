@@ -30,6 +30,10 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.High)] // Run before OrderGivingPatch
         public static void Prefix()
         {
+            // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
+                return;
+
             // Only process keyboard events
             if (Event.current.type != EventType.KeyDown)
                 return;
@@ -242,7 +246,8 @@ namespace RimWorldAccess
         public static bool Prefix(Verse.Window window)
         {
             // If ZoneMenuPatch handled the Z key this frame and this is a map search dialog, block it
-            if (ZoneMenuPatch.ZKeyHandledThisFrame && window is RimWorld.Dialog_MapSearch)
+            // Also block if any accessibility menu is active (Z should go to typeahead, not game search)
+            if ((ZoneMenuPatch.ZKeyHandledThisFrame || KeyboardHelper.IsAnyAccessibilityMenuActive()) && window is RimWorld.Dialog_MapSearch)
             {
                 return false; // Prevent window from being added
             }

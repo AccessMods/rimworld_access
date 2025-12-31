@@ -167,7 +167,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -176,7 +176,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -202,7 +202,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -215,7 +215,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = menuItems.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(menuItems.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -339,7 +339,7 @@ namespace RimWorldAccess
             }
             else
             {
-                announcement += $". {selectedIndex + 1} of {menuItems.Count}";
+                announcement += $". {MenuHelper.FormatPosition(selectedIndex, menuItems.Count)}";
             }
 
             TolkHelper.Speak(announcement);
@@ -605,7 +605,7 @@ namespace RimWorldAccess
                     announcement += " (unavailable)";
                 }
 
-                announcement += $". {selectedIndex + 1} of {menuItems.Count}";
+                announcement += $". {MenuHelper.FormatPosition(selectedIndex, menuItems.Count)}";
 
                 TolkHelper.Speak(announcement);
             }

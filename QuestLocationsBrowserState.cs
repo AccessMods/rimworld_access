@@ -147,9 +147,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex++;
-            if (currentIndex >= questLocations.Count)
-                currentIndex = 0;
+            currentIndex = MenuHelper.SelectNext(currentIndex, questLocations.Count);
 
             AnnounceCurrentLocation();
         }
@@ -165,9 +163,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = questLocations.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, questLocations.Count);
 
             AnnounceCurrentLocation();
         }
@@ -231,10 +227,6 @@ namespace RimWorldAccess
 
             QuestLocationEntry entry = questLocations[currentIndex];
 
-            // Build announcement
-            int position = currentIndex + 1;
-            int total = questLocations.Count;
-
             // Get quest name (strip XML tags)
             string questName = entry.Quest.name.StripTags();
 
@@ -255,7 +247,7 @@ namespace RimWorldAccess
             // Get tile summary for additional context
             string tileSummary = WorldInfoHelper.GetTileSummary(entry.Tile);
 
-            string announcement = $"{position} of {total}: {questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}";
+            string announcement = $"{MenuHelper.FormatPosition(currentIndex, questLocations.Count)}: {questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}";
 
             TolkHelper.Speak(announcement);
         }

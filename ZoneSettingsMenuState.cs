@@ -73,7 +73,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 
@@ -85,7 +85,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 
@@ -114,7 +114,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentOption();
         }
@@ -127,7 +127,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = currentOptions.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(currentOptions.Count);
             typeahead.ClearSearch();
             AnnounceCurrentOption();
         }

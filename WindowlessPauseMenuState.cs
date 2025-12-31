@@ -55,7 +55,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 
@@ -67,7 +67,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 
@@ -95,7 +95,7 @@ namespace RimWorldAccess
         {
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
             {
-                TolkHelper.Speak($"{currentOptions[selectedIndex].Label}. {selectedIndex + 1} of {currentOptions.Count}");
+                TolkHelper.Speak($"{currentOptions[selectedIndex].Label}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
             }
         }
 
@@ -153,7 +153,7 @@ namespace RimWorldAccess
                     if (typeahead.HasNoMatches)
                     {
                         // No matches - navigate normally but keep search text
-                        selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+                        selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
                         AnnounceWithSearch();
                     }
                     else
@@ -182,7 +182,7 @@ namespace RimWorldAccess
                     if (typeahead.HasNoMatches)
                     {
                         // No matches - navigate normally but keep search text
-                        selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+                        selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
                         AnnounceWithSearch();
                     }
                     else
@@ -271,7 +271,7 @@ namespace RimWorldAccess
             {
                 if (typeahead.HasNoMatches)
                 {
-                    TolkHelper.Speak($"{label}. {selectedIndex + 1} of {currentOptions.Count}. No matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"{label}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}. No matches for '{typeahead.SearchBuffer}'");
                 }
                 else
                 {

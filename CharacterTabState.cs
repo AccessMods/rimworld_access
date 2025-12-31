@@ -146,27 +146,27 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex + 1) % sections.Count;
+                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.BackstoriesList:
                     if (backstories.Count > 0)
-                        backstoryIndex = (backstoryIndex + 1) % backstories.Count;
+                        backstoryIndex = MenuHelper.SelectNext(backstoryIndex, backstories.Count);
                     break;
 
                 case MenuLevel.TraitsList:
                     if (traits.Count > 0)
-                        traitIndex = (traitIndex + 1) % traits.Count;
+                        traitIndex = MenuHelper.SelectNext(traitIndex, traits.Count);
                     break;
 
                 case MenuLevel.IncapacitiesList:
                     if (incapacities.Count > 0)
-                        incapacityIndex = (incapacityIndex + 1) % incapacities.Count;
+                        incapacityIndex = MenuHelper.SelectNext(incapacityIndex, incapacities.Count);
                     break;
 
                 case MenuLevel.AbilitiesList:
                     if (abilities.Count > 0)
-                        abilityIndex = (abilityIndex + 1) % abilities.Count;
+                        abilityIndex = MenuHelper.SelectNext(abilityIndex, abilities.Count);
                     break;
             }
 
@@ -179,27 +179,27 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex - 1 + sections.Count) % sections.Count;
+                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.BackstoriesList:
                     if (backstories.Count > 0)
-                        backstoryIndex = (backstoryIndex - 1 + backstories.Count) % backstories.Count;
+                        backstoryIndex = MenuHelper.SelectPrevious(backstoryIndex, backstories.Count);
                     break;
 
                 case MenuLevel.TraitsList:
                     if (traits.Count > 0)
-                        traitIndex = (traitIndex - 1 + traits.Count) % traits.Count;
+                        traitIndex = MenuHelper.SelectPrevious(traitIndex, traits.Count);
                     break;
 
                 case MenuLevel.IncapacitiesList:
                     if (incapacities.Count > 0)
-                        incapacityIndex = (incapacityIndex - 1 + incapacities.Count) % incapacities.Count;
+                        incapacityIndex = MenuHelper.SelectPrevious(incapacityIndex, incapacities.Count);
                     break;
 
                 case MenuLevel.AbilitiesList:
                     if (abilities.Count > 0)
-                        abilityIndex = (abilityIndex - 1 + abilities.Count) % abilities.Count;
+                        abilityIndex = MenuHelper.SelectPrevious(abilityIndex, abilities.Count);
                     break;
             }
 
@@ -361,7 +361,7 @@ namespace RimWorldAccess
             {
                 case MenuLevel.SectionMenu:
                     sb.AppendLine($"Character - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {sectionIndex + 1} of {sections.Count}");
+                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
                     sb.AppendLine("Press Enter to open");
                     break;
 
@@ -393,7 +393,7 @@ namespace RimWorldAccess
                     {
                         var backstory = backstories[backstoryIndex];
                         sb.AppendLine($"{backstory.Title}");
-                        sb.AppendLine($"Backstory {backstoryIndex + 1} of {backstories.Count}");
+                        sb.AppendLine($"Backstory {MenuHelper.FormatPosition(backstoryIndex, backstories.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -411,7 +411,7 @@ namespace RimWorldAccess
                     {
                         var trait = traits[traitIndex];
                         sb.AppendLine($"{trait.Label}");
-                        sb.AppendLine($"Trait {traitIndex + 1} of {traits.Count}");
+                        sb.AppendLine($"Trait {MenuHelper.FormatPosition(traitIndex, traits.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -429,7 +429,7 @@ namespace RimWorldAccess
                     {
                         var incapacity = incapacities[incapacityIndex];
                         sb.AppendLine($"{incapacity.Label}");
-                        sb.AppendLine($"Incapacity {incapacityIndex + 1} of {incapacities.Count}");
+                        sb.AppendLine($"Incapacity {MenuHelper.FormatPosition(incapacityIndex, incapacities.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -447,7 +447,7 @@ namespace RimWorldAccess
                     {
                         var ability = abilities[abilityIndex];
                         sb.AppendLine($"{ability.Label}");
-                        sb.AppendLine($"Ability {abilityIndex + 1} of {abilities.Count}");
+                        sb.AppendLine($"Ability {MenuHelper.FormatPosition(abilityIndex, abilities.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;

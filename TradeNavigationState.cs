@@ -302,7 +302,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex + 1) % list.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, list.Count);
             AnnounceCurrentSelection();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
         }
@@ -325,9 +325,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = list.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, list.Count);
 
             AnnounceCurrentSelection();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
@@ -912,7 +910,7 @@ namespace RimWorldAccess
 
             // Position info
             List<Tradeable> list = GetCurrentList();
-            parts.Add($"({currentIndex + 1}/{list.Count})");
+            parts.Add($"({MenuHelper.FormatPosition(currentIndex, list.Count)})");
 
             // Item name
             parts.Add(tradeable.Label);
@@ -1114,7 +1112,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = 0;
+            currentIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
@@ -1138,7 +1136,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = list.Count - 1;
+            currentIndex = MenuHelper.JumpToLast(list.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();

@@ -188,52 +188,52 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex + 1) % sections.Count;
+                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.MedicalSettingsList:
-                    medicalSettingIndex = (medicalSettingIndex + 1) % medicalSettings.Count;
+                    medicalSettingIndex = MenuHelper.SelectNext(medicalSettingIndex, medicalSettings.Count);
                     break;
 
                 case MenuLevel.MedicalSettingChange:
                     if (currentSettingName == "Food Restriction")
-                        settingChoiceIndex = (settingChoiceIndex + 1) % availableFoodRestrictions.Count;
+                        settingChoiceIndex = MenuHelper.SelectNext(settingChoiceIndex, availableFoodRestrictions.Count);
                     else if (currentSettingName == "Medical Care")
-                        settingChoiceIndex = (settingChoiceIndex + 1) % availableMedicalCare.Count;
+                        settingChoiceIndex = MenuHelper.SelectNext(settingChoiceIndex, availableMedicalCare.Count);
                     break;
 
                 case MenuLevel.CapacitiesList:
                     if (capacities.Count > 0)
-                        capacityIndex = (capacityIndex + 1) % capacities.Count;
+                        capacityIndex = MenuHelper.SelectNext(capacityIndex, capacities.Count);
                     break;
 
                 case MenuLevel.OperationsList:
                     int totalOps = queuedOperations.Count + 1; // +1 for "Add Operation"
-                    operationIndex = (operationIndex + 1) % totalOps;
+                    operationIndex = MenuHelper.SelectNext(operationIndex, totalOps);
                     break;
 
                 case MenuLevel.OperationActions:
-                    operationActionIndex = (operationActionIndex + 1) % operationActions.Count;
+                    operationActionIndex = MenuHelper.SelectNext(operationActionIndex, operationActions.Count);
                     break;
 
                 case MenuLevel.AddOperationList:
                     if (availableOperations.Count > 0)
-                        operationIndex = (operationIndex + 1) % availableOperations.Count;
+                        operationIndex = MenuHelper.SelectNext(operationIndex, availableOperations.Count);
                     break;
 
                 case MenuLevel.AddRecipeList:
                     if (availableRecipes.Count > 0)
-                        recipeIndex = (recipeIndex + 1) % availableRecipes.Count;
+                        recipeIndex = MenuHelper.SelectNext(recipeIndex, availableRecipes.Count);
                     break;
 
                 case MenuLevel.SelectBodyPart:
                     if (partsForRecipe.Count > 0)
-                        partSelectionIndex = (partSelectionIndex + 1) % partsForRecipe.Count;
+                        partSelectionIndex = MenuHelper.SelectNext(partSelectionIndex, partsForRecipe.Count);
                     break;
 
                 case MenuLevel.BodyPartsList:
                     if (bodyParts.Count > 0)
-                        bodyPartIndex = (bodyPartIndex + 1) % bodyParts.Count;
+                        bodyPartIndex = MenuHelper.SelectNext(bodyPartIndex, bodyParts.Count);
                     break;
 
                 case MenuLevel.HediffsList:
@@ -241,7 +241,7 @@ namespace RimWorldAccess
                     {
                         int hediffCount = bodyParts[bodyPartIndex].Hediffs.Count;
                         if (hediffCount > 0)
-                            hediffIndex = (hediffIndex + 1) % hediffCount;
+                            hediffIndex = MenuHelper.SelectNext(hediffIndex, hediffCount);
                     }
                     break;
             }
@@ -255,52 +255,52 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex - 1 + sections.Count) % sections.Count;
+                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.MedicalSettingsList:
-                    medicalSettingIndex = (medicalSettingIndex - 1 + medicalSettings.Count) % medicalSettings.Count;
+                    medicalSettingIndex = MenuHelper.SelectPrevious(medicalSettingIndex, medicalSettings.Count);
                     break;
 
                 case MenuLevel.MedicalSettingChange:
                     if (currentSettingName == "Food Restriction")
-                        settingChoiceIndex = (settingChoiceIndex - 1 + availableFoodRestrictions.Count) % availableFoodRestrictions.Count;
+                        settingChoiceIndex = MenuHelper.SelectPrevious(settingChoiceIndex, availableFoodRestrictions.Count);
                     else if (currentSettingName == "Medical Care")
-                        settingChoiceIndex = (settingChoiceIndex - 1 + availableMedicalCare.Count) % availableMedicalCare.Count;
+                        settingChoiceIndex = MenuHelper.SelectPrevious(settingChoiceIndex, availableMedicalCare.Count);
                     break;
 
                 case MenuLevel.CapacitiesList:
                     if (capacities.Count > 0)
-                        capacityIndex = (capacityIndex - 1 + capacities.Count) % capacities.Count;
+                        capacityIndex = MenuHelper.SelectPrevious(capacityIndex, capacities.Count);
                     break;
 
                 case MenuLevel.OperationsList:
                     int totalOps = queuedOperations.Count + 1;
-                    operationIndex = (operationIndex - 1 + totalOps) % totalOps;
+                    operationIndex = MenuHelper.SelectPrevious(operationIndex, totalOps);
                     break;
 
                 case MenuLevel.OperationActions:
-                    operationActionIndex = (operationActionIndex - 1 + operationActions.Count) % operationActions.Count;
+                    operationActionIndex = MenuHelper.SelectPrevious(operationActionIndex, operationActions.Count);
                     break;
 
                 case MenuLevel.AddOperationList:
                     if (availableOperations.Count > 0)
-                        operationIndex = (operationIndex - 1 + availableOperations.Count) % availableOperations.Count;
+                        operationIndex = MenuHelper.SelectPrevious(operationIndex, availableOperations.Count);
                     break;
 
                 case MenuLevel.AddRecipeList:
                     if (availableRecipes.Count > 0)
-                        recipeIndex = (recipeIndex - 1 + availableRecipes.Count) % availableRecipes.Count;
+                        recipeIndex = MenuHelper.SelectPrevious(recipeIndex, availableRecipes.Count);
                     break;
 
                 case MenuLevel.SelectBodyPart:
                     if (partsForRecipe.Count > 0)
-                        partSelectionIndex = (partSelectionIndex - 1 + partsForRecipe.Count) % partsForRecipe.Count;
+                        partSelectionIndex = MenuHelper.SelectPrevious(partSelectionIndex, partsForRecipe.Count);
                     break;
 
                 case MenuLevel.BodyPartsList:
                     if (bodyParts.Count > 0)
-                        bodyPartIndex = (bodyPartIndex - 1 + bodyParts.Count) % bodyParts.Count;
+                        bodyPartIndex = MenuHelper.SelectPrevious(bodyPartIndex, bodyParts.Count);
                     break;
 
                 case MenuLevel.HediffsList:
@@ -308,7 +308,7 @@ namespace RimWorldAccess
                     {
                         int hediffCount = bodyParts[bodyPartIndex].Hediffs.Count;
                         if (hediffCount > 0)
-                            hediffIndex = (hediffIndex - 1 + hediffCount) % hediffCount;
+                            hediffIndex = MenuHelper.SelectPrevious(hediffIndex, hediffCount);
                     }
                     break;
             }
@@ -663,7 +663,7 @@ namespace RimWorldAccess
             {
                 case MenuLevel.SectionMenu:
                     sb.AppendLine($"Health - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {sectionIndex + 1} of {sections.Count}");
+                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
                     sb.AppendLine("Press Enter to open");
                     break;
 
@@ -687,7 +687,7 @@ namespace RimWorldAccess
                         sb.AppendLine($"Current: {(enabled ? "Enabled" : "Disabled")}");
                     }
 
-                    sb.AppendLine($"Setting {medicalSettingIndex + 1} of {medicalSettings.Count}");
+                    sb.AppendLine($"Setting {MenuHelper.FormatPosition(medicalSettingIndex, medicalSettings.Count)}");
                     sb.AppendLine("Press Enter to change");
                     break;
 
@@ -698,7 +698,7 @@ namespace RimWorldAccess
                         {
                             var restriction = availableFoodRestrictions[settingChoiceIndex];
                             sb.AppendLine($"{restriction.label}");
-                            sb.AppendLine($"Option {settingChoiceIndex + 1} of {availableFoodRestrictions.Count}");
+                            sb.AppendLine($"Option {MenuHelper.FormatPosition(settingChoiceIndex, availableFoodRestrictions.Count)}");
                         }
                     }
                     else if (currentSettingName == "Medical Care")
@@ -707,7 +707,7 @@ namespace RimWorldAccess
                         {
                             var care = availableMedicalCare[settingChoiceIndex];
                             sb.AppendLine($"{care.GetLabel()}");
-                            sb.AppendLine($"Option {settingChoiceIndex + 1} of {availableMedicalCare.Count}");
+                            sb.AppendLine($"Option {MenuHelper.FormatPosition(settingChoiceIndex, availableMedicalCare.Count)}");
                         }
                     }
                     sb.AppendLine("Press Enter to confirm");
@@ -718,7 +718,7 @@ namespace RimWorldAccess
                     {
                         var capacity = capacities[capacityIndex];
                         sb.AppendLine($"{capacity.Label}: {capacity.LevelLabel}");
-                        sb.AppendLine($"Capacity {capacityIndex + 1} of {capacities.Count}");
+                        sb.AppendLine($"Capacity {MenuHelper.FormatPosition(capacityIndex, capacities.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -736,20 +736,20 @@ namespace RimWorldAccess
                     {
                         var bill = queuedOperations[operationIndex];
                         sb.AppendLine($"Queued: {bill.LabelCap.StripTags()}");
-                        sb.AppendLine($"Operation {operationIndex + 1} of {queuedOperations.Count + 1}");
+                        sb.AppendLine($"Operation {MenuHelper.FormatPosition(operationIndex, queuedOperations.Count + 1)}");
                         sb.AppendLine("Press Enter for actions");
                     }
                     else
                     {
                         sb.AppendLine("Add Operation");
-                        sb.AppendLine($"Operation {operationIndex + 1} of {queuedOperations.Count + 1}");
+                        sb.AppendLine($"Operation {MenuHelper.FormatPosition(operationIndex, queuedOperations.Count + 1)}");
                         sb.AppendLine("Press Enter to add");
                     }
                     break;
 
                 case MenuLevel.OperationActions:
                     sb.AppendLine($"{operationActions[operationActionIndex]}");
-                    sb.AppendLine($"Action {operationActionIndex + 1} of {operationActions.Count}");
+                    sb.AppendLine($"Action {MenuHelper.FormatPosition(operationActionIndex, operationActions.Count)}");
                     sb.AppendLine("Press Enter to execute");
                     break;
 
@@ -766,7 +766,7 @@ namespace RimWorldAccess
                         {
                             sb.AppendLine($"Unavailable: {op.UnavailableReason}");
                         }
-                        sb.AppendLine($"Operation {operationIndex + 1} of {availableOperations.Count}");
+                        sb.AppendLine($"Operation {MenuHelper.FormatPosition(operationIndex, availableOperations.Count)}");
                         sb.AppendLine("Press Enter to add");
                     }
                     break;
@@ -794,7 +794,7 @@ namespace RimWorldAccess
                             sb.AppendLine();
                         }
 
-                        sb.AppendLine($"Recipe {recipeIndex + 1} of {availableRecipes.Count}");
+                        sb.AppendLine($"Recipe {MenuHelper.FormatPosition(recipeIndex, availableRecipes.Count)}");
                         sb.AppendLine("Press Enter to select");
                     }
                     break;
@@ -811,7 +811,7 @@ namespace RimWorldAccess
                         float maxHealth = part.def.GetMaxHealth(currentPawn);
                         sb.AppendLine($"Health: {health:F0} / {maxHealth:F0}");
 
-                        sb.AppendLine($"Part {partSelectionIndex + 1} of {partsForRecipe.Count}");
+                        sb.AppendLine($"Part {MenuHelper.FormatPosition(partSelectionIndex, partsForRecipe.Count)}");
                         sb.AppendLine("Press Enter to add operation");
                     }
                     break;
@@ -826,7 +826,7 @@ namespace RimWorldAccess
                             sb.AppendLine($"Health: {part.Health:F0} / {part.MaxHealth:F0} ({part.Efficiency:P0})");
                         }
                         sb.AppendLine($"Conditions: {part.Hediffs.Count}");
-                        sb.AppendLine($"Part {bodyPartIndex + 1} of {bodyParts.Count}");
+                        sb.AppendLine($"Part {MenuHelper.FormatPosition(bodyPartIndex, bodyParts.Count)}");
                         sb.AppendLine("Press Enter to view conditions");
                     }
                     break;
@@ -839,7 +839,7 @@ namespace RimWorldAccess
                         {
                             var hediff = part.Hediffs[hediffIndex];
                             sb.AppendLine($"{hediff.Label}");
-                            sb.AppendLine($"Condition {hediffIndex + 1} of {part.Hediffs.Count} on {part.Label}");
+                            sb.AppendLine($"Condition {MenuHelper.FormatPosition(hediffIndex, part.Hediffs.Count)} on {part.Label}");
                             sb.AppendLine("Press Enter for details");
                         }
                     }

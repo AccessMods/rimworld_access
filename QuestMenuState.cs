@@ -66,7 +66,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex + 1) % currentQuests.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, currentQuests.Count);
             AnnounceCurrentSelection();
         }
 
@@ -81,9 +81,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = currentQuests.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, currentQuests.Count);
 
             AnnounceCurrentSelection();
         }
@@ -296,7 +294,7 @@ namespace RimWorldAccess
             string status = "";
 
             // Add position info
-            string position = $"{currentIndex + 1} of {currentQuests.Count}";
+            string position = MenuHelper.FormatPosition(currentIndex, currentQuests.Count);
 
             // Add quest name (strip XML tags)
             string name = quest.name.StripTags();
@@ -435,7 +433,7 @@ namespace RimWorldAccess
             if (currentQuests.Count == 0)
                 return;
 
-            currentIndex = 0;
+            currentIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -448,7 +446,7 @@ namespace RimWorldAccess
             if (currentQuests.Count == 0)
                 return;
 
-            currentIndex = currentQuests.Count - 1;
+            currentIndex = MenuHelper.JumpToLast(currentQuests.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }

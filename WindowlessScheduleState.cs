@@ -171,10 +171,7 @@ namespace RimWorldAccess
             if (pawns.Count == 0)
                 return;
 
-            selectedPawnIndex--;
-            if (selectedPawnIndex < 0)
-                selectedPawnIndex = pawns.Count - 1;
-
+            selectedPawnIndex = MenuHelper.SelectPrevious(selectedPawnIndex, pawns.Count);
             UpdateClipboard();
         }
 
@@ -186,10 +183,7 @@ namespace RimWorldAccess
             if (pawns.Count == 0)
                 return;
 
-            selectedPawnIndex++;
-            if (selectedPawnIndex >= pawns.Count)
-                selectedPawnIndex = 0;
-
+            selectedPawnIndex = MenuHelper.SelectNext(selectedPawnIndex, pawns.Count);
             UpdateClipboard();
         }
 
@@ -198,10 +192,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void MoveLeft()
         {
-            selectedHourIndex--;
-            if (selectedHourIndex < 0)
-                selectedHourIndex = 23;
-
+            selectedHourIndex = MenuHelper.SelectPrevious(selectedHourIndex, 24);
             UpdateClipboard();
         }
 
@@ -210,10 +201,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void MoveRight()
         {
-            selectedHourIndex++;
-            if (selectedHourIndex > 23)
-                selectedHourIndex = 0;
-
+            selectedHourIndex = MenuHelper.SelectNext(selectedHourIndex, 24);
             UpdateClipboard();
         }
 
@@ -228,7 +216,7 @@ namespace RimWorldAccess
                 return;
 
             int currentIndex = availableAssignments.IndexOf(selectedAssignment);
-            currentIndex = (currentIndex + 1) % availableAssignments.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, availableAssignments.Count);
             selectedAssignment = availableAssignments[currentIndex];
 
             // Apply to current cell immediately

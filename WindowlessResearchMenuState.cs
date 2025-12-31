@@ -19,7 +19,6 @@ namespace RimWorldAccess
         private static int currentIndex = 0;
         private static HashSet<string> expandedNodes = new HashSet<string>();
         private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
-        private static int lastAnnouncedLevel = -1;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
@@ -32,7 +31,7 @@ namespace RimWorldAccess
             isActive = true;
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ResearchMenu");
             typeahead.ClearSearch();
             rootNodes = BuildCategoryTree();
             flatNavigationList = BuildFlatNavigationList();
@@ -50,7 +49,7 @@ namespace RimWorldAccess
             flatNavigationList.Clear();
             expandedNodes.Clear();
             lastChildIdPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ResearchMenu");
             typeahead.ClearSearch();
             TolkHelper.Speak("Research menu closed");
         }
@@ -62,7 +61,7 @@ namespace RimWorldAccess
         {
             if (flatNavigationList.Count == 0) return;
 
-            currentIndex = (currentIndex + 1) % flatNavigationList.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, flatNavigationList.Count);
             AnnounceCurrentSelection();
         }
 
@@ -73,9 +72,7 @@ namespace RimWorldAccess
         {
             if (flatNavigationList.Count == 0) return;
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = flatNavigationList.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, flatNavigationList.Count);
 
             AnnounceCurrentSelection();
         }
@@ -614,7 +611,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the currently selected item to the clipboard for screen reader access.
-        /// WCAG format: "{name} {state} {X of Y}[, level N]"
+        /// WCAG format: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
         /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
@@ -627,8 +624,11 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
-            // Build announcement in WCAG format: "{name} {state} {X of Y}[, level N]"
-            string announcement = current.Label;
+            // Get level prefix (only announced when level changes)
+            string levelPrefix = MenuHelper.GetLevelPrefix("ResearchMenu", current.Level);
+
+            // Build announcement: "level N. {name} {state}. {X of Y}."
+            string announcement = levelPrefix + current.Label;
 
             // Add state for expandable nodes (categories)
             if (current.Type == ResearchMenuNodeType.Category)
@@ -649,19 +649,7 @@ namespace RimWorldAccess
                 siblings = current.Parent.Children;
             }
             int siblingPosition = siblings.IndexOf(current) + 1;
-            announcement += $". {siblingPosition} of {siblings.Count}";
-
-            // Add level only when it changes (1-based for user clarity)
-            int currentLevel = current.Level + 1; // Convert 0-based to 1-based
-            if (currentLevel != lastAnnouncedLevel)
-            {
-                announcement += $". level {currentLevel}.";
-                lastAnnouncedLevel = currentLevel;
-            }
-            else
-            {
-                announcement += ".";  // Always end with period
-            }
+            announcement += $". {MenuHelper.FormatPosition(siblingPosition - 1, siblings.Count)}.";
 
             TolkHelper.Speak(announcement);
         }

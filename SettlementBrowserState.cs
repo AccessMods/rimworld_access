@@ -209,9 +209,7 @@ namespace RimWorldAccess
             }
 
             // Navigate normally (either no search active, OR search with no matches)
-            currentIndex++;
-            if (currentIndex >= filteredSettlements.Count)
-                currentIndex = 0;
+            currentIndex = MenuHelper.SelectNext(currentIndex, filteredSettlements.Count);
 
             AnnounceCurrentSettlement();
         }
@@ -240,9 +238,7 @@ namespace RimWorldAccess
             }
 
             // Navigate normally (either no search active, OR search with no matches)
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = filteredSettlements.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, filteredSettlements.Count);
 
             AnnounceCurrentSettlement();
         }
@@ -258,7 +254,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = 0;
+            currentIndex = MenuHelper.JumpToFirst();
             AnnounceCurrentSettlement();
         }
 
@@ -273,7 +269,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = filteredSettlements.Count - 1;
+            currentIndex = MenuHelper.JumpToLast(filteredSettlements.Count);
             AnnounceCurrentSettlement();
         }
 
@@ -384,9 +380,7 @@ namespace RimWorldAccess
             }
 
             // Build announcement
-            int position = currentIndex + 1;
-            int total = filteredSettlements.Count;
-            string announcement = $"{position} of {total}: {settlement.Label}, {settlement.Faction.Name}, {relationship}, {distance:F1} tiles";
+            string announcement = $"{MenuHelper.FormatPosition(currentIndex, filteredSettlements.Count)}: {settlement.Label}, {settlement.Faction.Name}, {relationship}, {distance:F1} tiles";
 
             TolkHelper.Speak(announcement);
         }

@@ -240,7 +240,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Switches to the next column (wraps around).
+        /// Switches to the next column (does not wrap).
         /// </summary>
         public static void SelectNextColumn()
         {
@@ -248,14 +248,14 @@ namespace RimWorldAccess
             if (totalColumns == 0)
                 return;
 
-            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
+            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
             selectedOptionIndex = GetCurrentOptionIndex();
             typeahead.ClearSearch();
             UpdateClipboard();
         }
 
         /// <summary>
-        /// Switches to the previous column (wraps around).
+        /// Switches to the previous column (does not wrap).
         /// </summary>
         public static void SelectPreviousColumn()
         {
@@ -263,9 +263,7 @@ namespace RimWorldAccess
             if (totalColumns == 0)
                 return;
 
-            currentColumnIndex--;
-            if (currentColumnIndex < 0)
-                currentColumnIndex = totalColumns - 1;
+            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
 
             selectedOptionIndex = GetCurrentOptionIndex();
             typeahead.ClearSearch();
@@ -273,7 +271,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Moves selection to next option in current column (wraps around).
+        /// Moves selection to next option in current column (does not wrap).
         /// </summary>
         public static void SelectNextOption()
         {
@@ -284,12 +282,12 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedOptionIndex = (selectedOptionIndex + 1) % optionCount;
+            selectedOptionIndex = MenuHelper.SelectNext(selectedOptionIndex, optionCount);
             UpdateClipboard();
         }
 
         /// <summary>
-        /// Moves selection to previous option in current column (wraps around).
+        /// Moves selection to previous option in current column (does not wrap).
         /// </summary>
         public static void SelectPreviousOption()
         {
@@ -300,9 +298,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedOptionIndex--;
-            if (selectedOptionIndex < 0)
-                selectedOptionIndex = optionCount - 1;
+            selectedOptionIndex = MenuHelper.SelectPrevious(selectedOptionIndex, optionCount);
 
             UpdateClipboard();
         }
@@ -472,34 +468,32 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Switches to the next pawn in the list (wraps around).
+        /// Switches to the next pawn in the list (does not wrap).
         /// </summary>
         public static void SwitchToNextPawn()
         {
             if (allPawns.Count == 0)
                 return;
 
-            currentPawnIndex = (currentPawnIndex + 1) % allPawns.Count;
+            currentPawnIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
             currentPawn = allPawns[currentPawnIndex];
             RebuildActiveColumns();
             LoadAllPolicies();
             selectedOptionIndex = GetCurrentOptionIndex();
             typeahead.ClearSearch();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
-        /// Switches to the previous pawn in the list (wraps around).
+        /// Switches to the previous pawn in the list (does not wrap).
         /// </summary>
         public static void SwitchToPreviousPawn()
         {
             if (allPawns.Count == 0)
                 return;
 
-            currentPawnIndex--;
-            if (currentPawnIndex < 0)
-                currentPawnIndex = allPawns.Count - 1;
+            currentPawnIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
 
             currentPawn = allPawns[currentPawnIndex];
             RebuildActiveColumns();
@@ -507,7 +501,7 @@ namespace RimWorldAccess
             selectedOptionIndex = GetCurrentOptionIndex();
             typeahead.ClearSearch();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
@@ -633,7 +627,7 @@ namespace RimWorldAccess
             string optionName = GetCurrentOptionName();
             int optionCount = GetCurrentColumnOptionCount();
 
-            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {selectedOptionIndex + 1} of {optionCount}";
+            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {MenuHelper.FormatPosition(selectedOptionIndex, optionCount)}";
             TolkHelper.Speak(message);
         }
 
@@ -742,7 +736,7 @@ namespace RimWorldAccess
             if (optionCount == 0)
                 return;
 
-            selectedOptionIndex = 0;
+            selectedOptionIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             UpdateClipboard();
         }
@@ -756,7 +750,7 @@ namespace RimWorldAccess
             if (optionCount == 0)
                 return;
 
-            selectedOptionIndex = optionCount - 1;
+            selectedOptionIndex = MenuHelper.JumpToLast(optionCount);
             typeahead.ClearSearch();
             UpdateClipboard();
         }
@@ -866,7 +860,7 @@ namespace RimWorldAccess
             string optionName = GetCurrentOptionName();
             int optionCount = GetCurrentColumnOptionCount();
 
-            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {selectedOptionIndex + 1} of {optionCount}";
+            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {MenuHelper.FormatPosition(selectedOptionIndex, optionCount)}";
 
             if (typeahead.HasActiveSearch)
             {

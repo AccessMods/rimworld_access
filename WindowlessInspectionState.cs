@@ -25,7 +25,6 @@ namespace RimWorldAccess
         private static IntVec3 inspectionPosition;
         private static object parentObject = null; // Track parent object for navigation back
         private static Dictionary<InspectionTreeItem, InspectionTreeItem> lastChildPerParent = new Dictionary<InspectionTreeItem, InspectionTreeItem>();
-        private static int lastAnnouncedLevel = -1;
 
         /// <summary>
         /// Opens the inspection menu for the specified position.
@@ -51,7 +50,7 @@ namespace RimWorldAccess
                 RebuildVisibleList();
                 selectedIndex = 0;
                 lastChildPerParent.Clear();
-                lastAnnouncedLevel = -1;
+                MenuHelper.ResetLevel("Inspection");
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -128,7 +127,7 @@ namespace RimWorldAccess
                 RebuildVisibleList();
                 selectedIndex = 0;
                 lastChildPerParent.Clear();
-                lastAnnouncedLevel = -1;
+                MenuHelper.ResetLevel("Inspection");
 
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -151,7 +150,7 @@ namespace RimWorldAccess
             rootItem = null;
             visibleItems = null;
             lastChildPerParent.Clear();
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("Inspection");
             selectedIndex = 0;
             parentObject = null;
             typeahead.ClearSearch();
@@ -242,7 +241,7 @@ namespace RimWorldAccess
             if (!IsActive || visibleItems == null || visibleItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % visibleItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, visibleItems.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
@@ -255,9 +254,7 @@ namespace RimWorldAccess
             if (!IsActive || visibleItems == null || visibleItems.Count == 0)
                 return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = visibleItems.Count - 1;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, visibleItems.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
@@ -490,26 +487,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the level suffix for announcements (only when level changes).
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            // If single root, subtract 1 so children start at level 1
-            int displayLevel = currentLevel + 1;
-            if (HasSingleRoot())
-            {
-                displayLevel = Math.Max(1, displayLevel - 1);
-            }
-
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}.";
-            }
-            return ".";
-        }
-
-        /// <summary>
         /// Moves selection to the first child of the current item.
         /// </summary>
         private static void MoveToFirstChild()
@@ -577,7 +554,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the current selection to the screen reader.
-        /// Format: "{name} {state}. {X} of {Y}. level N." or "{name} {state}. {X} of {Y}."
+        /// Format: "level N. {name} {state}. {X} of {Y}." or "{name} {state}. {X} of {Y}."
         /// Level is only announced when it changes.
         /// </summary>
         private static void AnnounceCurrentSelection()
@@ -607,14 +584,18 @@ namespace RimWorldAccess
 
                 // Get sibling position
                 var (position, total) = GetSiblingPosition(item);
-                string positionText = $"{position} of {total}";
 
-                // Get level suffix (only announced when level changes)
-                // Returns ". level N." when level changes, or "." when it doesn't
-                string levelSuffix = GetLevelSuffix(item.IndentLevel);
+                // Get level prefix (only announced when level changes)
+                // If single root, subtract 1 so children start at level 1
+                int adjustedLevel = item.IndentLevel;
+                if (HasSingleRoot())
+                {
+                    adjustedLevel = Math.Max(0, adjustedLevel - 1);
+                }
+                string levelPrefix = MenuHelper.GetLevelPrefix("Inspection", adjustedLevel);
 
-                // Build full announcement: "{name} {state}. {X} of {Y}{levelSuffix}"
-                string announcement = $"{label}{stateIndicator}. {positionText}{levelSuffix}";
+                // Build full announcement: "level N. {name} {state}. {X} of {Y}."
+                string announcement = $"{levelPrefix}{label}{stateIndicator}. {MenuHelper.FormatPosition(position - 1, total)}.";
 
                 TolkHelper.Speak(announcement);
             }

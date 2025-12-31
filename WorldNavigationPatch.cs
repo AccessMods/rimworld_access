@@ -24,6 +24,10 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.High)]
         public static void Prefix()
         {
+            // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
+                return;
+
             // Detect if we're in world view
             bool isWorldView = Current.ProgramState == ProgramState.Playing &&
                               Find.World != null &&

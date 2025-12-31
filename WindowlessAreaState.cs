@@ -106,7 +106,7 @@ namespace RimWorldAccess
             if (allAreas.Count == 0)
                 return;
 
-            selectedAreaIndex = (selectedAreaIndex + 1) % allAreas.Count;
+            selectedAreaIndex = MenuHelper.SelectNext(selectedAreaIndex, allAreas.Count);
             selectedArea = allAreas[selectedAreaIndex];
             UpdateClipboard();
         }
@@ -119,10 +119,7 @@ namespace RimWorldAccess
             if (allAreas.Count == 0)
                 return;
 
-            selectedAreaIndex--;
-            if (selectedAreaIndex < 0)
-                selectedAreaIndex = allAreas.Count - 1;
-
+            selectedAreaIndex = MenuHelper.SelectPrevious(selectedAreaIndex, allAreas.Count);
             selectedArea = allAreas[selectedAreaIndex];
             UpdateClipboard();
         }
@@ -172,7 +169,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextAction()
         {
-            selectedActionIndex = (selectedActionIndex + 1) % areaActions.Length;
+            selectedActionIndex = MenuHelper.SelectNext(selectedActionIndex, areaActions.Length);
             UpdateClipboard();
         }
 
@@ -181,9 +178,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousAction()
         {
-            selectedActionIndex--;
-            if (selectedActionIndex < 0)
-                selectedActionIndex = areaActions.Length - 1;
+            selectedActionIndex = MenuHelper.SelectPrevious(selectedActionIndex, areaActions.Length);
             UpdateClipboard();
         }
 

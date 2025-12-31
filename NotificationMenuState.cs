@@ -89,7 +89,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex + 1) % notifications.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, notifications.Count);
             AnnounceCurrentSelection();
         }
 
@@ -109,7 +109,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex - 1 + notifications.Count) % notifications.Count;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, notifications.Count);
             AnnounceCurrentSelection();
         }
 
@@ -329,7 +329,7 @@ namespace RimWorldAccess
                 string typeLabel = item.Type == NotificationType.Message ? "Message" :
                                   item.Type == NotificationType.Letter ? "Letter" :
                                   "Alert";
-                string announcement = $"{typeLabel}: {item.Label}. {currentIndex + 1} of {notifications.Count}";
+                string announcement = $"{typeLabel}: {item.Label}. {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
                 TolkHelper.Speak(announcement);
             }
         }
@@ -449,7 +449,7 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            currentIndex = 0;
+            currentIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -462,7 +462,7 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            currentIndex = notifications.Count - 1;
+            currentIndex = MenuHelper.JumpToLast(notifications.Count);
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
@@ -510,7 +510,7 @@ namespace RimWorldAccess
             string typeLabel = item.Type == NotificationType.Message ? "Message" :
                               item.Type == NotificationType.Letter ? "Letter" :
                               "Alert";
-            string announcement = $"{typeLabel}: {item.Label}. {currentIndex + 1} of {notifications.Count}";
+            string announcement = $"{typeLabel}: {item.Label}. {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
 
             // Add search context if active
             if (typeahead.HasActiveSearch)

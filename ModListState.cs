@@ -125,7 +125,7 @@ namespace RimWorldAccess
             var list = GetCurrentList();
             if (list == null || list.Count == 0) return;
 
-            selectedIndex = (selectedIndex + 1) % list.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, list.Count);
             SyncSelection();
             AnnounceCurrentMod();
         }
@@ -138,7 +138,7 @@ namespace RimWorldAccess
             var list = GetCurrentList();
             if (list == null || list.Count == 0) return;
 
-            selectedIndex = (selectedIndex - 1 + list.Count) % list.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, list.Count);
             SyncSelection();
             AnnounceCurrentMod();
         }
@@ -618,7 +618,7 @@ namespace RimWorldAccess
 
             var parts = new List<string>();
             parts.Add(mod.Name);
-            parts.Add($"{position} of {total}");
+            parts.Add(MenuHelper.FormatPosition(selectedIndex, total));
 
             if (mod.Active)
             {
@@ -670,7 +670,7 @@ namespace RimWorldAccess
             var list = GetCurrentList();
             if (list == null || list.Count == 0) return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             SyncSelection();
             AnnounceCurrentMod();
         }
@@ -684,7 +684,7 @@ namespace RimWorldAccess
             var list = GetCurrentList();
             if (list == null || list.Count == 0) return;
 
-            selectedIndex = list.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(list.Count);
             SyncSelection();
             AnnounceCurrentMod();
         }

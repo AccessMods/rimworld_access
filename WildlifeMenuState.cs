@@ -100,7 +100,7 @@ namespace RimWorldAccess
         {
             if (wildlifeList.Count == 0) return;
 
-            currentAnimalIndex = (currentAnimalIndex + 1) % wildlifeList.Count;
+            currentAnimalIndex = MenuHelper.SelectNext(currentAnimalIndex, wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -109,11 +109,7 @@ namespace RimWorldAccess
         {
             if (wildlifeList.Count == 0) return;
 
-            currentAnimalIndex--;
-            if (currentAnimalIndex < 0)
-            {
-                currentAnimalIndex = wildlifeList.Count - 1;
-            }
+            currentAnimalIndex = MenuHelper.SelectPrevious(currentAnimalIndex, wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -121,7 +117,7 @@ namespace RimWorldAccess
         private static void SelectNextColumn()
         {
             int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
+            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -129,11 +125,7 @@ namespace RimWorldAccess
         private static void SelectPreviousColumn()
         {
             int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            currentColumnIndex--;
-            if (currentColumnIndex < 0)
-            {
-                currentColumnIndex = totalColumns - 1;
-            }
+            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }

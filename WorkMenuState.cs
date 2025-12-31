@@ -247,7 +247,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Switches to the next pawn in the list (wraps around).
+        /// Switches to the next pawn in the list (does not wrap).
         /// Automatically applies any pending changes before switching.
         /// </summary>
         public static void SwitchToNextPawn()
@@ -258,16 +258,16 @@ namespace RimWorldAccess
             // Apply pending changes for current pawn before switching
             ApplyPendingChanges();
 
-            currentPawnIndex = (currentPawnIndex + 1) % allPawns.Count;
+            currentPawnIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
             typeahead.ClearSearch();
             LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
-        /// Switches to the previous pawn in the list (wraps around).
+        /// Switches to the previous pawn in the list (does not wrap).
         /// Automatically applies any pending changes before switching.
         /// </summary>
         public static void SwitchToPreviousPawn()
@@ -278,15 +278,13 @@ namespace RimWorldAccess
             // Apply pending changes for current pawn before switching
             ApplyPendingChanges();
 
-            currentPawnIndex--;
-            if (currentPawnIndex < 0)
-                currentPawnIndex = allPawns.Count - 1;
+            currentPawnIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
 
             currentPawn = allPawns[currentPawnIndex];
             selectedIndex = 0;
             typeahead.ClearSearch();
             LoadWorkTypesForCurrentPawn();
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {currentPawnIndex + 1} of {allPawns.Count}");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
@@ -543,7 +541,7 @@ namespace RimWorldAccess
             if (workEntries.Count == 0)
                 return;
 
-            selectedIndex = 0;
+            selectedIndex = MenuHelper.JumpToFirst();
             typeahead.ClearSearch();
             UpdateClipboard();
         }
@@ -556,7 +554,7 @@ namespace RimWorldAccess
             if (workEntries.Count == 0)
                 return;
 
-            selectedIndex = workEntries.Count - 1;
+            selectedIndex = MenuHelper.JumpToLast(workEntries.Count);
             typeahead.ClearSearch();
             UpdateClipboard();
         }

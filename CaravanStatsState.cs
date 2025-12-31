@@ -314,10 +314,8 @@ namespace RimWorldAccess
                 return;
 
             string line = infoLines[currentLineIndex];
-            int position = currentLineIndex + 1;
-            int total = infoLines.Count;
 
-            TolkHelper.Speak($"{position} of {total}: {line}");
+            TolkHelper.Speak($"{MenuHelper.FormatPosition(currentLineIndex, infoLines.Count)}: {line}");
         }
 
         /// <summary>
@@ -331,9 +329,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentLineIndex++;
-            if (currentLineIndex >= infoLines.Count)
-                currentLineIndex = 0;
+            currentLineIndex = MenuHelper.SelectNext(currentLineIndex, infoLines.Count);
 
             AnnounceCurrentLine();
         }
@@ -349,9 +345,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentLineIndex--;
-            if (currentLineIndex < 0)
-                currentLineIndex = infoLines.Count - 1;
+            currentLineIndex = MenuHelper.SelectPrevious(currentLineIndex, infoLines.Count);
 
             AnnounceCurrentLine();
         }

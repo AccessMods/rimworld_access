@@ -48,7 +48,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 
@@ -60,7 +60,7 @@ namespace RimWorldAccess
             if (currentOptions == null || currentOptions.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + currentOptions.Count) % currentOptions.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
             AnnounceCurrentOption();
         }
 

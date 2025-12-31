@@ -39,7 +39,6 @@ namespace RimWorldAccess
         private static TreeNode_ThingCategory rootNode = null;
         private static List<NavigationNode> flattenedNodes = new List<NavigationNode>();
         private static int selectedIndex = 0;
-        private static int lastAnnouncedLevel = -1;
 
         // Slider states
         private enum SliderMode { None, Quality, HitPoints }
@@ -65,7 +64,7 @@ namespace RimWorldAccess
             hasHitPointsSlider = showHitPoints;
             selectedIndex = 0;
             currentSliderMode = SliderMode.None;
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ThingFilter");
 
             RebuildNavigationList();
             AnnounceCurrentNode();
@@ -81,7 +80,7 @@ namespace RimWorldAccess
             rootNode = null;
             flattenedNodes.Clear();
             selectedIndex = 0;
-            lastAnnouncedLevel = -1;
+            MenuHelper.ResetLevel("ThingFilter");
         }
 
         /// <summary>
@@ -205,7 +204,7 @@ namespace RimWorldAccess
             if (flattenedNodes.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % flattenedNodes.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, flattenedNodes.Count);
             AnnounceCurrentNode();
         }
 
@@ -217,10 +216,7 @@ namespace RimWorldAccess
             if (flattenedNodes.Count == 0)
                 return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = flattenedNodes.Count - 1;
-
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, flattenedNodes.Count);
             AnnounceCurrentNode();
         }
 
@@ -567,20 +563,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the level suffix for announcements. Only announces level when it changes.
-        /// </summary>
-        private static string GetLevelSuffix(int currentLevel)
-        {
-            int displayLevel = currentLevel + 1; // 1-based for users
-            if (displayLevel != lastAnnouncedLevel)
-            {
-                lastAnnouncedLevel = displayLevel;
-                return $". level {displayLevel}.";
-            }
-            return ".";  // Always end with period
-        }
-
-        /// <summary>
         /// Adjusts the slider value (for quality or hit points sliders).
         /// In editing mode, adjusts the current part (min or max).
         /// Outside editing mode, just announces the current value.
@@ -692,7 +674,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the current node using WCAG-compliant format.
-        /// Format: "{name} {state} {X of Y}[, level N]"
+        /// Format: "[level N. ]{name} {state}. {X of Y}"
         /// </summary>
         private static void AnnounceCurrentNode()
         {
@@ -707,7 +689,7 @@ namespace RimWorldAccess
 
             var node = flattenedNodes[selectedIndex];
             var (position, total) = GetSiblingPosition(node);
-            string levelSuffix = GetLevelSuffix(node.IndentLevel);
+            string prefix = MenuHelper.GetLevelPrefix("ThingFilter", node.IndentLevel);
 
             string announcement;
 
@@ -716,33 +698,33 @@ namespace RimWorldAccess
                 case NodeType.Slider:
                     // Sliders show their current value
                     string sliderValue = GetSliderValueString(node);
-                    announcement = $"{node.Label} {sliderValue}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label} {sliderValue}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.SpecialFilter:
                     // Special filters show checked state
                     string specialState = node.IsChecked ? "checked" : "not checked";
-                    announcement = $"{node.Label} {specialState}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label} {specialState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.Category:
                     // Categories show expanded/collapsed state
                     string categoryState = node.IsExpanded ? "expanded" : "collapsed";
-                    announcement = $"{node.Label} {categoryState}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label} {categoryState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.ThingDef:
                     // ThingDefs show checked state
                     string thingState = node.IsChecked ? "checked" : "not checked";
-                    announcement = $"{node.Label} {thingState}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label} {thingState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.SaveAndReturn:
-                    announcement = $"{node.Label}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 default:
-                    announcement = $"{node.Label}. {position} of {total}{levelSuffix}";
+                    announcement = $"{prefix}{node.Label}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
             }
 

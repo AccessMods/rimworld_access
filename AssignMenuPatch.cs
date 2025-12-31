@@ -58,12 +58,6 @@ namespace RimWorldAccess
                     handled = true;
                 }
             }
-            // Handle Backspace: Remove last character from search if active
-            else if (key == KeyCode.Backspace && AssignMenuState.HasActiveSearch)
-            {
-                AssignMenuState.ProcessBackspace();
-                handled = true;
-            }
             // Handle Arrow Up: Navigate to previous option (with search awareness)
             else if (key == KeyCode.UpArrow)
             {
@@ -125,19 +119,6 @@ namespace RimWorldAccess
             {
                 AssignMenuState.OpenManagementDialog();
                 handled = true;
-            }
-            // Handle typeahead characters (letters and numbers)
-            else
-            {
-                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-                if (isLetter || isNumber)
-                {
-                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                    AssignMenuState.ProcessTypeaheadCharacter(c);
-                    handled = true;
-                }
             }
 
             // Consume the event if we handled it
