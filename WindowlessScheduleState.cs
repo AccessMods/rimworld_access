@@ -206,17 +206,59 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Cycles through available time assignment types and applies to current cell.
+        /// Cycles forward through available time assignment types for current cell.
         /// Order: Anything -> Work -> Joy -> Sleep -> Meditate (if available)
         /// </summary>
         public static void CycleAssignment()
         {
+            if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+                return;
+
+            Pawn pawn = pawns[selectedPawnIndex];
+            if (pawn.timetable == null)
+                return;
+
             var availableAssignments = GetAvailableAssignments();
             if (availableAssignments.Count == 0)
                 return;
 
-            int currentIndex = availableAssignments.IndexOf(selectedAssignment);
-            currentIndex = MenuHelper.SelectNext(currentIndex, availableAssignments.Count);
+            // Get the CURRENT cell's assignment, not the tracking variable
+            TimeAssignmentDef currentCellAssignment = pawn.timetable.GetAssignment(selectedHourIndex);
+            int currentIndex = availableAssignments.IndexOf(currentCellAssignment);
+            if (currentIndex < 0) currentIndex = 0;
+
+            // Wrap around: at end, go to start
+            currentIndex = (currentIndex + 1) % availableAssignments.Count;
+            selectedAssignment = availableAssignments[currentIndex];
+
+            // Apply to current cell immediately
+            ApplyAssignment();
+        }
+
+        /// <summary>
+        /// Cycles backward through available time assignment types for current cell.
+        /// Order: Meditate (if available) -> Sleep -> Joy -> Work -> Anything
+        /// </summary>
+        public static void CycleAssignmentBackward()
+        {
+            if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+                return;
+
+            Pawn pawn = pawns[selectedPawnIndex];
+            if (pawn.timetable == null)
+                return;
+
+            var availableAssignments = GetAvailableAssignments();
+            if (availableAssignments.Count == 0)
+                return;
+
+            // Get the CURRENT cell's assignment, not the tracking variable
+            TimeAssignmentDef currentCellAssignment = pawn.timetable.GetAssignment(selectedHourIndex);
+            int currentIndex = availableAssignments.IndexOf(currentCellAssignment);
+            if (currentIndex < 0) currentIndex = 0;
+
+            // Wrap around: at start, go to end
+            currentIndex = (currentIndex - 1 + availableAssignments.Count) % availableAssignments.Count;
             selectedAssignment = availableAssignments[currentIndex];
 
             // Apply to current cell immediately

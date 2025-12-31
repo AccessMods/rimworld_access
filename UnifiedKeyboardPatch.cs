@@ -864,7 +864,14 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Tab)
                 {
-                    WindowlessScheduleState.CycleAssignment();
+                    if (shift)
+                    {
+                        WindowlessScheduleState.CycleAssignmentBackward();
+                    }
+                    else
+                    {
+                        WindowlessScheduleState.CycleAssignment();
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.Space)
