@@ -1,4 +1,5 @@
 using System;
+using Verse;
 
 namespace RimWorldAccess
 {
@@ -10,6 +11,16 @@ namespace RimWorldAccess
         /// </summary>
         public static bool IsAnyAccessibilityMenuActive()
         {
+            // Safety: Don't run during loading - only when game is actually playing or in main menu
+            // Entry = main menu, Playing = in-game, MapInitializing = loading a map
+            if (Current.ProgramState != ProgramState.Playing && Current.ProgramState != ProgramState.Entry)
+                return false;
+
+            // NOTE: MapNavigationState.IsInitialized is NOT included here - it's too broad.
+            // Map navigation is always "active" when on the map, but we don't want to block
+            // ALL keyboard input. Instead, MapNavigationPatch handles arrow keys directly
+            // and consumes them there.
+
             // Windowless menus (main accessibility menus)
             return WindowlessFloatMenuState.IsActive
                 || WindowlessInventoryState.IsActive

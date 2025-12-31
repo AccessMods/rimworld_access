@@ -261,7 +261,9 @@ namespace RimWorldAccess
         {
             if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
             {
-                TolkHelper.Speak(currentOptions[selectedIndex].Label);
+                string label = currentOptions[selectedIndex].Label;
+                string position = MenuHelper.FormatPosition(selectedIndex, currentOptions.Count);
+                TolkHelper.Speak($"{label}. {position}");
             }
         }
 

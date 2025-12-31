@@ -40,19 +40,25 @@ namespace RimWorldAccess
         {
             public MenuItemType type;
             public string label;
+            public string searchLabel; // Label used for typeahead search (field name only, no values)
             public object data;
             public bool isEditable; // Can be edited with left/right or Enter
 
-            public MenuItem(MenuItemType type, string label, object data = null, bool editable = false)
+            public MenuItem(MenuItemType type, string label, string searchLabel = null, object data = null, bool editable = false)
             {
                 this.type = type;
                 this.label = label;
+                this.searchLabel = searchLabel ?? label; // Default to full label if not specified
                 this.data = data;
                 this.isEditable = editable;
             }
         }
 
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
         public static bool IsEditing => isEditing;
 
         /// <summary>
@@ -72,6 +78,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = true;
             isEditing = false;
+            typeahead.ClearSearch();
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -89,56 +96,57 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             isEditing = false;
+            typeahead.ClearSearch();
         }
 
         private static void BuildMenuItems()
         {
             menuItems.Clear();
 
-            // Recipe info (read-only)
-            menuItems.Add(new MenuItem(MenuItemType.RecipeInfo, GetRecipeInfoLabel(), null, false));
+            // Recipe info (read-only) - searchLabel: "Recipe"
+            menuItems.Add(new MenuItem(MenuItemType.RecipeInfo, GetRecipeInfoLabel(), "Recipe", null, false));
 
-            // Suspend/Resume toggle
+            // Suspend/Resume toggle - searchLabel matches the action
             string suspendLabel = bill.suspended ? "Resume bill" : "Pause bill";
-            menuItems.Add(new MenuItem(MenuItemType.SuspendToggle, suspendLabel, null, true));
+            menuItems.Add(new MenuItem(MenuItemType.SuspendToggle, suspendLabel, suspendLabel, null, true));
 
-            // Repeat mode
-            menuItems.Add(new MenuItem(MenuItemType.RepeatMode, GetRepeatModeLabel(), null, true));
+            // Repeat mode - searchLabel: "Repeat mode" (not the value)
+            menuItems.Add(new MenuItem(MenuItemType.RepeatMode, GetRepeatModeLabel(), "Repeat mode", null, true));
 
-            // Repeat count (only if mode is RepeatCount)
+            // Repeat count (only if mode is RepeatCount) - searchLabel: "Repeat count"
             if (bill.repeatMode == BillRepeatModeDefOf.RepeatCount)
             {
-                menuItems.Add(new MenuItem(MenuItemType.RepeatCount, GetRepeatCountLabel(), null, true));
+                menuItems.Add(new MenuItem(MenuItemType.RepeatCount, GetRepeatCountLabel(), "Repeat count", null, true));
             }
 
             // Target count and unpause threshold (only if mode is TargetCount)
             if (bill.repeatMode == BillRepeatModeDefOf.TargetCount)
             {
-                menuItems.Add(new MenuItem(MenuItemType.TargetCount, GetTargetCountLabel(), null, true));
+                menuItems.Add(new MenuItem(MenuItemType.TargetCount, GetTargetCountLabel(), "Target count", null, true));
 
                 if (bill.unpauseWhenYouHave < bill.targetCount)
                 {
-                    menuItems.Add(new MenuItem(MenuItemType.UnpauseAt, GetUnpauseAtLabel(), null, true));
+                    menuItems.Add(new MenuItem(MenuItemType.UnpauseAt, GetUnpauseAtLabel(), "Unpause at", null, true));
                 }
             }
 
-            // Store mode
-            menuItems.Add(new MenuItem(MenuItemType.StoreMode, GetStoreModeLabel(), null, true));
+            // Store mode - searchLabel: "Store in"
+            menuItems.Add(new MenuItem(MenuItemType.StoreMode, GetStoreModeLabel(), "Store in", null, true));
 
-            // Pawn restriction
-            menuItems.Add(new MenuItem(MenuItemType.PawnRestriction, GetPawnRestrictionLabel(), null, true));
+            // Pawn restriction - searchLabel: "Worker"
+            menuItems.Add(new MenuItem(MenuItemType.PawnRestriction, GetPawnRestrictionLabel(), "Worker", null, true));
 
-            // Allowed skill range
-            menuItems.Add(new MenuItem(MenuItemType.AllowedSkillRange, GetSkillRangeLabel(), null, true));
+            // Allowed skill range - searchLabel: "Allowed skill range"
+            menuItems.Add(new MenuItem(MenuItemType.AllowedSkillRange, GetSkillRangeLabel(), "Allowed skill range", null, true));
 
-            // Ingredient search radius
-            menuItems.Add(new MenuItem(MenuItemType.IngredientSearchRadius, GetIngredientRadiusLabel(), null, true));
+            // Ingredient search radius - searchLabel: "Ingredient radius"
+            menuItems.Add(new MenuItem(MenuItemType.IngredientSearchRadius, GetIngredientRadiusLabel(), "Ingredient radius", null, true));
 
-            // Ingredient filter
-            menuItems.Add(new MenuItem(MenuItemType.IngredientFilter, "Configure ingredient filter...", null, true));
+            // Ingredient filter - searchLabel matches full label
+            menuItems.Add(new MenuItem(MenuItemType.IngredientFilter, "Configure ingredient filter...", "Ingredient filter", null, true));
 
-            // Delete bill
-            menuItems.Add(new MenuItem(MenuItemType.DeleteBill, "Delete this bill", null, true));
+            // Delete bill - searchLabel matches full label
+            menuItems.Add(new MenuItem(MenuItemType.DeleteBill, "Delete this bill", "Delete bill", null, true));
         }
 
         #region Label Generators
@@ -268,6 +276,140 @@ namespace RimWorldAccess
 
             selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Sets the selected index directly (used for typeahead navigation).
+        /// </summary>
+        public static void SetSelectedIndex(int index)
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            if (index >= 0 && index < menuItems.Count)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Gets a list of search labels for typeahead.
+        /// These are the field names only, not values.
+        /// </summary>
+        private static List<string> GetSearchLabels()
+        {
+            List<string> labels = new List<string>();
+            if (menuItems != null)
+            {
+                foreach (var item in menuItems)
+                {
+                    labels.Add(item.searchLabel ?? "");
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Processes a typeahead character input.
+        /// </summary>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return false;
+
+            if (isEditing)
+                return false;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return false;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces the action.
+        /// </summary>
+        public static bool ClearTypeaheadSearch()
+        {
+            return typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Gets the next match index when navigating with active search.
+        /// </summary>
+        public static int SelectNextMatch()
+        {
+            return typeahead.GetNextMatch(selectedIndex);
+        }
+
+        /// <summary>
+        /// Gets the previous match index when navigating with active search.
+        /// </summary>
+        public static int SelectPreviousMatch()
+        {
+            return typeahead.GetPreviousMatch(selectedIndex);
+        }
+
+        /// <summary>
+        /// Gets the last failed search string for no-match announcements.
+        /// </summary>
+        public static string GetLastFailedSearch()
+        {
+            return typeahead.LastFailedSearch;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (menuItems == null || menuItems.Count == 0)
+                return;
+
+            if (selectedIndex < 0 || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+            string announcement = item.label;
+
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+            else
+            {
+                announcement += $". {MenuHelper.FormatPosition(selectedIndex, menuItems.Count)}";
+            }
+
+            TolkHelper.Speak(announcement);
         }
 
         public static void AdjustValue(int direction)
@@ -598,7 +740,8 @@ namespace RimWorldAccess
             if (selectedIndex >= 0 && selectedIndex < menuItems.Count)
             {
                 MenuItem item = menuItems[selectedIndex];
-                TolkHelper.Speak(item.label);
+                string announcement = $"{item.label}. {MenuHelper.FormatPosition(selectedIndex, menuItems.Count)}";
+                TolkHelper.Speak(announcement);
             }
         }
     }

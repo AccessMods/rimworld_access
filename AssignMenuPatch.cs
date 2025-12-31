@@ -114,8 +114,9 @@ namespace RimWorldAccess
                 AssignMenuState.ApplySelection();
                 handled = true;
             }
-            // Handle E: Open management dialog for current column
-            else if (key == KeyCode.E)
+            // Handle Alt+E: Open management dialog for current column
+            // (Alt required to avoid conflicting with typeahead 'e')
+            else if (key == KeyCode.E && Event.current.alt)
             {
                 AssignMenuState.OpenManagementDialog();
                 handled = true;

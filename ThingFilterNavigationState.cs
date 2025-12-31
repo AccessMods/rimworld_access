@@ -39,6 +39,7 @@ namespace RimWorldAccess
         private static TreeNode_ThingCategory rootNode = null;
         private static List<NavigationNode> flattenedNodes = new List<NavigationNode>();
         private static int selectedIndex = 0;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         // Slider states
         private enum SliderMode { None, Quality, HitPoints }
@@ -51,6 +52,8 @@ namespace RimWorldAccess
 
         public static bool IsActive => isActive;
         public static bool IsEditingSlider => isEditingSlider;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Activates filter navigation for a given ThingFilter.
@@ -64,6 +67,7 @@ namespace RimWorldAccess
             hasHitPointsSlider = showHitPoints;
             selectedIndex = 0;
             currentSliderMode = SliderMode.None;
+            typeahead.ClearSearch();
             MenuHelper.ResetLevel("ThingFilter");
 
             RebuildNavigationList();
@@ -80,6 +84,7 @@ namespace RimWorldAccess
             rootNode = null;
             flattenedNodes.Clear();
             selectedIndex = 0;
+            typeahead.ClearSearch();
             MenuHelper.ResetLevel("ThingFilter");
         }
 
@@ -221,7 +226,10 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Enters slider editing mode (for sliders) or executes action (for SaveAndReturn).
+        /// Activates the current selection:
+        /// - Sliders: Enter editing mode
+        /// - Checkboxes (SpecialFilter, Category, ThingDef): Toggle checked state
+        /// - SaveAndReturn: Execute action
         /// </summary>
         public static void ActivateSelected()
         {
@@ -247,6 +255,11 @@ namespace RimWorldAccess
             {
                 // Save and return to assign menu
                 SaveAndReturnToAssign();
+            }
+            else if (node.Type == NodeType.SpecialFilter || node.Type == NodeType.Category || node.Type == NodeType.ThingDef)
+            {
+                // Toggle checkbox (Enter key works same as Space for checkboxes)
+                ToggleSelected();
             }
         }
 
@@ -333,6 +346,9 @@ namespace RimWorldAccess
 
             var node = flattenedNodes[selectedIndex];
 
+            // Strip asterisks from labels for announcements
+            string cleanLabel = StripAsterisks(node.Label);
+
             switch (node.Type)
             {
                 case NodeType.SpecialFilter:
@@ -342,7 +358,7 @@ namespace RimWorldAccess
                         bool newValue = !currentFilter.Allows(specialFilter);
                         currentFilter.SetAllow(specialFilter, newValue);
                         node.IsChecked = newValue;
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -356,7 +372,7 @@ namespace RimWorldAccess
                         currentFilter.SetAllow(category.catDef, newValue);
                         node.IsChecked = newValue;
                         RebuildNavigationList(); // Rebuild because children may change
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -367,7 +383,7 @@ namespace RimWorldAccess
                         bool newValue = !currentFilter.Allows(thingDef);
                         currentFilter.SetAllow(thingDef, newValue);
                         node.IsChecked = newValue;
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -693,38 +709,41 @@ namespace RimWorldAccess
 
             string announcement;
 
+            // Strip asterisks from labels (they're visual indicators for special filters)
+            string cleanLabel = StripAsterisks(node.Label);
+
             switch (node.Type)
             {
                 case NodeType.Slider:
                     // Sliders show their current value
                     string sliderValue = GetSliderValueString(node);
-                    announcement = $"{prefix}{node.Label} {sliderValue}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel} {sliderValue}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.SpecialFilter:
                     // Special filters show checked state
                     string specialState = node.IsChecked ? "checked" : "not checked";
-                    announcement = $"{prefix}{node.Label} {specialState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel} {specialState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.Category:
                     // Categories show expanded/collapsed state
                     string categoryState = node.IsExpanded ? "expanded" : "collapsed";
-                    announcement = $"{prefix}{node.Label} {categoryState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel} {categoryState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.ThingDef:
                     // ThingDefs show checked state
                     string thingState = node.IsChecked ? "checked" : "not checked";
-                    announcement = $"{prefix}{node.Label} {thingState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel} {thingState}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 case NodeType.SaveAndReturn:
-                    announcement = $"{prefix}{node.Label}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
 
                 default:
-                    announcement = $"{prefix}{node.Label}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    announcement = $"{prefix}{cleanLabel}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
             }
 
@@ -751,5 +770,176 @@ namespace RimWorldAccess
 
             return "";
         }
+
+        /// <summary>
+        /// Strips leading asterisks and whitespace from a label.
+        /// Asterisks are visual indicators for special filters that shouldn't be read aloud.
+        /// </summary>
+        private static string StripAsterisks(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+                return label;
+
+            return label.TrimStart('*', ' ');
+        }
+
+        #region Typeahead Support
+
+        /// <summary>
+        /// Gets the labels for typeahead searching.
+        /// </summary>
+        private static List<string> GetSearchLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flattenedNodes)
+            {
+                labels.Add(StripAsterisks(node.Label));
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Gets the last failed search string.
+        /// </summary>
+        public static string GetLastFailedSearch()
+        {
+            return typeahead.LastFailedSearch;
+        }
+
+        /// <summary>
+        /// Processes a typeahead character for search.
+        /// </summary>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            if (!isActive || flattenedNodes.Count == 0)
+                return;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static void ProcessBackspace()
+        {
+            if (!isActive || flattenedNodes.Count == 0)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+            AnnounceCurrentNode();
+        }
+
+        /// <summary>
+        /// Sets the selected index (for typeahead navigation).
+        /// </summary>
+        public static void SetSelectedIndex(int index)
+        {
+            if (index >= 0 && index < flattenedNodes.Count)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Selects the next match in the filtered list.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            if (flattenedNodes.Count == 0)
+                return;
+
+            int nextIndex = typeahead.GetNextMatch(selectedIndex);
+            if (nextIndex >= 0)
+            {
+                selectedIndex = nextIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous match in the filtered list.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            if (flattenedNodes.Count == 0)
+                return;
+
+            int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+            if (prevIndex >= 0)
+            {
+                selectedIndex = prevIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            var node = flattenedNodes[selectedIndex];
+            string cleanLabel = StripAsterisks(node.Label);
+
+            // Build state string based on node type
+            string stateStr = "";
+            switch (node.Type)
+            {
+                case NodeType.SpecialFilter:
+                case NodeType.ThingDef:
+                    stateStr = node.IsChecked ? " checked" : " not checked";
+                    break;
+                case NodeType.Category:
+                    stateStr = node.IsExpanded ? " expanded" : " collapsed";
+                    break;
+                case NodeType.Slider:
+                    stateStr = " " + GetSliderValueString(node);
+                    break;
+            }
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{cleanLabel}{stateStr}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentNode();
+            }
+        }
+
+        #endregion
     }
 }
