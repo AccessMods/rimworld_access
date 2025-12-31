@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
 using RimWorld;
 
@@ -14,6 +15,7 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static bool isActive = false;
         private static bool givesColonistOrders = false;
+        private static List<object> savedSelection = null;
 
         /// <summary>
         /// Gets whether the windowless menu is currently active.
@@ -29,6 +31,9 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = true;
             givesColonistOrders = colonistOrders;
+
+            // Save current selection - some FloatMenu actions expect specific objects to be selected
+            savedSelection = Find.Selector?.SelectedObjects?.ToList();
 
             // Announce the first option
             if (selectedIndex >= 0 && selectedIndex < options.Count)
@@ -115,12 +120,28 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Restore saved selection before executing - some actions check Find.Selector.SelectedObjects
+            if (savedSelection != null && Find.Selector != null)
+            {
+                Find.Selector.ClearSelection();
+                foreach (var obj in savedSelection)
+                {
+                    if (obj is ISelectable selectable)
+                    {
+                        Find.Selector.Select(selectable, playSound: false, forceDesignatorDeselect: false);
+                    }
+                }
+            }
+
             // Close the menu BEFORE executing the action
             // This allows the action to open a new menu if needed
             Close();
 
             // Call the Chosen method to execute the option's action
             selectedOption.Chosen(givesColonistOrders, null);
+
+            // Announce selection
+            TolkHelper.Speak($"{selectedOption.Label} selected");
         }
     }
 }
