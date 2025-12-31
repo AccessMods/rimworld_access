@@ -82,15 +82,10 @@ namespace RimWorldAccess
             lastInputTime = currentTime;
             searchBuffer += c;
 
-            // Find all matching items
-            matchingIndices.Clear();
-            for (int i = 0; i < labels.Count; i++)
-            {
-                if (MatchesWordPrefix(searchBuffer, labels[i]))
-                {
-                    matchingIndices.Add(i);
-                }
-            }
+            // Find all matching items using two-pass approach:
+            // Pass 1: Match against names only (ignore parenthetical content like descriptions)
+            // Pass 2: If no matches, try matching full labels including parenthetical content
+            FindMatches(labels);
 
             // If matches found, set newIndex to first match
             if (matchingIndices.Count > 0)
@@ -132,15 +127,8 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Re-filter matches
-            matchingIndices.Clear();
-            for (int i = 0; i < labels.Count; i++)
-            {
-                if (MatchesWordPrefix(searchBuffer, labels[i]))
-                {
-                    matchingIndices.Add(i);
-                }
-            }
+            // Re-filter matches using two-pass approach
+            FindMatches(labels);
 
             // Update current match index and return first match
             if (matchingIndices.Count > 0)
@@ -175,6 +163,39 @@ namespace RimWorldAccess
             ClearSearch();
             TolkHelper.Speak("Search cleared");
             return true;
+        }
+
+        /// <summary>
+        /// Finds matching items using a two-pass approach:
+        /// Pass 1: Match against names only (ignoring parenthetical content like descriptions)
+        /// Pass 2: If no matches, try matching full labels including parenthetical content
+        /// This prioritizes exact name matches while still allowing description searches as fallback.
+        /// </summary>
+        private void FindMatches(List<string> labels)
+        {
+            matchingIndices.Clear();
+
+            // Pass 1: Try matching without parenthetical content (names only)
+            for (int i = 0; i < labels.Count; i++)
+            {
+                if (MatchesWordPrefix(searchBuffer, labels[i], ignoreParenthetical: true))
+                {
+                    matchingIndices.Add(i);
+                }
+            }
+
+            // If we found matches in pass 1, we're done
+            if (matchingIndices.Count > 0)
+                return;
+
+            // Pass 2: No matches found - try matching full labels including descriptions
+            for (int i = 0; i < labels.Count; i++)
+            {
+                if (MatchesWordPrefix(searchBuffer, labels[i], ignoreParenthetical: false))
+                {
+                    matchingIndices.Add(i);
+                }
+            }
         }
 
         /// <summary>
@@ -257,8 +278,9 @@ namespace RimWorldAccess
         /// </summary>
         /// <param name="search">The search string</param>
         /// <param name="label">The label to match against</param>
+        /// <param name="ignoreParenthetical">If true, strips content in parentheses before matching</param>
         /// <returns>True if the search matches a word prefix or the label start</returns>
-        public static bool MatchesWordPrefix(string search, string label)
+        public static bool MatchesWordPrefix(string search, string label, bool ignoreParenthetical = false)
         {
             if (string.IsNullOrEmpty(search) || string.IsNullOrEmpty(label))
             {
@@ -267,6 +289,12 @@ namespace RimWorldAccess
 
             string searchLower = search.ToLowerInvariant();
             string labelLower = label.ToLowerInvariant().Trim();
+
+            // Strip parenthetical content if requested
+            if (ignoreParenthetical)
+            {
+                labelLower = StripParentheticalContent(labelLower);
+            }
 
             // Check if entire label starts with search
             if (labelLower.StartsWith(searchLower))
@@ -285,6 +313,38 @@ namespace RimWorldAccess
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Strips content inside parentheses from a string.
+        /// Example: "Sleeping spot (description here)" -> "Sleeping spot"
+        /// </summary>
+        private static string StripParentheticalContent(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            // Remove all content between parentheses (including nested)
+            var result = new System.Text.StringBuilder();
+            int depth = 0;
+
+            foreach (char c in text)
+            {
+                if (c == '(')
+                {
+                    depth++;
+                }
+                else if (c == ')')
+                {
+                    if (depth > 0) depth--;
+                }
+                else if (depth == 0)
+                {
+                    result.Append(c);
+                }
+            }
+
+            return result.ToString().Trim();
         }
     }
 }

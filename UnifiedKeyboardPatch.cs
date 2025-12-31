@@ -1689,16 +1689,26 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Escape)
                 {
-                    WindowlessFloatMenuState.Close();
-
-                    // If architect mode is active (category/tool/material selection), also reset it
-                    if (ArchitectState.IsActive && !ArchitectState.IsInPlacementMode)
+                    // Clear search first if active, otherwise close the menu
+                    if (WindowlessFloatMenuState.ClearTypeaheadSearch())
                     {
-                        ArchitectState.Reset();
+                        // Search was cleared, don't close the menu
+                        handled = true;
                     }
+                    else
+                    {
+                        // No active search, close the menu
+                        WindowlessFloatMenuState.Close();
 
-                    TolkHelper.Speak("Menu closed");
-                    handled = true;
+                        // If architect mode is active (category/tool/material selection), also reset it
+                        if (ArchitectState.IsActive && !ArchitectState.IsInPlacementMode)
+                        {
+                            ArchitectState.Reset();
+                        }
+
+                        TolkHelper.Speak("Menu closed");
+                        handled = true;
+                    }
                 }
                 // === Handle Home/End for menu navigation ===
                 else if (key == KeyCode.Home)

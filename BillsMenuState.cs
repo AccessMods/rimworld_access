@@ -400,7 +400,8 @@ namespace RimWorldAccess
                 billGiver.BillStack.Delete(bill);
                 TolkHelper.Speak($"Deleted: {bill.LabelCap}");
 
-                // Rebuild menu
+                // Clear search and rebuild menu
+                typeahead.ClearSearch();
                 BuildMenuItems();
 
                 // Adjust selection
@@ -432,7 +433,8 @@ namespace RimWorldAccess
                 BillUtility.Clipboard = bill;
                 TolkHelper.Speak($"Copied to clipboard: {bill.LabelCap}");
 
-                // Rebuild to show paste option
+                // Clear search and rebuild to show paste option
+                typeahead.ClearSearch();
                 BuildMenuItems();
                 AnnounceCurrentSelection();
             }
@@ -531,7 +533,8 @@ namespace RimWorldAccess
 
                 TolkHelper.Speak($"Added bill: {bill.LabelCap}");
 
-                // Rebuild menu
+                // Clear search and rebuild menu
+                typeahead.ClearSearch();
                 BuildMenuItems();
 
                 // Select the newly added bill
@@ -570,7 +573,8 @@ namespace RimWorldAccess
 
             TolkHelper.Speak($"Pasted bill: {bill.LabelCap}");
 
-            // Rebuild menu and select the new bill
+            // Clear search, rebuild menu and select the new bill
+            typeahead.ClearSearch();
             BuildMenuItems();
             for (int i = 0; i < menuItems.Count; i++)
             {

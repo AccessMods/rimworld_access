@@ -211,6 +211,20 @@ namespace RimWorldAccess
         public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
+        /// Clears the typeahead search and announces the action.
+        /// Returns true if there was an active search to clear.
+        /// </summary>
+        public static bool ClearTypeaheadSearch()
+        {
+            if (!typeahead.HasActiveSearch)
+                return false;
+
+            typeahead.ClearSearchAndAnnounce();
+            AnnounceCurrentSelection();
+            return true;
+        }
+
+        /// <summary>
         /// Handles keyboard input for the menu, including typeahead search.
         /// </summary>
         /// <returns>True if input was handled, false otherwise.</returns>
