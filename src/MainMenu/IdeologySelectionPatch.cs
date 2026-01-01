@@ -59,8 +59,8 @@ namespace RimWorldAccess
                     // Announce the first option after a brief delay
                     hasAnnouncedTitle = true;
 
-                    // Announce initial selection
-                    System.Threading.Tasks.Task.Delay(500).ContinueWith(_ =>
+                    // Announce initial selection after a brief delay
+                    LongEventHandler.ExecuteWhenFinished(() =>
                     {
                         string description = IdeoPresetCategoryDefOf.Classic.description;
                         TolkHelper.Speak($"Play Classic - {description}");
