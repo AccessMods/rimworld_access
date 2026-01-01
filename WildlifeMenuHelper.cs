@@ -158,7 +158,19 @@ namespace RimWorldAccess
             if (pawn.Map == null) return "N/A";
 
             Designation designation = pawn.Map.designationManager.DesignationOn(pawn, DesignationDefOf.Hunt);
-            return designation != null ? "Marked for hunting" : "Not marked";
+
+            // Get manhunter on damage chance
+            float manhunterChance = PawnUtility.GetManhunterOnDamageChance(pawn);
+            string manhunterInfo = manhunterChance > 0f ? $", revenge chance: {manhunterChance.ToStringPercent()}" : "";
+
+            if (designation != null)
+            {
+                return $"Marked for hunting{manhunterInfo}";
+            }
+            else
+            {
+                return manhunterChance > 0f ? $"Not marked (revenge chance: {manhunterChance.ToStringPercent()})" : "Not marked";
+            }
         }
 
         public static string GetTameStatus(Pawn pawn)
@@ -173,14 +185,32 @@ namespace RimWorldAccess
                 return "Cannot tame (too wild)";
             }
 
+            // Get minimum handling skill required
+            int minSkill = (int)pawn.GetStatValue(StatDefOf.MinimumHandlingSkill);
+
+            // Get manhunter on tame fail chance
+            float manhunterChance = PawnUtility.GetManhunterOnTameFailChance(pawn);
+
+            // Build info string
+            List<string> infoParts = new List<string>();
+            infoParts.Add($"wildness: {wildness.ToStringPercent()}");
+            if (minSkill > 0)
+            {
+                infoParts.Add($"requires skill {minSkill}");
+            }
+            if (manhunterChance > 0f)
+            {
+                infoParts.Add($"manhunter on fail: {manhunterChance.ToStringPercent()}");
+            }
+            string infoString = string.Join(", ", infoParts);
+
             Designation designation = pawn.Map.designationManager.DesignationOn(pawn, DesignationDefOf.Tame);
             if (designation != null)
             {
-                return "Marked for taming";
+                return $"Marked for taming ({infoString})";
             }
 
-            // Show wildness/tame chance info
-            return $"Not marked (wildness: {wildness.ToStringPercent()})";
+            return $"Not marked ({infoString})";
         }
 
         // === Designation Toggles ===
@@ -199,6 +229,8 @@ namespace RimWorldAccess
             else
             {
                 pawn.Map.designationManager.AddDesignation(new Designation(pawn, DesignationDefOf.Hunt));
+                // Show warnings (manhunter risk, no hunters, etc.) - same as vanilla Wildlife tab
+                Designator_Hunt.ShowDesignationWarnings(pawn);
                 return true; // Now marked
             }
         }
@@ -224,6 +256,8 @@ namespace RimWorldAccess
             else
             {
                 pawn.Map.designationManager.AddDesignation(new Designation(pawn, DesignationDefOf.Tame));
+                // Show warnings (manhunter risk, no handlers, etc.) - same as vanilla Wildlife tab
+                TameUtility.ShowDesignationWarnings(pawn);
                 return true; // Now marked
             }
         }

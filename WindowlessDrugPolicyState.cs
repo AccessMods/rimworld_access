@@ -125,7 +125,7 @@ namespace RimWorldAccess
             if (allPolicies.Count == 0)
                 return;
 
-            selectedPolicyIndex = (selectedPolicyIndex + 1) % allPolicies.Count;
+            selectedPolicyIndex = MenuHelper.SelectNext(selectedPolicyIndex, allPolicies.Count);
             selectedPolicy = allPolicies[selectedPolicyIndex];
             UpdateClipboard();
         }
@@ -138,10 +138,7 @@ namespace RimWorldAccess
             if (allPolicies.Count == 0)
                 return;
 
-            selectedPolicyIndex--;
-            if (selectedPolicyIndex < 0)
-                selectedPolicyIndex = allPolicies.Count - 1;
-
+            selectedPolicyIndex = MenuHelper.SelectPrevious(selectedPolicyIndex, allPolicies.Count);
             selectedPolicy = allPolicies[selectedPolicyIndex];
             UpdateClipboard();
         }
@@ -173,7 +170,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextAction()
         {
-            selectedActionIndex = (selectedActionIndex + 1) % policyActions.Length;
+            selectedActionIndex = MenuHelper.SelectNext(selectedActionIndex, policyActions.Length);
             UpdateClipboard();
         }
 
@@ -182,9 +179,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousAction()
         {
-            selectedActionIndex--;
-            if (selectedActionIndex < 0)
-                selectedActionIndex = policyActions.Length - 1;
+            selectedActionIndex = MenuHelper.SelectPrevious(selectedActionIndex, policyActions.Length);
             UpdateClipboard();
         }
 
@@ -338,7 +333,7 @@ namespace RimWorldAccess
             if (selectedPolicy == null || selectedPolicy.Count == 0)
                 return;
 
-            selectedDrugIndex = (selectedDrugIndex + 1) % selectedPolicy.Count;
+            selectedDrugIndex = MenuHelper.SelectNext(selectedDrugIndex, selectedPolicy.Count);
             UpdateClipboard();
         }
 
@@ -350,10 +345,7 @@ namespace RimWorldAccess
             if (selectedPolicy == null || selectedPolicy.Count == 0)
                 return;
 
-            selectedDrugIndex--;
-            if (selectedDrugIndex < 0)
-                selectedDrugIndex = selectedPolicy.Count - 1;
-
+            selectedDrugIndex = MenuHelper.SelectPrevious(selectedDrugIndex, selectedPolicy.Count);
             UpdateClipboard();
         }
 
@@ -384,7 +376,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextSetting()
         {
-            selectedSettingIndex = (selectedSettingIndex + 1) % drugSettings.Length;
+            selectedSettingIndex = MenuHelper.SelectNext(selectedSettingIndex, drugSettings.Length);
             UpdateClipboard();
         }
 
@@ -393,10 +385,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousSetting()
         {
-            selectedSettingIndex--;
-            if (selectedSettingIndex < 0)
-                selectedSettingIndex = drugSettings.Length - 1;
-
+            selectedSettingIndex = MenuHelper.SelectPrevious(selectedSettingIndex, drugSettings.Length);
             UpdateClipboard();
         }
 
@@ -487,7 +476,7 @@ namespace RimWorldAccess
                 {
                     bool isDefault = Current.Game?.drugPolicyDatabase?.DefaultDrugPolicy() == selectedPolicy;
                     string defaultMarker = isDefault ? " (default)" : "";
-                    TolkHelper.Speak($"Drug policy {selectedPolicyIndex + 1}/{allPolicies.Count}: {selectedPolicy.label}{defaultMarker}. Press Tab for actions.");
+                    TolkHelper.Speak($"{selectedPolicy.label}{defaultMarker}. {MenuHelper.FormatPosition(selectedPolicyIndex, allPolicies.Count)}. Press Tab for actions.");
                 }
                 else
                 {
@@ -497,7 +486,7 @@ namespace RimWorldAccess
             else if (currentMode == NavigationMode.PolicyActions)
             {
                 string action = policyActions[selectedActionIndex];
-                TolkHelper.Speak($"Action {selectedActionIndex + 1}/{policyActions.Length}: {action}. Press Enter to execute, Tab/Shift+Tab or arrows to navigate, Escape to return to policy list.");
+                TolkHelper.Speak($"{action}. {MenuHelper.FormatPosition(selectedActionIndex, policyActions.Length)}. Press Enter to execute, Tab/Shift+Tab or arrows to navigate, Escape to return to policy list.");
             }
             else if (currentMode == NavigationMode.DrugList)
             {
@@ -506,7 +495,7 @@ namespace RimWorldAccess
                     DrugPolicyEntry entry = selectedPolicy[selectedDrugIndex];
                     string drugName = entry.drug.label;
                     string status = GetDrugStatusSummary(entry);
-                    TolkHelper.Speak($"Drug {selectedDrugIndex + 1}/{selectedPolicy.Count}: {drugName}. {status}. Press Enter to edit, Escape to return.");
+                    TolkHelper.Speak($"{drugName}. {status}. {MenuHelper.FormatPosition(selectedDrugIndex, selectedPolicy.Count)}. Press Enter to edit, Escape to return.");
                 }
                 else
                 {
@@ -520,7 +509,7 @@ namespace RimWorldAccess
                     DrugPolicyEntry entry = selectedPolicy[selectedDrugIndex];
                     string settingName = drugSettings[selectedSettingIndex];
                     string settingValue = GetSettingValue(entry, settingName);
-                    TolkHelper.Speak($"{entry.drug.label} - Setting {selectedSettingIndex + 1}/{drugSettings.Length}: {settingName} = {settingValue}. Use Space to toggle, Left/Right to adjust.");
+                    TolkHelper.Speak($"{entry.drug.label} - {settingName} = {settingValue}. {MenuHelper.FormatPosition(selectedSettingIndex, drugSettings.Length)}. Use Space to toggle, Left/Right to adjust.");
                 }
             }
         }

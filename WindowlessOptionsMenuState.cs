@@ -29,8 +29,12 @@ namespace RimWorldAccess
         private static int selectedCategoryIndex = 0;
         private static int selectedSettingIndex = 0;
         private static List<OptionCategory> categories = new List<OptionCategory>();
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
+        public static OptionsMenuLevel CurrentLevel => currentLevel;
 
         /// <summary>
         /// Opens the options menu at the category list level.
@@ -41,6 +45,7 @@ namespace RimWorldAccess
             currentLevel = OptionsMenuLevel.CategoryList;
             selectedCategoryIndex = 0;
             selectedSettingIndex = 0;
+            typeahead.ClearSearch();
 
             // Close pause menu
             WindowlessPauseMenuState.Close();
@@ -61,6 +66,7 @@ namespace RimWorldAccess
             currentLevel = OptionsMenuLevel.CategoryList;
             selectedCategoryIndex = 0;
             selectedSettingIndex = 0;
+            typeahead.ClearSearch();
 
             // Save all preferences when closing, like the native options dialog
             Prefs.Save();
@@ -73,14 +79,14 @@ namespace RimWorldAccess
         {
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
-                selectedCategoryIndex = (selectedCategoryIndex + 1) % categories.Count;
+                selectedCategoryIndex = MenuHelper.SelectNext(selectedCategoryIndex, categories.Count);
             }
             else // SettingsList
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
                 {
-                    selectedSettingIndex = (selectedSettingIndex + 1) % settings.Count;
+                    selectedSettingIndex = MenuHelper.SelectNext(selectedSettingIndex, settings.Count);
                 }
             }
 
@@ -94,14 +100,14 @@ namespace RimWorldAccess
         {
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
-                selectedCategoryIndex = (selectedCategoryIndex - 1 + categories.Count) % categories.Count;
+                selectedCategoryIndex = MenuHelper.SelectPrevious(selectedCategoryIndex, categories.Count);
             }
             else // SettingsList
             {
                 var settings = categories[selectedCategoryIndex].Settings;
                 if (settings.Count > 0)
                 {
-                    selectedSettingIndex = (selectedSettingIndex - 1 + settings.Count) % settings.Count;
+                    selectedSettingIndex = MenuHelper.SelectPrevious(selectedSettingIndex, settings.Count);
                 }
             }
 
@@ -118,6 +124,7 @@ namespace RimWorldAccess
                 // Enter the selected category
                 currentLevel = OptionsMenuLevel.SettingsList;
                 selectedSettingIndex = 0;
+                typeahead.ClearSearch();
                 AnnounceCurrentState();
             }
             else // SettingsList
@@ -151,6 +158,7 @@ namespace RimWorldAccess
             {
                 // Go back to category list
                 currentLevel = OptionsMenuLevel.CategoryList;
+                typeahead.ClearSearch();
                 AnnounceCurrentState();
             }
             else
@@ -161,17 +169,194 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Processes a typeahead character for searching the current list.
+        /// </summary>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    if (currentLevel == OptionsMenuLevel.CategoryList)
+                        selectedCategoryIndex = newIndex;
+                    else
+                        selectedSettingIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Processes backspace key for typeahead search.
+        /// </summary>
+        public static void ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    if (currentLevel == OptionsMenuLevel.CategoryList)
+                        selectedCategoryIndex = newIndex;
+                    else
+                        selectedSettingIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the current list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            typeahead.ClearSearch();
+            if (currentLevel == OptionsMenuLevel.CategoryList)
+            {
+                if (categories.Count > 0)
+                    selectedCategoryIndex = MenuHelper.JumpToFirst();
+            }
+            else
+            {
+                var settings = categories[selectedCategoryIndex].Settings;
+                if (settings.Count > 0)
+                    selectedSettingIndex = MenuHelper.JumpToFirst();
+            }
+            AnnounceCurrentState();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            typeahead.ClearSearch();
+            if (currentLevel == OptionsMenuLevel.CategoryList)
+            {
+                if (categories.Count > 0)
+                    selectedCategoryIndex = MenuHelper.JumpToLast(categories.Count);
+            }
+            else
+            {
+                var settings = categories[selectedCategoryIndex].Settings;
+                if (settings.Count > 0)
+                    selectedSettingIndex = MenuHelper.JumpToLast(settings.Count);
+            }
+            AnnounceCurrentState();
+        }
+
+        /// <summary>
+        /// Selects the next match when typeahead is active.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            int currentIndex = currentLevel == OptionsMenuLevel.CategoryList ? selectedCategoryIndex : selectedSettingIndex;
+            int newIndex = typeahead.GetNextMatch(currentIndex);
+            if (newIndex >= 0)
+            {
+                if (currentLevel == OptionsMenuLevel.CategoryList)
+                    selectedCategoryIndex = newIndex;
+                else
+                    selectedSettingIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous match when typeahead is active.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            int currentIndex = currentLevel == OptionsMenuLevel.CategoryList ? selectedCategoryIndex : selectedSettingIndex;
+            int newIndex = typeahead.GetPreviousMatch(currentIndex);
+            if (newIndex >= 0)
+            {
+                if (currentLevel == OptionsMenuLevel.CategoryList)
+                    selectedCategoryIndex = newIndex;
+                else
+                    selectedSettingIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets the labels for the current list level.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+            if (currentLevel == OptionsMenuLevel.CategoryList)
+            {
+                foreach (var category in categories)
+                {
+                    labels.Add(category.Name);
+                }
+            }
+            else
+            {
+                var settings = categories[selectedCategoryIndex].Settings;
+                foreach (var setting in settings)
+                {
+                    labels.Add(setting.Name);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (typeahead.HasActiveSearch)
+            {
+                string itemName;
+                if (currentLevel == OptionsMenuLevel.CategoryList)
+                {
+                    itemName = categories[selectedCategoryIndex].Name;
+                    TolkHelper.Speak($"Category: {itemName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                }
+                else
+                {
+                    var setting = categories[selectedCategoryIndex].Settings[selectedSettingIndex];
+                    TolkHelper.Speak($"{setting.GetAnnouncement()}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                }
+            }
+            else
+            {
+                AnnounceCurrentState();
+            }
+        }
+
         private static void AnnounceCurrentState()
         {
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 string categoryName = categories[selectedCategoryIndex].Name;
-                TolkHelper.Speak($"Category: {categoryName}");
+                TolkHelper.Speak($"Category: {categoryName}. {MenuHelper.FormatPosition(selectedCategoryIndex, categories.Count)}");
             }
             else // SettingsList
             {
                 var setting = categories[selectedCategoryIndex].Settings[selectedSettingIndex];
-                TolkHelper.Speak(setting.GetAnnouncement());
+                var currentSettings = categories[selectedCategoryIndex].Settings;
+                TolkHelper.Speak($"{setting.GetAnnouncement()}. {MenuHelper.FormatPosition(selectedSettingIndex, currentSettings.Count)}");
             }
         }
 

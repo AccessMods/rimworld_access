@@ -17,6 +17,7 @@ namespace RimWorldAccess
         private static List<Quest> currentQuests = new List<Quest>();
         private static int currentIndex = 0;
         private static QuestsTab currentTab = QuestsTab.Available;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         // Mirror RimWorld's quest tab enum
         private enum QuestsTab
@@ -27,6 +28,8 @@ namespace RimWorldAccess
         }
 
         public static bool IsActive => isActive;
+        public static TypeaheadSearchHelper Typeahead => typeahead;
+        public static int CurrentIndex => currentIndex;
 
         /// <summary>
         /// Opens the quest menu and initializes with the available quests tab.
@@ -36,7 +39,9 @@ namespace RimWorldAccess
             isActive = true;
             currentTab = QuestsTab.Available;
             currentIndex = 0;
+            typeahead.ClearSearch();
             RefreshQuestList();
+            TolkHelper.Speak("Quest menu");
             AnnounceCurrentSelection();
         }
 
@@ -47,6 +52,7 @@ namespace RimWorldAccess
         {
             isActive = false;
             currentQuests.Clear();
+            typeahead.ClearSearch();
             TolkHelper.Speak("Quest menu closed");
         }
 
@@ -61,7 +67,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex + 1) % currentQuests.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, currentQuests.Count);
             AnnounceCurrentSelection();
         }
 
@@ -76,9 +82,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = currentQuests.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, currentQuests.Count);
 
             AnnounceCurrentSelection();
         }
@@ -90,6 +94,7 @@ namespace RimWorldAccess
         {
             currentTab = (QuestsTab)(((int)currentTab + 1) % 3);
             currentIndex = 0;
+            typeahead.ClearSearch();
             RefreshQuestList();
             AnnounceTabSwitch();
         }
@@ -101,6 +106,7 @@ namespace RimWorldAccess
         {
             currentTab = (QuestsTab)(((int)currentTab + 2) % 3);
             currentIndex = 0;
+            typeahead.ClearSearch();
             RefreshQuestList();
             AnnounceTabSwitch();
         }
@@ -289,7 +295,7 @@ namespace RimWorldAccess
             string status = "";
 
             // Add position info
-            string position = $"({currentIndex + 1}/{currentQuests.Count})";
+            string position = MenuHelper.FormatPosition(currentIndex, currentQuests.Count);
 
             // Add quest name (strip XML tags)
             string name = quest.name.StripTags();
@@ -322,7 +328,7 @@ namespace RimWorldAccess
             int rating = Math.Max(quest.challengeRating, 1);
             string ratingInfo = rating == 1 ? " (1 star)" : $" ({rating} stars)";
 
-            return $"{position} {name}{status}{timeInfo}{ratingInfo}";
+            return $"{name}{status}{timeInfo}{ratingInfo}. {position}";
         }
 
         /// <summary>
@@ -373,10 +379,10 @@ namespace RimWorldAccess
             details.Add("");
             details.Add("Controls:");
             details.Add("Enter: View details");
-            details.Add("A: Accept quest (Available tab only)");
-            details.Add("D: Dismiss/Resume/Delete quest");
+            details.Add("Alt+A: Accept quest (Available tab only)");
+            details.Add("Alt+D: Dismiss/Resume/Delete quest");
             details.Add("Left/Right: Switch tabs");
-            details.Add("Escape: Close menu");
+            details.Add("Type to search, Escape: Close menu");
 
             return string.Join("\n", details);
         }
@@ -417,6 +423,116 @@ namespace RimWorldAccess
                     return "Historical Quests";
                 default:
                     return "Quests";
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (currentQuests.Count == 0)
+                return;
+
+            currentIndex = MenuHelper.JumpToFirst();
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (currentQuests.Count == 0)
+                return;
+
+            currentIndex = MenuHelper.JumpToLast(currentQuests.Count);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Gets a list of labels for all quests for typeahead search.
+        /// </summary>
+        public static List<string> GetItemLabels()
+        {
+            List<string> labels = new List<string>();
+            foreach (var quest in currentQuests)
+            {
+                labels.Add(quest.name.StripTags());
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Sets the current index directly.
+        /// </summary>
+        public static void SetCurrentIndex(int index)
+        {
+            if (index >= 0 && index < currentQuests.Count)
+            {
+                currentIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (currentQuests.Count == 0)
+            {
+                TolkHelper.Speak($"{GetTabName()} tab - No quests");
+                return;
+            }
+
+            Quest quest = currentQuests[currentIndex];
+            string announcement = BuildQuestAnnouncement(quest);
+
+            // Add search context if active
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Handles backspace for typeahead search.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    currentIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Handles character input for typeahead search.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
             }
         }
     }

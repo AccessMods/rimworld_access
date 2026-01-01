@@ -17,8 +17,11 @@ namespace RimWorldAccess
         private static List<TreeNode> rootNodes = new List<TreeNode>();
         private static List<TreeNode> flattenedVisibleNodes = new List<TreeNode>();
         private static int selectedIndex = 0;
+        private static Dictionary<TreeNode, TreeNode> lastChildPerParent = new Dictionary<TreeNode, TreeNode>();
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static TypeaheadSearchHelper Typeahead => typeahead;
 
         /// <summary>
         /// Represents a node in the inventory tree (category, item, or action)
@@ -85,6 +88,9 @@ namespace RimWorldAccess
 
             isActive = true;
             selectedIndex = 0;
+            lastChildPerParent.Clear();
+            MenuHelper.ResetLevel("Inventory");
+            typeahead.ClearSearch();
 
             // Collect all stored items
             List<Thing> allItems = InventoryHelper.GetAllStoredItems();
@@ -250,6 +256,9 @@ namespace RimWorldAccess
             rootNodes.Clear();
             flattenedVisibleNodes.Clear();
             selectedIndex = 0;
+            lastChildPerParent.Clear();
+            MenuHelper.ResetLevel("Inventory");
+            typeahead.ClearSearch();
 
             TolkHelper.Speak("Inventory menu closed.");
             SoundDefOf.TabClose.PlayOneShotOnCamera();
@@ -265,19 +274,91 @@ namespace RimWorldAccess
 
             KeyCode key = ev.keyCode;
 
-            // Up arrow - previous item
-            if (key == KeyCode.UpArrow)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
                 ev.Use();
-                SelectPrevious();
+                JumpToFirst();
                 return true;
             }
 
-            // Down arrow - next item
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                ev.Use();
+                JumpToLast();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    ev.Use();
+                    return true;
+                }
+                ev.Use();
+                Close();
+                return true;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetItemLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                        selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                ev.Use();
+                return true;
+            }
+
+            // Up arrow - navigate with search awareness
+            if (key == KeyCode.UpArrow)
+            {
+                ev.Use();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+                    if (prevIndex >= 0)
+                    {
+                        selectedIndex = prevIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectPrevious();
+                }
+                return true;
+            }
+
+            // Down arrow - navigate with search awareness
             if (key == KeyCode.DownArrow)
             {
                 ev.Use();
-                SelectNext();
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int nextIndex = typeahead.GetNextMatch(selectedIndex);
+                    if (nextIndex >= 0)
+                    {
+                        selectedIndex = nextIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
+                    SelectNext();
+                }
                 return true;
             }
 
@@ -297,6 +378,15 @@ namespace RimWorldAccess
                 return true;
             }
 
+            // Handle * key - expand all sibling categories (WCAG tree view pattern)
+            bool isStar = key == KeyCode.KeypadMultiply || (ev.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                ExpandAllSiblings();
+                ev.Use();
+                return true;
+            }
+
             // Enter - activate current node
             if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
@@ -305,15 +395,124 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Escape - close menu
-            if (key == KeyCode.Escape)
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
             {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetItemLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+                }
                 ev.Use();
-                Close();
                 return true;
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is active.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        private static void JumpToFirst()
+        {
+            if (flattenedVisibleNodes.Count == 0) return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        private static void JumpToLast()
+        {
+            if (flattenedVisibleNodes.Count == 0) return;
+
+            selectedIndex = flattenedVisibleNodes.Count - 1;
+            typeahead.ClearSearch();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Gets the list of labels for all visible items.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flattenedVisibleNodes)
+            {
+                labels.Add(node.Label ?? "");
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flattenedVisibleNodes.Count == 0)
+            {
+                TolkHelper.Speak("Inventory is empty.");
+                return;
+            }
+
+            TreeNode current = flattenedVisibleNodes[selectedIndex];
+
+            // Get state info (only for expandable nodes)
+            string stateInfo = "";
+            if (current.CanExpand)
+            {
+                stateInfo = current.IsExpanded ? "expanded" : "collapsed";
+            }
+
+            // Get sibling position
+            var (position, total) = GetSiblingPosition(current);
+            string positionInfo = $"{position} of {total}";
+
+            // Build announcement with search context
+            string announcement;
+            if (string.IsNullOrEmpty(stateInfo))
+            {
+                announcement = $"{current.Label}";
+            }
+            else
+            {
+                announcement = $"{current.Label} {stateInfo}";
+            }
+
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'";
+            }
+            else
+            {
+                announcement += $". {positionInfo}";
+            }
+
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            TolkHelper.Speak(announcement.Trim());
         }
 
         /// <summary>
@@ -323,11 +522,7 @@ namespace RimWorldAccess
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-            {
-                selectedIndex = flattenedVisibleNodes.Count - 1; // Wrap to bottom
-            }
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, flattenedVisibleNodes.Count);
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
@@ -340,70 +535,167 @@ namespace RimWorldAccess
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
-            selectedIndex++;
-            if (selectedIndex >= flattenedVisibleNodes.Count)
-            {
-                selectedIndex = 0; // Wrap to top
-            }
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, flattenedVisibleNodes.Count);
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Expands the currently selected node
+        /// Expands the currently selected node (WCAG-compliant)
+        /// - If collapsed and expandable: expand, focus stays on current item
+        /// - If already expanded with children: move to first child
+        /// - If end node (not expandable): reject feedback
         /// </summary>
         private static void ExpandCurrent()
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
+            // Clear search when expanding to avoid "no more search results" confusion
+            typeahead.ClearSearch();
+
             TreeNode current = flattenedVisibleNodes[selectedIndex];
 
-            if (current.CanExpand && !current.IsExpanded)
+            if (!current.CanExpand)
             {
+                // End node - provide reject feedback
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
+                return;
+            }
+
+            if (!current.IsExpanded)
+            {
+                // Collapsed node - expand it, focus stays on current item
                 current.IsExpanded = true;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Expanded: {current.Label}");
+                // Focus stays on current item, just announce the state change
+                AnnounceCurrentSelection();
             }
             else
             {
-                TolkHelper.Speak("Cannot expand this item.", SpeechPriority.High);
+                // Already expanded - move to first child
+                MoveToFirstChild();
             }
         }
 
         /// <summary>
-        /// Collapses the currently selected node
+        /// Moves focus to the first child of the current expanded item
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            TreeNode current = flattenedVisibleNodes[selectedIndex];
+
+            if (current.Children.Count > 0)
+            {
+                int firstChildIndex = flattenedVisibleNodes.IndexOf(current) + 1;
+                if (firstChildIndex < flattenedVisibleNodes.Count)
+                {
+                    selectedIndex = firstChildIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flattenedVisibleNodes.Count == 0 || selectedIndex >= flattenedVisibleNodes.Count)
+                return;
+
+            TreeNode currentItem = flattenedVisibleNodes[selectedIndex];
+            TreeNode parent = currentItem.Parent; // null means root level
+
+            // Get siblings list (either from parent's children or root nodes)
+            List<TreeNode> siblings = parent != null ? parent.Children : rootNodes;
+
+            // Find all collapsed sibling nodes that can be expanded
+            int expandedCount = 0;
+            foreach (TreeNode sibling in siblings)
+            {
+                // Must be expandable and currently collapsed
+                if (sibling.CanExpand && !sibling.IsExpanded)
+                {
+                    sibling.IsExpanded = true;
+                    expandedCount++;
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildFlattenedList();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any expandable sibling nodes at all
+                bool hasAnyExpandableSiblings = false;
+                foreach (TreeNode sibling in siblings)
+                {
+                    if (sibling.CanExpand)
+                    {
+                        hasAnyExpandableSiblings = true;
+                        break;
+                    }
+                }
+
+                if (hasAnyExpandableSiblings)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
+            }
+        }
+
+        /// <summary>
+        /// Collapses the currently selected node (WCAG-compliant)
+        /// - If expanded: collapse, focus stays on current item
+        /// - If collapsed or end node: move to parent WITHOUT collapsing it
         /// </summary>
         private static void CollapseCurrent()
         {
             if (flattenedVisibleNodes.Count == 0) return;
 
+            // Clear search when collapsing to avoid "no more search results" confusion
+            typeahead.ClearSearch();
+
             TreeNode current = flattenedVisibleNodes[selectedIndex];
 
             if (current.CanExpand && current.IsExpanded)
             {
+                // Currently expanded - collapse it, focus stays on current item
                 current.IsExpanded = false;
                 RebuildFlattenedList();
                 SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Collapsed: {current.Label}");
+                AnnounceCurrentSelection();
             }
             else if (current.Parent != null)
             {
-                // Collapse parent instead
-                current.Parent.IsExpanded = false;
-                RebuildFlattenedList();
+                // Collapsed or end node - move to parent WITHOUT collapsing it
+                // Save current child position for potential future restoration
+                lastChildPerParent[current.Parent] = current;
 
-                // Select the parent
+                // Move focus to parent (do NOT collapse it)
                 selectedIndex = flattenedVisibleNodes.IndexOf(current.Parent);
                 if (selectedIndex < 0) selectedIndex = 0;
 
-                SoundDefOf.Click.PlayOneShotOnCamera();
-                TolkHelper.Speak($"Collapsed parent: {current.Parent.Label}");
+                SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                AnnounceCurrentSelection();
             }
             else
             {
-                TolkHelper.Speak("Cannot collapse this item.", SpeechPriority.High);
+                // Already at top level with no parent
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Already at top level.", SpeechPriority.High);
             }
         }
 
@@ -443,7 +735,18 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the currently selected item via clipboard
+        /// Gets the sibling position (1-based) and total siblings for a node
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(TreeNode item)
+        {
+            List<TreeNode> siblings = item.Parent != null ? item.Parent.Children : rootNodes;
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Announces the currently selected item via screen reader
+        /// Format: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -454,23 +757,24 @@ namespace RimWorldAccess
             }
 
             TreeNode current = flattenedVisibleNodes[selectedIndex];
-            string typeInfo = "";
 
-            switch (current.Type)
+            // Get state info (only for expandable nodes)
+            string stateInfo = "";
+            if (current.CanExpand)
             {
-                case TreeNode.NodeType.Category:
-                    typeInfo = current.CanExpand ? (current.IsExpanded ? "[Expanded]" : "[Collapsed]") : "";
-                    break;
-                case TreeNode.NodeType.Item:
-                    typeInfo = current.IsExpanded ? "[Expanded]" : "[Collapsed]";
-                    break;
-                case TreeNode.NodeType.Action:
-                    typeInfo = ""; // No suffix for actions
-                    break;
+                stateInfo = current.IsExpanded ? " expanded" : " collapsed";
             }
 
-            string announcement = $"{current.Label} {typeInfo}".Trim();
-            TolkHelper.Speak(announcement);
+            // Get sibling position
+            var (position, total) = GetSiblingPosition(current);
+
+            // Get level prefix (only announced when level changes)
+            string levelPrefix = MenuHelper.GetLevelPrefix("Inventory", current.Depth);
+
+            // Build announcement: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
+            string announcement = $"{levelPrefix}{current.Label}{stateInfo}. {MenuHelper.FormatPosition(position - 1, total)}.";
+
+            TolkHelper.Speak(announcement.Trim());
         }
 
         /// <summary>

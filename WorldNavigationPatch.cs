@@ -1,3 +1,4 @@
+using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 using RimWorld;
@@ -24,6 +25,10 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.High)]
         public static void Prefix()
         {
+            // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
+                return;
+
             // Detect if we're in world view
             bool isWorldView = Current.ProgramState == ProgramState.Playing &&
                               Find.World != null &&
@@ -40,6 +45,7 @@ namespace RimWorldAccess
             {
                 // Just left world view
                 WorldNavigationState.Close();
+                WorldScannerState.Reset();
             }
 
             lastFrameWasWorldView = isWorldView;
@@ -79,26 +85,6 @@ namespace RimWorldAccess
                 }
             }
 
-            // Handle quest locations browser input if it's active
-            if (QuestLocationsBrowserState.IsActive)
-            {
-                if (QuestLocationsBrowserState.HandleInput(key))
-                {
-                    Event.current.Use();
-                    return;
-                }
-            }
-
-            // Handle settlement browser input if it's active
-            if (SettlementBrowserState.IsActive)
-            {
-                if (SettlementBrowserState.HandleInput(key))
-                {
-                    Event.current.Use();
-                    return;
-                }
-            }
-
             // Handle arrow key navigation
             if (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
                 key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
@@ -108,40 +94,61 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Home key - jump to player's home settlement
-            if (key == KeyCode.Home && !shift && !ctrl && !alt)
+            // ===== World Scanner Controls (Page Up/Down) =====
+            // Page Down: Next item in current category
+            if (key == KeyCode.PageDown && !shift && !alt)
             {
-                WorldNavigationState.JumpToHome();
+                if (ctrl)
+                    WorldScannerState.NextCategory();
+                else
+                    WorldScannerState.NextItem();
                 Event.current.Use();
                 return;
             }
 
-            // Handle End key - jump to nearest player caravan
-            if (key == KeyCode.End && !shift && !ctrl && !alt)
+            // Page Up: Previous item in current category
+            if (key == KeyCode.PageUp && !shift && !alt)
             {
-                WorldNavigationState.JumpToNearestCaravan();
+                if (ctrl)
+                    WorldScannerState.PreviousCategory();
+                else
+                    WorldScannerState.PreviousItem();
+                Event.current.Use();
+                return;
+            }
+
+            // Home: Jump to scanner item OR home settlement (Alt+Home for home)
+            if (key == KeyCode.Home && !shift && !ctrl)
+            {
+                if (alt)
+                    WorldNavigationState.JumpToHome();
+                else
+                    WorldScannerState.JumpToCurrent();
+                Event.current.Use();
+                return;
+            }
+
+            // End: Read scanner distance/direction OR jump to caravan (Alt+End for caravan)
+            if (key == KeyCode.End && !shift && !ctrl)
+            {
+                if (alt)
+                    WorldNavigationState.JumpToNearestCaravan();
+                else
+                    WorldScannerState.ReadDistanceAndDirection();
+                Event.current.Use();
+                return;
+            }
+
+            // Alt+J: Toggle auto-jump mode for scanner
+            if (key == KeyCode.J && alt && !shift && !ctrl)
+            {
+                WorldScannerState.ToggleAutoJumpMode();
                 Event.current.Use();
                 return;
             }
 
             // Note: Comma and Period keys for caravan cycling are handled in UnifiedKeyboardPatch
             // at a higher priority to prevent colonist selection from intercepting them
-
-            // Handle S key - open settlement browser
-            if (key == KeyCode.S && !shift && !ctrl && !alt)
-            {
-                WorldNavigationState.OpenSettlementBrowser();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Q key - open quest locations browser
-            if (key == KeyCode.Q && !shift && !ctrl && !alt)
-            {
-                WorldNavigationState.OpenQuestLocationsBrowser();
-                Event.current.Use();
-                return;
-            }
 
             // Handle I key - show caravan stats (if caravan selected) or read detailed tile information
             if (key == KeyCode.I && !shift && !ctrl && !alt)
@@ -175,7 +182,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Enter key - set caravan destination if in destination selection mode
+            // Handle Enter key - set caravan destination, inspect caravan, or enter settlement
             if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt)
             {
                 if (CaravanFormationState.IsChoosingDestination)
@@ -184,9 +191,40 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
+
+                // Check if there's a player caravan at the current tile - show stats
+                PlanetTile currentTile = WorldNavigationState.CurrentSelectedTile;
+                if (currentTile.Valid && Find.WorldObjects != null)
+                {
+                    var caravanAtTile = Find.WorldObjects.ObjectsAt(currentTile)
+                        .OfType<RimWorld.Planet.Caravan>()
+                        .FirstOrDefault(c => c.Faction == RimWorld.Faction.OfPlayer);
+
+                    if (caravanAtTile != null)
+                    {
+                        // Show caravan stats (same as I key)
+                        CaravanStatsState.Open(caravanAtTile);
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Check for player settlement - could enter it
+                    var settlementAtTile = Find.WorldObjects.ObjectsAt(currentTile)
+                        .OfType<RimWorld.Planet.Settlement>()
+                        .FirstOrDefault(s => s.Faction == RimWorld.Faction.OfPlayer && s.HasMap);
+
+                    if (settlementAtTile != null)
+                    {
+                        // Enter the player's settlement
+                        CameraJumper.TryJumpAndSelect(new GlobalTargetInfo(settlementAtTile.Map.Center, settlementAtTile.Map));
+                        TolkHelper.Speak($"Entering {settlementAtTile.Label}");
+                        Event.current.Use();
+                        return;
+                    }
+                }
             }
 
-            // Handle Escape key - close caravan stats, quest locations browser, settlement browser, cancel destination selection, or let RimWorld handle it
+            // Handle Escape key - close caravan stats, cancel destination selection, or let RimWorld handle it
             if (key == KeyCode.Escape)
             {
                 if (CaravanFormationState.IsChoosingDestination)
@@ -198,18 +236,6 @@ namespace RimWorldAccess
                 else if (CaravanStatsState.IsActive)
                 {
                     CaravanStatsState.Close();
-                    Event.current.Use();
-                    return;
-                }
-                else if (QuestLocationsBrowserState.IsActive)
-                {
-                    QuestLocationsBrowserState.Close();
-                    Event.current.Use();
-                    return;
-                }
-                else if (SettlementBrowserState.IsActive)
-                {
-                    SettlementBrowserState.Close();
                     Event.current.Use();
                     return;
                 }
@@ -273,7 +299,7 @@ namespace RimWorldAccess
 
             // Get tile info
             string tileInfo = WorldInfoHelper.GetTileSummary(tile);
-            string instructions = "Arrows: Navigate | Home: Home | End: Caravan | ,/.: Cycle Caravans | S: Settlements | Q: Quest Locations | I: Details | C: Form | ]: Orders";
+            string instructions = "Arrows: Navigate | PgUp/Dn: Scan Items | Ctrl+PgUp/Dn: Categories | Alt+Home: Home | Alt+End: Caravan | I: Details | C: Form | ]: Orders";
 
             Rect infoRect = new Rect(overlayX, overlayY + 15f, overlayWidth, 30f);
             Rect instructionsRect = new Rect(overlayX, overlayY + 45f, overlayWidth, 25f);

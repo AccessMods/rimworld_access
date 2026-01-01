@@ -220,30 +220,141 @@ namespace RimWorldAccess
                 return;
 
             KeyCode key = Event.current.keyCode;
+            var typeahead = MenuNavigationState.Typeahead;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
+                MenuNavigationState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                MenuNavigationState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search first, then close
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    MenuNavigationState.AnnounceWithSearch();
+                    Event.current.Use();
+                    return;
+                }
+                // Default escape handling (if any) - let it pass through
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = MenuNavigationState.GetCurrentColumnLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0) MenuNavigationState.SetSelectedIndex(newIndex);
+                    MenuNavigationState.AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle * key - consume to prevent passthrough (reserved for future)
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
+            {
+                Event.current.Use();
+                return;
+            }
+
+            // Handle typeahead characters
+            // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if (isLetter || isNumber)
+            {
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = MenuNavigationState.GetCurrentColumnLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        MenuNavigationState.SetSelectedIndex(newIndex);
+                        MenuNavigationState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+                }
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down arrows with typeahead support (only navigate matches when there ARE matches)
+            if (key == KeyCode.UpArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int prev = typeahead.GetPreviousMatch(MenuNavigationState.SelectedIndex);
+                    if (prev >= 0)
+                    {
+                        MenuNavigationState.SetSelectedIndex(prev);
+                        MenuNavigationState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     MenuNavigationState.MoveUp();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.DownArrow:
+            if (key == KeyCode.DownArrow)
+            {
+                if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    int next = typeahead.GetNextMatch(MenuNavigationState.SelectedIndex);
+                    if (next >= 0)
+                    {
+                        MenuNavigationState.SetSelectedIndex(next);
+                        MenuNavigationState.AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     MenuNavigationState.MoveDown();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.LeftArrow:
-                case KeyCode.RightArrow:
-                    MenuNavigationState.SwitchColumn();
-                    Event.current.Use();
-                    break;
+            // Handle Left/Right arrows - switch column (clears search)
+            if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+            {
+                MenuNavigationState.SwitchColumn();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    ExecuteSelectedMenuItem();
-                    Event.current.Use();
-                    break;
+            // Handle Enter - execute selected item
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ExecuteSelectedMenuItem();
+                Event.current.Use();
+                return;
             }
         }
 

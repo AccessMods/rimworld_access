@@ -147,9 +147,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex++;
-            if (currentIndex >= questLocations.Count)
-                currentIndex = 0;
+            currentIndex = MenuHelper.SelectNext(currentIndex, questLocations.Count);
 
             AnnounceCurrentLocation();
         }
@@ -165,9 +163,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex--;
-            if (currentIndex < 0)
-                currentIndex = questLocations.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, questLocations.Count);
 
             AnnounceCurrentLocation();
         }
@@ -211,8 +207,16 @@ namespace RimWorldAccess
             // Close browser first
             Close();
 
-            // Announce the tile info
-            WorldNavigationState.AnnounceTile();
+            // If we're choosing a destination for caravan, set it directly
+            if (CaravanFormationState.IsChoosingDestination)
+            {
+                CaravanFormationState.SetDestination(selected.Tile);
+            }
+            else
+            {
+                // Announce the tile info
+                WorldNavigationState.AnnounceTile();
+            }
         }
 
         /// <summary>
@@ -230,10 +234,6 @@ namespace RimWorldAccess
                 return;
 
             QuestLocationEntry entry = questLocations[currentIndex];
-
-            // Build announcement
-            int position = currentIndex + 1;
-            int total = questLocations.Count;
 
             // Get quest name (strip XML tags)
             string questName = entry.Quest.name.StripTags();
@@ -255,7 +255,7 @@ namespace RimWorldAccess
             // Get tile summary for additional context
             string tileSummary = WorldInfoHelper.GetTileSummary(entry.Tile);
 
-            string announcement = $"{position} of {total}: {questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}";
+            string announcement = $"{questName} - {locationDesc}, {entry.DistanceFromOrigin:F1} tiles. {tileSummary}. {MenuHelper.FormatPosition(currentIndex, questLocations.Count)}";
 
             TolkHelper.Speak(announcement);
         }
@@ -286,6 +286,11 @@ namespace RimWorldAccess
 
                 case UnityEngine.KeyCode.Escape:
                     Close();
+                    // If we're in destination selection mode, cancel it and return to caravan dialog
+                    if (CaravanFormationState.IsChoosingDestination)
+                    {
+                        CaravanFormationState.CancelDestinationSelection();
+                    }
                     return true;
 
                 default:

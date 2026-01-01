@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Verse;
+using Verse.Sound;
 using RimWorld;
 using UnityEngine;
 
@@ -69,6 +70,7 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
+            MenuHelper.ResetLevel("ThingFilterMenu");
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -86,6 +88,7 @@ namespace RimWorldAccess
             isActive = false;
             currentFilter = null;
             expandedCategories.Clear();
+            MenuHelper.ResetLevel("ThingFilterMenu");
         }
 
         private static void BuildMenuItems()
@@ -185,7 +188,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -194,7 +197,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -208,26 +211,34 @@ namespace RimWorldAccess
             switch (item.type)
             {
                 case MenuItemType.Category:
-                    // If collapsed, expand; if expanded, toggle on
+                    // WCAG Right arrow: collapsed -> expand (focus stays); expanded -> move to first child
                     if (!item.isExpanded)
                     {
+                        // Collapsed: expand it, focus stays on current item
                         TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
                         if (node != null)
                         {
                             expandedCategories.Add(node.catDef.defName);
                             RebuildMenu();
-                            TolkHelper.Speak($"Expanded: {item.label}");
+                            SoundDefOf.TabOpen.PlayOneShotOnCamera();
+                            AnnounceCurrentSelection();
                         }
                     }
                     else
                     {
-                        ToggleCategory(item, true);
+                        // Already expanded: move to first child if it has children
+                        if (!MoveToFirstChild())
+                        {
+                            // No children, play reject sound
+                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                        }
                     }
                     break;
 
                 case MenuItemType.ThingDef:
                 case MenuItemType.SpecialFilter:
-                    ToggleItem(item, true);
+                    // End node: play reject sound (no children to expand into)
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     break;
 
                 case MenuItemType.HitPointsRange:
@@ -255,26 +266,30 @@ namespace RimWorldAccess
             switch (item.type)
             {
                 case MenuItemType.Category:
-                    // If expanded, collapse; if collapsed, toggle off
+                    // WCAG Left arrow: expanded -> collapse (focus stays); collapsed -> move to parent
                     if (item.isExpanded)
                     {
+                        // Expanded: collapse it, focus stays on current item
                         TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
                         if (node != null)
                         {
                             expandedCategories.Remove(node.catDef.defName);
                             RebuildMenu();
-                            TolkHelper.Speak($"Collapsed: {item.label}");
+                            SoundDefOf.TabClose.PlayOneShotOnCamera();
+                            AnnounceCurrentSelection();
                         }
                     }
                     else
                     {
-                        ToggleCategory(item, false);
+                        // Collapsed: move to parent without collapsing
+                        MoveToParent();
                     }
                     break;
 
                 case MenuItemType.ThingDef:
                 case MenuItemType.SpecialFilter:
-                    ToggleItem(item, false);
+                    // End node: move to parent
+                    MoveToParent();
                     break;
 
                 case MenuItemType.HitPointsRange:
@@ -441,23 +456,105 @@ namespace RimWorldAccess
             if (selectedIndex >= 0 && selectedIndex < menuItems.Count)
             {
                 MenuItem item = menuItems[selectedIndex];
-                string announcement = item.label;
 
-                // Add state information
-                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
-                {
-                    string state = item.isAllowed ? "Allowed" : "Disallowed";
-                    announcement += $" ({state})";
-                }
+                // WCAG format: "[level N. ]{name} {state}. {X of Y}"
+                string prefix = MenuHelper.GetLevelPrefix("ThingFilterMenu", item.indentLevel);
+                string announcement = prefix + item.label;
 
+                // Add expanded/collapsed state for categories
                 if (item.type == MenuItemType.Category)
                 {
-                    string expandState = item.isExpanded ? "Expanded" : "Collapsed";
-                    announcement += $" [{expandState}]";
+                    string expandState = item.isExpanded ? "expanded" : "collapsed";
+                    announcement += $" {expandState}";
                 }
+
+                // Add sibling position (X of Y)
+                var (position, total) = GetSiblingPosition(item);
+                announcement += $". {MenuHelper.FormatPosition(position - 1, total)}";
 
                 TolkHelper.Speak(announcement);
             }
+        }
+
+        /// <summary>
+        /// Gets the position of an item among its siblings at the same indent level.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(MenuItem item)
+        {
+            // Find siblings: items with the same parent reference
+            var siblings = new List<MenuItem>();
+            foreach (var m in menuItems)
+            {
+                if (m.parent == item.parent && m.indentLevel == item.indentLevel)
+                {
+                    siblings.Add(m);
+                }
+            }
+
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current category.
+        /// Returns true if successful, false if no children exist.
+        /// </summary>
+        private static bool MoveToFirstChild()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return false;
+
+            MenuItem item = menuItems[selectedIndex];
+            int currentIndent = item.indentLevel;
+
+            // Find first child in the flat list (next item with higher indent level)
+            for (int i = selectedIndex + 1; i < menuItems.Count; i++)
+            {
+                if (menuItems[i].indentLevel > currentIndent)
+                {
+                    // Found a child
+                    selectedIndex = i;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return true;
+                }
+                if (menuItems[i].indentLevel <= currentIndent)
+                {
+                    // Hit a sibling or ancestor, no children
+                    break;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Moves focus to the parent of the current item.
+        /// </summary>
+        private static void MoveToParent()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            // If item has a parent reference, find it in the list
+            if (item.parent != null)
+            {
+                for (int i = 0; i < menuItems.Count; i++)
+                {
+                    if (menuItems[i] == item.parent)
+                    {
+                        selectedIndex = i;
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection();
+                        return;
+                    }
+                }
+            }
+
+            // No parent found (top-level item), play reject sound
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
         }
     }
 }

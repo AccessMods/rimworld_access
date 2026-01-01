@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
 using UnityEngine;
 
@@ -38,6 +39,7 @@ namespace RimWorldAccess
         private static TreeNode_ThingCategory rootNode = null;
         private static List<NavigationNode> flattenedNodes = new List<NavigationNode>();
         private static int selectedIndex = 0;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         // Slider states
         private enum SliderMode { None, Quality, HitPoints }
@@ -50,6 +52,8 @@ namespace RimWorldAccess
 
         public static bool IsActive => isActive;
         public static bool IsEditingSlider => isEditingSlider;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Activates filter navigation for a given ThingFilter.
@@ -63,9 +67,11 @@ namespace RimWorldAccess
             hasHitPointsSlider = showHitPoints;
             selectedIndex = 0;
             currentSliderMode = SliderMode.None;
+            typeahead.ClearSearch();
+            MenuHelper.ResetLevel("ThingFilter");
 
             RebuildNavigationList();
-            UpdateClipboard();
+            AnnounceCurrentNode();
         }
 
         /// <summary>
@@ -78,6 +84,8 @@ namespace RimWorldAccess
             rootNode = null;
             flattenedNodes.Clear();
             selectedIndex = 0;
+            typeahead.ClearSearch();
+            MenuHelper.ResetLevel("ThingFilter");
         }
 
         /// <summary>
@@ -201,8 +209,8 @@ namespace RimWorldAccess
             if (flattenedNodes.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % flattenedNodes.Count;
-            UpdateClipboard();
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, flattenedNodes.Count);
+            AnnounceCurrentNode();
         }
 
         /// <summary>
@@ -213,15 +221,15 @@ namespace RimWorldAccess
             if (flattenedNodes.Count == 0)
                 return;
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = flattenedNodes.Count - 1;
-
-            UpdateClipboard();
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, flattenedNodes.Count);
+            AnnounceCurrentNode();
         }
 
         /// <summary>
-        /// Enters slider editing mode (for sliders) or executes action (for SaveAndReturn).
+        /// Activates the current selection:
+        /// - Sliders: Enter editing mode
+        /// - Checkboxes (SpecialFilter, Category, ThingDef): Toggle checked state
+        /// - SaveAndReturn: Execute action
         /// </summary>
         public static void ActivateSelected()
         {
@@ -248,6 +256,11 @@ namespace RimWorldAccess
                 // Save and return to assign menu
                 SaveAndReturnToAssign();
             }
+            else if (node.Type == NodeType.SpecialFilter || node.Type == NodeType.Category || node.Type == NodeType.ThingDef)
+            {
+                // Toggle checkbox (Enter key works same as Space for checkboxes)
+                ToggleSelected();
+            }
         }
 
         /// <summary>
@@ -259,7 +272,7 @@ namespace RimWorldAccess
             {
                 isEditingSlider = false;
                 currentSliderMode = SliderMode.None;
-                UpdateClipboard();
+                AnnounceCurrentNode();
             }
         }
 
@@ -333,6 +346,9 @@ namespace RimWorldAccess
 
             var node = flattenedNodes[selectedIndex];
 
+            // Strip asterisks from labels for announcements
+            string cleanLabel = StripAsterisks(node.Label);
+
             switch (node.Type)
             {
                 case NodeType.SpecialFilter:
@@ -342,7 +358,7 @@ namespace RimWorldAccess
                         bool newValue = !currentFilter.Allows(specialFilter);
                         currentFilter.SetAllow(specialFilter, newValue);
                         node.IsChecked = newValue;
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -356,7 +372,7 @@ namespace RimWorldAccess
                         currentFilter.SetAllow(category.catDef, newValue);
                         node.IsChecked = newValue;
                         RebuildNavigationList(); // Rebuild because children may change
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -367,7 +383,7 @@ namespace RimWorldAccess
                         bool newValue = !currentFilter.Allows(thingDef);
                         currentFilter.SetAllow(thingDef, newValue);
                         node.IsChecked = newValue;
-                        TolkHelper.Speak($"{node.Label}: {(newValue ? "Allowed" : "Disallowed")}");
+                        TolkHelper.Speak($"{cleanLabel}: {(newValue ? "Allowed" : "Disallowed")}");
                     }
                     break;
 
@@ -379,23 +395,268 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Expands or collapses a category node.
+        /// Expands the current category node (Right arrow - WCAG tree navigation).
+        /// If collapsed: expand and stay on current node.
+        /// If already expanded: move to first child.
+        /// If end node: reject with feedback.
         /// </summary>
-        public static void ToggleExpand()
+        public static void Expand()
         {
             if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
                 return;
 
             var node = flattenedNodes[selectedIndex];
 
-            if (node.Type == NodeType.Category)
+            // Case 1: Collapsed category - expand it, focus stays
+            if (node.Type == NodeType.Category && !node.IsExpanded)
             {
-                node.IsExpanded = !node.IsExpanded;
+                node.IsExpanded = true;
                 int oldIndex = selectedIndex;
                 RebuildNavigationList();
-                selectedIndex = oldIndex; // Try to maintain position
-                TolkHelper.Speak($"{node.Label}: {(node.IsExpanded ? "Expanded" : "Collapsed")}");
+                // Find the same node after rebuild (it should be at or near the same position)
+                selectedIndex = FindNodeIndex(node);
+                if (selectedIndex < 0) selectedIndex = oldIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
             }
+
+            // Case 2: Expanded category - move to first child
+            if (node.Type == NodeType.Category && node.IsExpanded)
+            {
+                // First child is the next item with higher indent level
+                if (selectedIndex + 1 < flattenedNodes.Count)
+                {
+                    var nextNode = flattenedNodes[selectedIndex + 1];
+                    if (nextNode.IndentLevel > node.IndentLevel)
+                    {
+                        selectedIndex++;
+                        SoundDefOf.Click.PlayOneShotOnCamera();
+                        AnnounceCurrentNode();
+                        return;
+                    }
+                }
+                // No children found (empty category)
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot expand this item.");
+                return;
+            }
+
+            // Case 3: End node (ThingDef, Slider, SpecialFilter, SaveAndReturn) - reject
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Cannot expand this item.");
+        }
+
+        /// <summary>
+        /// Collapses the current category node or moves to parent (Left arrow - WCAG tree navigation).
+        /// If expanded category: collapse and stay on current node.
+        /// If collapsed/end node: move to parent.
+        /// If at root level with no parent: reject with feedback.
+        /// </summary>
+        public static void Collapse()
+        {
+            if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            var node = flattenedNodes[selectedIndex];
+
+            // Case 1: Expanded category - collapse it, focus stays
+            if (node.Type == NodeType.Category && node.IsExpanded)
+            {
+                node.IsExpanded = false;
+                int oldIndex = selectedIndex;
+                RebuildNavigationList();
+                // Find the same node after rebuild
+                selectedIndex = FindNodeIndex(node);
+                if (selectedIndex < 0) selectedIndex = oldIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
+            }
+
+            // Case 2: Move to parent (don't collapse parent)
+            int parentIndex = FindParentIndex(node);
+            if (parentIndex >= 0)
+            {
+                selectedIndex = parentIndex;
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentNode();
+                return;
+            }
+
+            // Case 3: At root level with no parent - reject
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Already at top level");
+        }
+
+        /// <summary>
+        /// Finds the index of a node in the flattened list by reference.
+        /// </summary>
+        private static int FindNodeIndex(NavigationNode node)
+        {
+            for (int i = 0; i < flattenedNodes.Count; i++)
+            {
+                if (flattenedNodes[i] == node)
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Finds the parent index for a given node.
+        /// Parent is the nearest preceding node with a lower indent level.
+        /// </summary>
+        private static int FindParentIndex(NavigationNode node)
+        {
+            if (node.IndentLevel <= 0)
+                return -1;
+
+            int targetIndent = node.IndentLevel - 1;
+            int currentIdx = FindNodeIndex(node);
+
+            // Search backwards for a node with lower indent level
+            for (int i = currentIdx - 1; i >= 0; i--)
+            {
+                if (flattenedNodes[i].IndentLevel == targetIndent)
+                    return i;
+                // If we hit something with even lower indent, we've gone too far
+                if (flattenedNodes[i].IndentLevel < targetIndent)
+                    break;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flattenedNodes == null || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            NavigationNode currentNode = flattenedNodes[selectedIndex];
+            int currentIndent = currentNode.IndentLevel;
+            int parentIndex = FindParentIndex(currentNode);
+
+            // Find the range of siblings (nodes at same indent level under same parent)
+            int startIndex = 0;
+            int endIndex = flattenedNodes.Count - 1;
+
+            // If we have a parent, siblings are bounded by parent's scope
+            if (parentIndex >= 0)
+            {
+                startIndex = parentIndex + 1;
+                // Find end: scan forwards from parent until we hit a node at parent's level or lower
+                for (int i = parentIndex + 1; i < flattenedNodes.Count; i++)
+                {
+                    if (flattenedNodes[i].IndentLevel <= flattenedNodes[parentIndex].IndentLevel)
+                    {
+                        endIndex = i - 1;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // At root level, siblings extend until we hit a different root-level parent section
+                // For root level, we consider all root-level items as siblings
+                startIndex = 0;
+                endIndex = flattenedNodes.Count - 1;
+            }
+
+            // Find all collapsed sibling categories at the current indent level
+            int expandedCount = 0;
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                var node = flattenedNodes[i];
+                // Must be at same indent level (sibling) and be a collapsed category
+                if (node.IndentLevel == currentIndent && node.Type == NodeType.Category && !node.IsExpanded)
+                {
+                    node.IsExpanded = true;
+                    expandedCount++;
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildNavigationList();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any sibling categories at all
+                bool hasAnySiblingCategories = false;
+                for (int i = startIndex; i <= endIndex; i++)
+                {
+                    if (flattenedNodes[i].IndentLevel == currentIndent && flattenedNodes[i].Type == NodeType.Category)
+                    {
+                        hasAnySiblingCategories = true;
+                        break;
+                    }
+                }
+
+                if (hasAnySiblingCategories)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
+            }
+        }
+
+        /// <summary>
+        /// Gets the position of the current node among its siblings (same indent level, same parent).
+        /// Returns (position, total) where position is 1-based.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(NavigationNode node)
+        {
+            int nodeIndex = FindNodeIndex(node);
+            if (nodeIndex < 0)
+                return (1, 1);
+
+            int indentLevel = node.IndentLevel;
+
+            // Find the range of siblings by looking for the parent boundary
+            int startIndex = 0;
+            int endIndex = flattenedNodes.Count - 1;
+
+            // Find start: scan backwards until we hit a lower indent level or start
+            for (int i = nodeIndex - 1; i >= 0; i--)
+            {
+                if (flattenedNodes[i].IndentLevel < indentLevel)
+                {
+                    startIndex = i + 1;
+                    break;
+                }
+            }
+
+            // Find end: scan forwards until we hit a lower indent level or end
+            for (int i = nodeIndex + 1; i < flattenedNodes.Count; i++)
+            {
+                if (flattenedNodes[i].IndentLevel < indentLevel)
+                {
+                    endIndex = i - 1;
+                    break;
+                }
+            }
+
+            // Count siblings at the same indent level within this range
+            int position = 0;
+            int total = 0;
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (flattenedNodes[i].IndentLevel == indentLevel)
+                {
+                    total++;
+                    if (i <= nodeIndex)
+                        position = total;
+                }
+            }
+
+            return (position, total);
         }
 
         /// <summary>
@@ -509,9 +770,10 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Updates the clipboard with the current selection.
+        /// Announces the current node using WCAG-compliant format.
+        /// Format: "[level N. ]{name} {state}. {X of Y}"
         /// </summary>
-        private static void UpdateClipboard()
+        private static void AnnounceCurrentNode()
         {
             if (flattenedNodes.Count == 0)
             {
@@ -523,42 +785,242 @@ namespace RimWorldAccess
                 return;
 
             var node = flattenedNodes[selectedIndex];
-            string indent = new string(' ', node.IndentLevel * 2);
-            string typeIcon = "";
+            var (position, total) = GetSiblingPosition(node);
+            string prefix = MenuHelper.GetLevelPrefix("ThingFilter", node.IndentLevel);
+
+            string announcement;
+
+            // Strip asterisks from labels (they're visual indicators for special filters)
+            string cleanLabel = StripAsterisks(node.Label);
+
             switch (node.Type)
             {
                 case NodeType.Slider:
-                    typeIcon = "[Slider]";
+                    // Sliders show their current value
+                    string sliderValue = GetSliderValueString(node);
+                    announcement = $"{prefix}{cleanLabel} {sliderValue}. {MenuHelper.FormatPosition(position - 1, total)}";
                     break;
+
                 case NodeType.SpecialFilter:
-                    typeIcon = "[*]";
+                    // Special filters show checked state
+                    string specialState = node.IsChecked ? "checked" : "not checked";
+                    announcement = $"{prefix}{cleanLabel} {specialState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    break;
+
+                case NodeType.Category:
+                    // Categories show expanded/collapsed state
+                    string categoryState = node.IsExpanded ? "expanded" : "collapsed";
+                    announcement = $"{prefix}{cleanLabel} {categoryState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    break;
+
+                case NodeType.ThingDef:
+                    // ThingDefs show checked state
+                    string thingState = node.IsChecked ? "checked" : "not checked";
+                    announcement = $"{prefix}{cleanLabel} {thingState}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    break;
+
+                case NodeType.SaveAndReturn:
+                    announcement = $"{prefix}{cleanLabel}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    break;
+
+                default:
+                    announcement = $"{prefix}{cleanLabel}. {MenuHelper.FormatPosition(position - 1, total)}";
+                    break;
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Gets the current value string for a slider node.
+        /// </summary>
+        private static string GetSliderValueString(NavigationNode node)
+        {
+            string sliderType = node.Data as string;
+
+            if (sliderType == "Quality")
+            {
+                var range = currentFilter.AllowedQualityLevels;
+                return $"{range.min} to {range.max}";
+            }
+            else if (sliderType == "HitPoints")
+            {
+                var range = currentFilter.AllowedHitPointsPercents;
+                return $"{range.min:P0} to {range.max:P0}";
+            }
+
+            return "";
+        }
+
+        /// <summary>
+        /// Strips leading asterisks and whitespace from a label.
+        /// Asterisks are visual indicators for special filters that shouldn't be read aloud.
+        /// </summary>
+        private static string StripAsterisks(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+                return label;
+
+            return label.TrimStart('*', ' ');
+        }
+
+        #region Typeahead Support
+
+        /// <summary>
+        /// Gets the labels for typeahead searching.
+        /// </summary>
+        private static List<string> GetSearchLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flattenedNodes)
+            {
+                labels.Add(StripAsterisks(node.Label));
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Gets the last failed search string.
+        /// </summary>
+        public static string GetLastFailedSearch()
+        {
+            return typeahead.LastFailedSearch;
+        }
+
+        /// <summary>
+        /// Processes a typeahead character for search.
+        /// </summary>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            if (!isActive || flattenedNodes.Count == 0)
+                return;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static void ProcessBackspace()
+        {
+            if (!isActive || flattenedNodes.Count == 0)
+                return;
+
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetSearchLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+            AnnounceCurrentNode();
+        }
+
+        /// <summary>
+        /// Sets the selected index (for typeahead navigation).
+        /// </summary>
+        public static void SetSelectedIndex(int index)
+        {
+            if (index >= 0 && index < flattenedNodes.Count)
+            {
+                selectedIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Selects the next match in the filtered list.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            if (flattenedNodes.Count == 0)
+                return;
+
+            int nextIndex = typeahead.GetNextMatch(selectedIndex);
+            if (nextIndex >= 0)
+            {
+                selectedIndex = nextIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous match in the filtered list.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            if (flattenedNodes.Count == 0)
+                return;
+
+            int prevIndex = typeahead.GetPreviousMatch(selectedIndex);
+            if (prevIndex >= 0)
+            {
+                selectedIndex = prevIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flattenedNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= flattenedNodes.Count)
+                return;
+
+            var node = flattenedNodes[selectedIndex];
+            string cleanLabel = StripAsterisks(node.Label);
+
+            // Build state string based on node type
+            string stateStr = "";
+            switch (node.Type)
+            {
+                case NodeType.SpecialFilter:
+                case NodeType.ThingDef:
+                    stateStr = node.IsChecked ? " checked" : " not checked";
                     break;
                 case NodeType.Category:
-                    typeIcon = node.IsExpanded ? "[-]" : "[+]";
+                    stateStr = node.IsExpanded ? " expanded" : " collapsed";
                     break;
-                case NodeType.ThingDef:
-                    typeIcon = "[ ]";
-                    break;
-                case NodeType.SaveAndReturn:
-                    typeIcon = "[Action]";
+                case NodeType.Slider:
+                    stateStr = " " + GetSliderValueString(node);
                     break;
             }
 
-            string status = "";
-            if (node.Type == NodeType.Category || node.Type == NodeType.ThingDef || node.Type == NodeType.SpecialFilter)
+            if (typeahead.HasActiveSearch)
             {
-                status = node.IsChecked ? " (Allowed)" : " (Disallowed)";
+                TolkHelper.Speak($"{cleanLabel}{stateStr}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
             }
-            else if (node.Type == NodeType.Slider)
+            else
             {
-                status = " - Press Enter to edit";
+                AnnounceCurrentNode();
             }
-            else if (node.Type == NodeType.SaveAndReturn)
-            {
-                status = " - Press Enter to execute";
-            }
-
-            TolkHelper.Speak($"{indent}{typeIcon} {node.Label}{status} - {selectedIndex + 1}/{flattenedNodes.Count}");
         }
+
+        #endregion
     }
 }

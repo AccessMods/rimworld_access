@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 using Verse;
 using RimWorld;
 
@@ -35,6 +36,9 @@ namespace RimWorldAccess
         private static int currentColumnIndex = 0;
         private static int selectedOptionIndex = 0;
 
+        // Typeahead search
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
         // Column option lists
         private static List<ApparelPolicy> outfitPolicies = new List<ApparelPolicy>();
         private static List<FoodPolicy> foodPolicies = new List<FoodPolicy>();
@@ -61,6 +65,8 @@ namespace RimWorldAccess
         public static int CurrentPawnIndex => currentPawnIndex;
         public static int TotalPawns => allPawns.Count;
         public static int CurrentColumnIndex => currentColumnIndex;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Opens the assign menu for the specified pawn.
@@ -74,6 +80,7 @@ namespace RimWorldAccess
             currentPawn = pawn;
             currentColumnIndex = 0;
             selectedOptionIndex = 0;
+            typeahead.ClearSearch();
 
             // Build list of all colonists
             allPawns.Clear();
@@ -87,6 +94,7 @@ namespace RimWorldAccess
 
             RebuildActiveColumns();
             LoadAllPolicies();
+            TolkHelper.Speak("Assign menu");
             UpdateClipboard();
         }
 
@@ -218,6 +226,7 @@ namespace RimWorldAccess
             allPawns.Clear();
             currentColumnIndex = 0;
             selectedOptionIndex = 0;
+            typeahead.ClearSearch();
 
             activeColumns.Clear();
             outfitPolicies.Clear();
@@ -232,7 +241,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Switches to the next column (wraps around).
+        /// Switches to the next column (does not wrap).
         /// </summary>
         public static void SelectNextColumn()
         {
@@ -240,13 +249,14 @@ namespace RimWorldAccess
             if (totalColumns == 0)
                 return;
 
-            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
+            currentColumnIndex = MenuHelper.SelectNext(currentColumnIndex, totalColumns);
             selectedOptionIndex = GetCurrentOptionIndex();
+            typeahead.ClearSearch();
             UpdateClipboard();
         }
 
         /// <summary>
-        /// Switches to the previous column (wraps around).
+        /// Switches to the previous column (does not wrap).
         /// </summary>
         public static void SelectPreviousColumn()
         {
@@ -254,16 +264,15 @@ namespace RimWorldAccess
             if (totalColumns == 0)
                 return;
 
-            currentColumnIndex--;
-            if (currentColumnIndex < 0)
-                currentColumnIndex = totalColumns - 1;
+            currentColumnIndex = MenuHelper.SelectPrevious(currentColumnIndex, totalColumns);
 
             selectedOptionIndex = GetCurrentOptionIndex();
+            typeahead.ClearSearch();
             UpdateClipboard();
         }
 
         /// <summary>
-        /// Moves selection to next option in current column (wraps around).
+        /// Moves selection to next option in current column (does not wrap).
         /// </summary>
         public static void SelectNextOption()
         {
@@ -274,12 +283,12 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedOptionIndex = (selectedOptionIndex + 1) % optionCount;
+            selectedOptionIndex = MenuHelper.SelectNext(selectedOptionIndex, optionCount);
             UpdateClipboard();
         }
 
         /// <summary>
-        /// Moves selection to previous option in current column (wraps around).
+        /// Moves selection to previous option in current column (does not wrap).
         /// </summary>
         public static void SelectPreviousOption()
         {
@@ -290,9 +299,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedOptionIndex--;
-            if (selectedOptionIndex < 0)
-                selectedOptionIndex = optionCount - 1;
+            selectedOptionIndex = MenuHelper.SelectPrevious(selectedOptionIndex, optionCount);
 
             UpdateClipboard();
         }
@@ -462,40 +469,40 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Switches to the next pawn in the list (wraps around).
+        /// Switches to the next pawn in the list (does not wrap).
         /// </summary>
         public static void SwitchToNextPawn()
         {
             if (allPawns.Count == 0)
                 return;
 
-            currentPawnIndex = (currentPawnIndex + 1) % allPawns.Count;
+            currentPawnIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
             currentPawn = allPawns[currentPawnIndex];
             RebuildActiveColumns();
             LoadAllPolicies();
             selectedOptionIndex = GetCurrentOptionIndex();
+            typeahead.ClearSearch();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
-        /// Switches to the previous pawn in the list (wraps around).
+        /// Switches to the previous pawn in the list (does not wrap).
         /// </summary>
         public static void SwitchToPreviousPawn()
         {
             if (allPawns.Count == 0)
                 return;
 
-            currentPawnIndex--;
-            if (currentPawnIndex < 0)
-                currentPawnIndex = allPawns.Count - 1;
+            currentPawnIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
 
             currentPawn = allPawns[currentPawnIndex];
             RebuildActiveColumns();
             LoadAllPolicies();
             selectedOptionIndex = GetCurrentOptionIndex();
+            typeahead.ClearSearch();
 
-            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort} ({currentPawnIndex + 1}/{allPawns.Count})");
+            TolkHelper.Speak($"Now editing: {currentPawn.LabelShort}. {MenuHelper.FormatPosition(currentPawnIndex, allPawns.Count)}");
         }
 
         /// <summary>
@@ -621,7 +628,7 @@ namespace RimWorldAccess
             string optionName = GetCurrentOptionName();
             int optionCount = GetCurrentColumnOptionCount();
 
-            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName} ({selectedOptionIndex + 1}/{optionCount})";
+            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {MenuHelper.FormatPosition(selectedOptionIndex, optionCount)}";
             TolkHelper.Speak(message);
         }
 
@@ -672,6 +679,196 @@ namespace RimWorldAccess
             }
 
             return "Unknown";
+        }
+
+        /// <summary>
+        /// Processes a character for typeahead search in the current column.
+        /// </summary>
+        public static void ProcessTypeaheadCharacter(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedOptionIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace key for typeahead search.
+        /// </summary>
+        public static void ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedOptionIndex = newIndex;
+                }
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Jumps to the first option in the current column.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            int optionCount = GetCurrentColumnOptionCount();
+            if (optionCount == 0)
+                return;
+
+            selectedOptionIndex = MenuHelper.JumpToFirst();
+            typeahead.ClearSearch();
+            UpdateClipboard();
+        }
+
+        /// <summary>
+        /// Jumps to the last option in the current column.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            int optionCount = GetCurrentColumnOptionCount();
+            if (optionCount == 0)
+                return;
+
+            selectedOptionIndex = MenuHelper.JumpToLast(optionCount);
+            typeahead.ClearSearch();
+            UpdateClipboard();
+        }
+
+        /// <summary>
+        /// Selects the next match in the typeahead search results.
+        /// </summary>
+        public static void SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches)
+                return;
+
+            int nextIndex = typeahead.GetNextMatch(selectedOptionIndex);
+            if (nextIndex >= 0)
+            {
+                selectedOptionIndex = nextIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous match in the typeahead search results.
+        /// </summary>
+        public static void SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch || typeahead.HasNoMatches)
+                return;
+
+            int prevIndex = typeahead.GetPreviousMatch(selectedOptionIndex);
+            if (prevIndex >= 0)
+            {
+                selectedOptionIndex = prevIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Gets the labels for all options in the current column.
+        /// </summary>
+        private static List<string> GetItemLabels()
+        {
+            var labels = new List<string>();
+
+            if (currentColumnIndex < 0 || currentColumnIndex >= activeColumns.Count)
+                return labels;
+
+            switch (activeColumns[currentColumnIndex])
+            {
+                case ColumnType.Outfit:
+                    foreach (var policy in outfitPolicies)
+                        labels.Add(policy.label ?? "");
+                    break;
+
+                case ColumnType.FoodRestrictions:
+                    foreach (var policy in foodPolicies)
+                        labels.Add(policy.label ?? "");
+                    break;
+
+                case ColumnType.DrugPolicies:
+                    foreach (var policy in drugPolicies)
+                        labels.Add(policy.label ?? "");
+                    break;
+
+                case ColumnType.AllowedAreas:
+                    foreach (var area in areaOptions)
+                        labels.Add(area.Label ?? "");
+                    break;
+
+                case ColumnType.ReadingPolicies:
+                    foreach (var policy in readingPolicies)
+                        labels.Add(policy.label ?? "");
+                    break;
+
+                case ColumnType.MedicineCarry:
+                    foreach (var option in medicineCarryOptions)
+                        labels.Add(option.Label ?? "");
+                    break;
+
+                case ColumnType.HostilityResponse:
+                    foreach (var response in hostilityOptions)
+                        labels.Add(HostilityResponseModeUtility.GetLabel(response) ?? "");
+                    break;
+            }
+
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if applicable.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (currentPawn == null)
+            {
+                TolkHelper.Speak("No pawn selected");
+                return;
+            }
+
+            if (currentColumnIndex < 0 || currentColumnIndex >= activeColumns.Count)
+            {
+                TolkHelper.Speak("Invalid column");
+                return;
+            }
+
+            ColumnType currentColumn = activeColumns[currentColumnIndex];
+            string columnName = columnNames[currentColumn];
+            string optionName = GetCurrentOptionName();
+            int optionCount = GetCurrentColumnOptionCount();
+
+            string message = $"{currentPawn.LabelShort} - {columnName}: {optionName}. {MenuHelper.FormatPosition(selectedOptionIndex, optionCount)}";
+
+            if (typeahead.HasActiveSearch)
+            {
+                message += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(message);
         }
 
         /// <summary>

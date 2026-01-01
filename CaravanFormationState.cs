@@ -13,7 +13,7 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// State management for keyboard navigation in Dialog_FormCaravan.
-    /// Provides three-tab interface for selecting pawns, items, and travel supplies.
+    /// Provides four-tab interface for selecting pawns, items, travel supplies, and viewing stats.
     /// </summary>
     public static class CaravanFormationState
     {
@@ -21,14 +21,22 @@ namespace RimWorldAccess
         {
             Pawns,
             Items,
-            TravelSupplies
+            TravelSupplies,
+            Stats
         }
+
+        private const int TabCount = 4;
 
         private static bool isActive = false;
         private static Dialog_FormCaravan currentDialog = null;
         private static Tab currentTab = Tab.Pawns;
         private static int selectedIndex = 0;
         private static bool isChoosingDestination = false;
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+
+        // Stats tab entries for navigation
+        private static List<string> statsEntries = new List<string>();
+        private static int statsIndex = 0;
 
         /// <summary>
         /// Gets whether caravan formation keyboard navigation is currently active.
@@ -113,11 +121,12 @@ namespace RimWorldAccess
             currentDialog = dialog;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
+            typeahead.ClearSearch();
 
             // Disable auto-select travel supplies to prevent it from resetting our manual selections
             DisableAutoSelectTravelSupplies();
 
-            TolkHelper.Speak("Caravan formation dialog opened. Use Left/Right to switch tabs, Up/Down to navigate, +/- or Enter to adjust. Press D to choose destination, navigate with arrows and press Enter to confirm. Press T to send, R to reset, Escape to cancel.");
+            TolkHelper.Speak("Caravan formation dialog opened. Use Left/Right to switch tabs, Up/Down to navigate, +/- or Enter to adjust. Press Alt+D to choose destination, Alt+T to send, Alt+R to reset, Escape to cancel.");
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -131,6 +140,9 @@ namespace RimWorldAccess
             currentDialog = null;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
+            statsIndex = 0;
+            statsEntries.Clear();
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -233,6 +245,12 @@ namespace RimWorldAccess
         /// </summary>
         private static void AnnounceCurrentTab()
         {
+            if (currentTab == Tab.Stats)
+            {
+                TolkHelper.Speak("Stats tab");
+                return;
+            }
+
             string tabName = "";
             switch (currentTab)
             {
@@ -256,6 +274,13 @@ namespace RimWorldAccess
         /// </summary>
         private static void AnnounceCurrentItem()
         {
+            // Stats tab has special handling
+            if (currentTab == Tab.Stats)
+            {
+                AnnounceStats();
+                return;
+            }
+
             List<TransferableOneWay> transferables = GetCurrentTabTransferables();
 
             if (transferables.Count == 0)
@@ -270,20 +295,17 @@ namespace RimWorldAccess
             }
 
             TransferableOneWay transferable = transferables[selectedIndex];
-            int position = selectedIndex + 1;
-            int total = transferables.Count;
 
             StringBuilder announcement = new StringBuilder();
-            announcement.Append($"{position} of {total}: ");
 
             if (transferable.AnyThing is Pawn pawn)
             {
                 // Pawn announcement
-                announcement.Append(pawn.LabelShortCap);
+                announcement.Append(pawn.LabelShortCap.StripTags());
 
                 if (pawn.story != null && !pawn.story.TitleCap.NullOrEmpty())
                 {
-                    announcement.Append($", {pawn.story.TitleCap}");
+                    announcement.Append($", {pawn.story.TitleCap.StripTags()}");
                 }
 
                 if (transferable.CountToTransfer > 0)
@@ -298,7 +320,7 @@ namespace RimWorldAccess
             else
             {
                 // Item announcement
-                announcement.Append(transferable.LabelCap);
+                announcement.Append(transferable.LabelCap.StripTags());
 
                 int current = transferable.CountToTransfer;
                 int max = transferable.GetMaximumToTransfer();
@@ -316,6 +338,9 @@ namespace RimWorldAccess
                 }
             }
 
+            // Add position at the end
+            announcement.Append($". {MenuHelper.FormatPosition(selectedIndex, transferables.Count)}");
+
             TolkHelper.Speak(announcement.ToString());
         }
 
@@ -324,6 +349,18 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNext()
         {
+            // Stats tab has special navigation
+            if (currentTab == Tab.Stats)
+            {
+                RebuildStatsEntries();
+                if (statsEntries.Count > 0)
+                {
+                    statsIndex = MenuHelper.SelectNext(statsIndex, statsEntries.Count);
+                    AnnounceStats();
+                }
+                return;
+            }
+
             List<TransferableOneWay> transferables = GetCurrentTabTransferables();
 
             if (transferables.Count == 0)
@@ -332,9 +369,20 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedIndex++;
-            if (selectedIndex >= transferables.Count)
-                selectedIndex = 0;
+            // If typeahead is active with matches, navigate to next match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int nextMatch = typeahead.GetNextMatch(selectedIndex);
+                if (nextMatch >= 0)
+                {
+                    selectedIndex = nextMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
+
+            // Navigate normally (either no search active, OR search with no matches)
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, transferables.Count);
 
             AnnounceCurrentItem();
         }
@@ -344,6 +392,18 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPrevious()
         {
+            // Stats tab has special navigation
+            if (currentTab == Tab.Stats)
+            {
+                RebuildStatsEntries();
+                if (statsEntries.Count > 0)
+                {
+                    statsIndex = MenuHelper.SelectPrevious(statsIndex, statsEntries.Count);
+                    AnnounceStats();
+                }
+                return;
+            }
+
             List<TransferableOneWay> transferables = GetCurrentTabTransferables();
 
             if (transferables.Count == 0)
@@ -352,10 +412,55 @@ namespace RimWorldAccess
                 return;
             }
 
-            selectedIndex--;
-            if (selectedIndex < 0)
-                selectedIndex = transferables.Count - 1;
+            // If typeahead is active with matches, navigate to previous match
+            if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
+            {
+                int prevMatch = typeahead.GetPreviousMatch(selectedIndex);
+                if (prevMatch >= 0)
+                {
+                    selectedIndex = prevMatch;
+                    AnnounceWithSearch();
+                }
+                return;
+            }
 
+            // Navigate normally (either no search active, OR search with no matches)
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, transferables.Count);
+
+            AnnounceCurrentItem();
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the current tab.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            selectedIndex = MenuHelper.JumpToFirst();
+            AnnounceCurrentItem();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current tab.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            selectedIndex = MenuHelper.JumpToLast(transferables.Count);
             AnnounceCurrentItem();
         }
 
@@ -364,8 +469,10 @@ namespace RimWorldAccess
         /// </summary>
         public static void NextTab()
         {
-            currentTab = (Tab)(((int)currentTab + 1) % 3);
+            currentTab = (Tab)(((int)currentTab + 1) % TabCount);
             selectedIndex = 0;
+            statsIndex = 0;
+            typeahead.ClearSearch();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -375,8 +482,10 @@ namespace RimWorldAccess
         /// </summary>
         public static void PreviousTab()
         {
-            currentTab = (Tab)(((int)currentTab + 2) % 3);
+            currentTab = (Tab)(((int)currentTab + TabCount - 1) % TabCount);
             selectedIndex = 0;
+            statsIndex = 0;
+            typeahead.ClearSearch();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -466,13 +575,13 @@ namespace RimWorldAccess
                 if (transferable.CountToTransfer > 0)
                 {
                     transferable.AdjustTo(0);
-                    TolkHelper.Speak($"Deselected {transferable.LabelCap}");
+                    TolkHelper.Speak($"Deselected {transferable.LabelCap.StripTags()}");
                 }
                 else
                 {
                     int max = transferable.GetMaximumToTransfer();
                     transferable.AdjustTo(max);
-                    TolkHelper.Speak($"Selected {transferable.LabelCap}");
+                    TolkHelper.Speak($"Selected {transferable.LabelCap.StripTags()}");
                 }
             }
             else
@@ -517,6 +626,10 @@ namespace RimWorldAccess
 
             try
             {
+                // Enter destination selection mode BEFORE removing dialog
+                // (PostClose checks this flag to avoid clearing currentDialog)
+                isChoosingDestination = true;
+
                 // Close the dialog temporarily (don't clear currentDialog - we need it to return)
                 if (Find.WindowStack != null)
                 {
@@ -525,9 +638,6 @@ namespace RimWorldAccess
 
                 // Switch to world view
                 CameraJumper.TryShowWorld();
-
-                // Enter destination selection mode
-                isChoosingDestination = true;
 
                 // Make sure world navigation is active
                 if (!WorldNavigationState.IsActive)
@@ -552,13 +662,24 @@ namespace RimWorldAccess
             if (currentDialog == null)
             {
                 TolkHelper.Speak("No dialog available", SpeechPriority.High);
+                Log.Warning("RimWorld Access: SetDestination called but currentDialog is null");
+                isChoosingDestination = false;
+                return;
+            }
+
+            if (!destinationTile.Valid)
+            {
+                TolkHelper.Speak("Invalid destination tile", SpeechPriority.High);
+                Log.Warning($"RimWorld Access: SetDestination called with invalid tile: {destinationTile}");
                 isChoosingDestination = false;
                 return;
             }
 
             try
             {
-                // Call Notify_ChoseRoute to properly set destination and calculate exit tile
+                Log.Message($"RimWorld Access: Setting caravan destination to tile {destinationTile.tileId}");
+
+                // Get the method before we do anything
                 MethodInfo notifyChoseRouteMethod = AccessTools.Method(typeof(Dialog_FormCaravan), "Notify_ChoseRoute");
                 if (notifyChoseRouteMethod == null)
                 {
@@ -567,37 +688,38 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // This sets destinationTile, calculates startingTile, and updates other state
-                notifyChoseRouteMethod.Invoke(currentDialog, new object[] { destinationTile });
-
-                // Also set the route via the world route planner for visual feedback
-                if (Find.WorldRoutePlanner != null)
-                {
-                    Find.WorldRoutePlanner.Start(currentDialog);
-                    Find.WorldRoutePlanner.TryAddWaypoint(destinationTile, true);
-                    Find.WorldRoutePlanner.Stop();
-                }
-
-                // Return to map view
+                // Return to map view first
                 CameraJumper.TryHideWorld();
 
-                // Reopen the dialog
+                // Reopen the dialog BEFORE calling Notify_ChoseRoute (matches game behavior)
                 if (Find.WindowStack != null)
                 {
                     Find.WindowStack.Add(currentDialog);
                 }
 
-                // Exit destination selection mode
+                // Exit destination selection mode BEFORE calling Notify_ChoseRoute
+                // (so PostOpen doesn't think we're still choosing)
                 isChoosingDestination = false;
+
+                // Now call Notify_ChoseRoute to set destination and calculate exit tile
+                notifyChoseRouteMethod.Invoke(currentDialog, new object[] { destinationTile });
+
+                // Verify the destination was set by reading it back
+                FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
+                if (destTileField != null)
+                {
+                    PlanetTile setTile = (PlanetTile)destTileField.GetValue(currentDialog);
+                    Log.Message($"RimWorld Access: After Notify_ChoseRoute, destinationTile is now: {setTile.tileId}, Valid: {setTile.Valid}");
+                }
 
                 // Announce destination set
                 string tileInfo = WorldInfoHelper.GetTileSummary(destinationTile);
-                TolkHelper.Speak($"Destination set to {tileInfo}. Returning to caravan formation dialog.");
+                TolkHelper.Speak($"Destination set to {tileInfo}.");
             }
             catch (Exception ex)
             {
                 TolkHelper.Speak($"Failed to set destination: {ex.Message}", SpeechPriority.High);
-                Log.Error($"RimWorld Access: Failed to set caravan destination: {ex.Message}");
+                Log.Error($"RimWorld Access: Failed to set caravan destination: {ex}");
                 isChoosingDestination = false;
             }
         }
@@ -767,6 +889,279 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Rebuilds the stats entries list from current caravan data.
+        /// </summary>
+        private static void RebuildStatsEntries()
+        {
+            statsEntries.Clear();
+
+            if (currentDialog == null)
+                return;
+
+            try
+            {
+                // Get mass usage and capacity (public properties)
+                PropertyInfo massUsageProp = AccessTools.Property(typeof(Dialog_FormCaravan), "MassUsage");
+                PropertyInfo massCapacityProp = AccessTools.Property(typeof(Dialog_FormCaravan), "MassCapacity");
+
+                if (massUsageProp != null && massCapacityProp != null)
+                {
+                    float massUsage = (float)massUsageProp.GetValue(currentDialog);
+                    float massCapacity = (float)massCapacityProp.GetValue(currentDialog);
+                    float massRemaining = massCapacity - massUsage;
+
+                    string massEntry = $"Mass: {massUsage:F1} of {massCapacity:F1} kg";
+                    if (massUsage > massCapacity)
+                    {
+                        massEntry += " - OVERLOADED!";
+                    }
+                    else
+                    {
+                        massEntry += $", {massRemaining:F1} kg remaining";
+                    }
+                    statsEntries.Add(massEntry);
+                }
+
+                // Get days worth of food (private property)
+                try
+                {
+                    PropertyInfo daysWorthProp = AccessTools.Property(typeof(Dialog_FormCaravan), "DaysWorthOfFood");
+                    if (daysWorthProp != null)
+                    {
+                        var daysWorth = daysWorthProp.GetValue(currentDialog);
+                        float days = (float)daysWorth.GetType().GetField("Item1").GetValue(daysWorth);
+                        float tillRot = (float)daysWorth.GetType().GetField("Item2").GetValue(daysWorth);
+
+                        string foodEntry;
+                        if (days < 0.1f)
+                        {
+                            foodEntry = "Food: None!";
+                        }
+                        else
+                        {
+                            foodEntry = $"Food: {days:F1} days";
+                            if (tillRot < days && tillRot > 0)
+                            {
+                                foodEntry += $", spoils in {tillRot:F1} days";
+                            }
+                        }
+                        statsEntries.Add(foodEntry);
+                    }
+                }
+                catch { /* Skip food stats on error */ }
+
+                // Get tiles per day (private property)
+                try
+                {
+                    PropertyInfo tilesPerDayProp = AccessTools.Property(typeof(Dialog_FormCaravan), "TilesPerDay");
+                    if (tilesPerDayProp != null)
+                    {
+                        float tilesPerDay = (float)tilesPerDayProp.GetValue(currentDialog);
+                        string speedEntry = tilesPerDay > 0
+                            ? $"Speed: {tilesPerDay:F1} tiles per day"
+                            : "Speed: Cannot move!";
+                        statsEntries.Add(speedEntry);
+                    }
+                }
+                catch { /* Skip speed stats on error */ }
+
+                // Get foraging info (private property)
+                try
+                {
+                    PropertyInfo forageProp = AccessTools.Property(typeof(Dialog_FormCaravan), "ForagedFoodPerDay");
+                    if (forageProp != null)
+                    {
+                        var forageInfo = forageProp.GetValue(currentDialog);
+                        var foodDef = forageInfo.GetType().GetField("Item1").GetValue(forageInfo) as ThingDef;
+                        float perDay = (float)forageInfo.GetType().GetField("Item2").GetValue(forageInfo);
+
+                        if (foodDef != null && perDay > 0)
+                        {
+                            statsEntries.Add($"Foraging: {perDay:F1} {foodDef.label} per day");
+                        }
+                        else
+                        {
+                            statsEntries.Add("Foraging: None available");
+                        }
+                    }
+                }
+                catch { /* Skip foraging stats on error */ }
+
+                // Get visibility (private property)
+                try
+                {
+                    PropertyInfo visibilityProp = AccessTools.Property(typeof(Dialog_FormCaravan), "Visibility");
+                    if (visibilityProp != null)
+                    {
+                        float visibility = (float)visibilityProp.GetValue(currentDialog);
+                        statsEntries.Add($"Visibility: {visibility:P0}");
+                    }
+                }
+                catch { /* Skip visibility stats on error */ }
+
+                // Get destination info if set
+                try
+                {
+                    FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
+                    if (destTileField != null)
+                    {
+                        // Cast boxed value directly to PlanetTile struct
+                        PlanetTile destTile = (PlanetTile)destTileField.GetValue(currentDialog);
+
+                        if (destTile.Valid && Find.WorldGrid != null)
+                        {
+                            string tileName = WorldInfoHelper.GetTileSummary(destTile);
+                            statsEntries.Add($"Destination: {tileName}");
+
+                            // Get ETA
+                            PropertyInfo ticksToArriveProp = AccessTools.Property(typeof(Dialog_FormCaravan), "TicksToArrive");
+                            if (ticksToArriveProp != null)
+                            {
+                                int ticksToArrive = (int)ticksToArriveProp.GetValue(currentDialog);
+                                if (ticksToArrive > 0)
+                                {
+                                    float daysToArrive = ticksToArrive / 60000f;
+                                    statsEntries.Add($"ETA: {daysToArrive:F1} days");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            statsEntries.Add("Destination: Not set (use Alt+D to choose)");
+                        }
+                    }
+                }
+                catch (Exception destEx)
+                {
+                    Log.Warning($"RimWorld Access: Failed to get destination info: {destEx.Message}");
+                    statsEntries.Add("Destination: Not set");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"RimWorld Access: Failed to rebuild caravan stats: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Announces the current stat entry.
+        /// </summary>
+        private static void AnnounceStats()
+        {
+            if (currentDialog == null)
+            {
+                TolkHelper.Speak("No caravan data available");
+                return;
+            }
+
+            // Rebuild stats entries each time to get current values
+            RebuildStatsEntries();
+
+            if (statsEntries.Count == 0)
+            {
+                TolkHelper.Speak("Could not read caravan stats");
+                return;
+            }
+
+            if (statsIndex < 0 || statsIndex >= statsEntries.Count)
+            {
+                statsIndex = 0;
+            }
+
+            string entry = statsEntries[statsIndex];
+            string position = MenuHelper.FormatPosition(statsIndex, statsEntries.Count);
+            TolkHelper.Speak($"{entry}. {position}");
+        }
+
+        /// <summary>
+        /// Gets the list of transferable labels for the current tab for typeahead search.
+        /// </summary>
+        private static List<string> GetTransferableLabels()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+            var labels = new List<string>();
+            foreach (var t in transferables)
+            {
+                if (t.AnyThing is Pawn pawn)
+                {
+                    labels.Add(pawn.LabelShortCap);
+                }
+                else
+                {
+                    labels.Add(t.LabelCap);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current item with search information.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+
+            if (transferables.Count == 0)
+            {
+                TolkHelper.Speak("No items in this tab");
+                return;
+            }
+
+            if (selectedIndex < 0 || selectedIndex >= transferables.Count)
+            {
+                selectedIndex = 0;
+            }
+
+            TransferableOneWay transferable = transferables[selectedIndex];
+            StringBuilder announcement = new StringBuilder();
+
+            if (transferable.AnyThing is Pawn pawn)
+            {
+                // Pawn announcement
+                announcement.Append(pawn.LabelShortCap.StripTags());
+
+                if (pawn.story != null && !pawn.story.TitleCap.NullOrEmpty())
+                {
+                    announcement.Append($", {pawn.story.TitleCap.StripTags()}");
+                }
+
+                if (transferable.CountToTransfer > 0)
+                {
+                    announcement.Append(" - Selected");
+                }
+                else
+                {
+                    announcement.Append(" - Not selected");
+                }
+            }
+            else
+            {
+                // Item announcement
+                announcement.Append(transferable.LabelCap.StripTags());
+
+                int current = transferable.CountToTransfer;
+                int max = transferable.GetMaximumToTransfer();
+
+                announcement.Append($" - {current} of {max}");
+
+                // Add mass information if significant
+                if (current > 0)
+                {
+                    float totalMass = transferable.AnyThing.GetStatValue(StatDefOf.Mass) * current;
+                    if (totalMass >= 1f)
+                    {
+                        announcement.Append($", {totalMass:F1} kg");
+                    }
+                }
+            }
+
+            // Add search info at the end
+            announcement.Append($". '{typeahead.SearchBuffer}' match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}");
+
+            TolkHelper.Speak(announcement.ToString());
+        }
+
+        /// <summary>
         /// Handles keyboard input for caravan formation.
         /// Returns true if the input was handled.
         /// </summary>
@@ -778,6 +1173,101 @@ namespace RimWorldAccess
             // When choosing destination, let world navigation handle the input
             if (isChoosingDestination)
                 return false;
+
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
+            {
+                JumpToFirst();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                JumpToLast();
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle Escape - clear search FIRST, then close dialog
+            if (key == KeyCode.Escape)
+            {
+                if (typeahead.HasActiveSearch)
+                {
+                    typeahead.ClearSearchAndAnnounce();
+                    AnnounceCurrentItem();
+                    return true;
+                }
+                // Force close the dialog
+                if (Find.WindowStack != null)
+                {
+                    // Try to close by instance first
+                    if (currentDialog != null && Find.WindowStack.IsOpen(currentDialog))
+                    {
+                        Find.WindowStack.TryRemove(currentDialog, doCloseSound: true);
+                    }
+                    // Also try by type in case reference is stale
+                    Find.WindowStack.TryRemove(typeof(Dialog_FormCaravan), doCloseSound: false);
+                }
+                // Always clean up our state
+                Close();
+                TolkHelper.Speak("Caravan formation cancelled");
+                return true;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && typeahead.HasActiveSearch)
+            {
+                var labels = GetTransferableLabels();
+                if (typeahead.ProcessBackspace(labels, out int newIndex))
+                {
+                    if (newIndex >= 0) selectedIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle * key - consume to prevent passthrough
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle typeahead characters (letters and numbers without Alt modifier)
+            // Stats tab doesn't support typeahead - consume keys but don't process
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if ((isLetter || isNumber) && !alt)
+            {
+                if (currentTab == Tab.Stats)
+                {
+                    // Stats tab doesn't support typeahead search
+                    Event.current.Use();
+                    return true;
+                }
+
+                char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                var labels = GetTransferableLabels();
+                if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+                {
+                    if (newIndex >= 0)
+                    {
+                        selectedIndex = newIndex;
+                        AnnounceWithSearch();
+                    }
+                }
+                else
+                {
+                    TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+                }
+                Event.current.Use();
+                return true;
+            }
 
             switch (key)
             {
@@ -818,6 +1308,8 @@ namespace RimWorldAccess
                 case KeyCode.Equals: // Shift+Equals is usually +
                     if (!ctrl && !alt)
                     {
+                        if (currentTab == Tab.Stats)
+                            return true; // Consume but do nothing
                         AdjustQuantity(1);
                         return true;
                     }
@@ -827,6 +1319,8 @@ namespace RimWorldAccess
                 case KeyCode.KeypadMinus:
                     if (!ctrl && !alt)
                     {
+                        if (currentTab == Tab.Stats)
+                            return true; // Consume but do nothing
                         AdjustQuantity(-1);
                         return true;
                     }
@@ -836,13 +1330,18 @@ namespace RimWorldAccess
                 case KeyCode.KeypadEnter:
                     if (!shift && !ctrl && !alt)
                     {
+                        // Stats tab doesn't have selectable items
+                        if (currentTab == Tab.Stats)
+                        {
+                            return true; // Consume key but do nothing
+                        }
                         ToggleSelection();
                         return true;
                     }
                     break;
 
                 case KeyCode.D:
-                    if (!shift && !ctrl && !alt)
+                    if (!shift && !ctrl && alt)
                     {
                         ChooseRoute();
                         return true;
@@ -850,7 +1349,7 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.T:
-                    if (!shift && !ctrl && !alt)
+                    if (!shift && !ctrl && alt)
                     {
                         Send();
                         return true;
@@ -858,17 +1357,12 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.R:
-                    if (!shift && !ctrl && !alt)
+                    if (!shift && !ctrl && alt)
                     {
                         Reset();
                         return true;
                     }
                     break;
-
-                case KeyCode.Escape:
-                    // Let the dialog handle its own closing
-                    // CaravanFormationPatch.PostClose will call Close()
-                    return false;
 
                 default:
                     return false;

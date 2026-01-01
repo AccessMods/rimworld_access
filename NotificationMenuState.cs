@@ -20,11 +20,15 @@ namespace RimWorldAccess
         private static List<NotificationItem> notifications = null;
         private static int currentIndex = 0;
         private static int detailScrollIndex = 0; // For scrolling through long explanations
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
         /// Gets whether the notification menu is currently active.
         /// </summary>
         public static bool IsActive => isActive;
+        public static TypeaheadSearchHelper Typeahead => typeahead;
+        public static int CurrentIndex => currentIndex;
+        public static bool IsInDetailView => isInDetailView;
 
         /// <summary>
         /// Opens the notification menu and collects all messages, letters, and alerts.
@@ -50,6 +54,7 @@ namespace RimWorldAccess
             isInDetailView = false;
             currentIndex = 0;
             detailScrollIndex = 0;
+            typeahead.ClearSearch();
 
             // Announce the first notification
             AnnounceCurrentSelection();
@@ -65,6 +70,7 @@ namespace RimWorldAccess
             notifications = null;
             currentIndex = 0;
             detailScrollIndex = 0;
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -83,7 +89,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex + 1) % notifications.Count;
+            currentIndex = MenuHelper.SelectNext(currentIndex, notifications.Count);
             AnnounceCurrentSelection();
         }
 
@@ -103,7 +109,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            currentIndex = (currentIndex - 1 + notifications.Count) % notifications.Count;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, notifications.Count);
             AnnounceCurrentSelection();
         }
 
@@ -130,6 +136,7 @@ namespace RimWorldAccess
                 // Enter detail view
                 isInDetailView = true;
                 detailScrollIndex = 0;
+                typeahead.ClearSearch();
                 AnnounceCurrentSelection();
             }
         }
@@ -143,6 +150,7 @@ namespace RimWorldAccess
             {
                 isInDetailView = false;
                 detailScrollIndex = 0;
+                typeahead.ClearSearch();
                 AnnounceCurrentSelection();
             }
             else
@@ -321,7 +329,7 @@ namespace RimWorldAccess
                 string typeLabel = item.Type == NotificationType.Message ? "Message" :
                                   item.Type == NotificationType.Letter ? "Letter" :
                                   "Alert";
-                string announcement = $"{typeLabel}: {item.Label}";
+                string announcement = $"{typeLabel}: {item.Label}. {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
                 TolkHelper.Speak(announcement);
             }
         }
@@ -430,6 +438,123 @@ namespace RimWorldAccess
             {
                 Log.Warning($"RimWorld Access: Failed to jump to target: {ex.Message}");
                 TolkHelper.Speak("Failed to jump to target", SpeechPriority.High);
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (notifications == null || notifications.Count == 0)
+                return;
+
+            currentIndex = MenuHelper.JumpToFirst();
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (notifications == null || notifications.Count == 0)
+                return;
+
+            currentIndex = MenuHelper.JumpToLast(notifications.Count);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Gets a list of labels for all notifications for typeahead search.
+        /// </summary>
+        public static List<string> GetItemLabels()
+        {
+            List<string> labels = new List<string>();
+            if (notifications != null)
+            {
+                foreach (var item in notifications)
+                {
+                    labels.Add(item.Label);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Sets the current index directly.
+        /// </summary>
+        public static void SetCurrentIndex(int index)
+        {
+            if (notifications != null && index >= 0 && index < notifications.Count)
+            {
+                currentIndex = index;
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context if active.
+        /// </summary>
+        public static void AnnounceWithSearch()
+        {
+            if (notifications == null || notifications.Count == 0)
+                return;
+
+            if (currentIndex < 0 || currentIndex >= notifications.Count)
+                return;
+
+            NotificationItem item = notifications[currentIndex];
+
+            string typeLabel = item.Type == NotificationType.Message ? "Message" :
+                              item.Type == NotificationType.Letter ? "Letter" :
+                              "Alert";
+            string announcement = $"{typeLabel}: {item.Label}. {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
+
+            // Add search context if active
+            if (typeahead.HasActiveSearch)
+            {
+                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Handles backspace for typeahead search.
+        /// </summary>
+        public static void HandleBackspace()
+        {
+            if (!typeahead.HasActiveSearch)
+                return;
+
+            var labels = GetItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    currentIndex = newIndex;
+                AnnounceWithSearch();
+            }
+        }
+
+        /// <summary>
+        /// Handles character input for typeahead search.
+        /// </summary>
+        public static void HandleTypeahead(char c)
+        {
+            var labels = GetItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    currentIndex = newIndex;
+                    AnnounceWithSearch();
+                }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
             }
         }
 

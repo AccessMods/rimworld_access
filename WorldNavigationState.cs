@@ -74,9 +74,9 @@ namespace RimWorldAccess
 
             isInitialized = true;
 
-            // Announce initial position
+            // Announce menu and initial position
             string initialInfo = WorldInfoHelper.GetTileSummary(currentSelectedTile);
-            TolkHelper.Speak(initialInfo);
+            TolkHelper.Speak($"World map. {initialInfo}");
             lastAnnouncedInfo = initialInfo;
 
             // Jump camera to selected tile
