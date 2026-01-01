@@ -21,7 +21,7 @@ namespace RimWorldAccess
         public static void Open(string confirmationMessage, Action confirmAction)
         {
             isActive = true;
-            message = confirmationMessage;
+            message = confirmationMessage.StripTags();
             onConfirm = confirmAction;
 
             // Announce the confirmation prompt

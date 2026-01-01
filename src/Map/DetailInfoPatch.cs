@@ -90,7 +90,17 @@ namespace RimWorldAccess
                    WindowlessConfirmationState.IsActive ||
                    StorageSettingsMenuState.IsActive ||
                    PlantSelectionMenuState.IsActive ||
-                   PrisonerTabState.IsActive;
+                   PrisonerTabState.IsActive ||
+                   WindowlessInventoryState.IsActive ||
+                   WindowlessInspectionState.IsActive ||
+                   WindowlessResearchMenuState.IsActive ||
+                   NotificationMenuState.IsActive ||
+                   QuestMenuState.IsActive ||
+                   GizmoNavigationState.IsActive ||
+                   SettlementBrowserState.IsActive ||
+                   CaravanFormationState.IsActive ||
+                   ModListState.IsActive ||
+                   HealthTabState.IsActive;
         }
 
         /// <summary>

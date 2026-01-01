@@ -16,6 +16,17 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.VeryHigh)] // Run before other patches
         public static void Prefix()
         {
+            // If any accessibility menu OTHER than the ones we handle is active, don't intercept
+            // This prevents conflicts when other menus are open
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive() &&
+                !ZoneRenameState.IsActive &&
+                !ZoneSettingsMenuState.IsActive &&
+                !PlaySettingsMenuState.IsActive &&
+                !StorageSettingsMenuState.IsActive &&
+                !PlantSelectionMenuState.IsActive &&
+                !RangeEditMenuState.IsActive)
+                return;
+
             // Handle zone rename text input (process both KeyDown and normal character input)
             if (ZoneRenameState.IsActive)
             {
@@ -67,39 +78,106 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
+                StorageSettingsMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                StorageSettingsMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch)
+                {
+                    StorageSettingsMenuState.ClearTypeaheadSearch();
+                    Event.current.Use();
+                    return;
+                }
+                StorageSettingsMenuState.Close();
+                TolkHelper.Speak("Closed storage settings menu");
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && StorageSettingsMenuState.HasActiveSearch)
+            {
+                StorageSettingsMenuState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle * key - expand all sibling categories (WCAG tree view pattern)
+            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+            if (isStar)
+            {
+                StorageSettingsMenuState.ExpandAllSiblings();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
+            if (key == KeyCode.UpArrow)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch && !StorageSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    StorageSettingsMenuState.SelectPreviousMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     StorageSettingsMenuState.SelectPrevious();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.DownArrow:
+            if (key == KeyCode.DownArrow)
+            {
+                if (StorageSettingsMenuState.HasActiveSearch && !StorageSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    StorageSettingsMenuState.SelectNextMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     StorageSettingsMenuState.SelectNext();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.RightArrow:
-                    StorageSettingsMenuState.ExpandCurrent();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.RightArrow)
+            {
+                StorageSettingsMenuState.ExpandCurrent();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.LeftArrow:
-                    StorageSettingsMenuState.CollapseCurrent();
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.LeftArrow)
+            {
+                StorageSettingsMenuState.CollapseCurrent();
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    StorageSettingsMenuState.ToggleCurrent();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.Escape:
-                    StorageSettingsMenuState.Close();
-                    TolkHelper.Speak("Closed storage settings menu");
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                StorageSettingsMenuState.ToggleCurrent();
+                Event.current.Use();
+                return;
             }
         }
 
@@ -175,6 +253,18 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Closed plant selection menu");
                     Event.current.Use();
                     break;
+
+                // === Handle Home/End for menu navigation ===
+                case KeyCode.Home:
+                    PlantSelectionMenuState.JumpToFirst();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.End:
+                    PlantSelectionMenuState.JumpToLast();
+                    Event.current.Use();
+                    break;
+
             }
         }
 
@@ -182,29 +272,83 @@ namespace RimWorldAccess
         {
             KeyCode key = Event.current.keyCode;
 
-            switch (key)
+            // Handle Home - jump to first
+            if (key == KeyCode.Home)
             {
-                case KeyCode.UpArrow:
+                ZoneSettingsMenuState.JumpToFirst();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle End - jump to last
+            if (key == KeyCode.End)
+            {
+                ZoneSettingsMenuState.JumpToLast();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Escape - clear search FIRST, then close
+            if (key == KeyCode.Escape)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch)
+                {
+                    ZoneSettingsMenuState.ClearTypeaheadSearch();
+                    Event.current.Use();
+                    return;
+                }
+                ZoneSettingsMenuState.Close();
+                TolkHelper.Speak("Closed zone settings menu");
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Backspace for search
+            if (key == KeyCode.Backspace && ZoneSettingsMenuState.HasActiveSearch)
+            {
+                ZoneSettingsMenuState.ProcessBackspace();
+                Event.current.Use();
+                return;
+            }
+
+            // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
+            if (key == KeyCode.UpArrow)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    ZoneSettingsMenuState.SelectPreviousMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     ZoneSettingsMenuState.SelectPrevious();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.DownArrow:
+            if (key == KeyCode.DownArrow)
+            {
+                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
+                {
+                    // Navigate through matches only when there ARE matches
+                    ZoneSettingsMenuState.SelectNextMatch();
+                }
+                else
+                {
+                    // Navigate normally (either no search active, OR search with no matches)
                     ZoneSettingsMenuState.SelectNext();
-                    Event.current.Use();
-                    break;
+                }
+                Event.current.Use();
+                return;
+            }
 
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    ZoneSettingsMenuState.ExecuteSelected();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.Escape:
-                    ZoneSettingsMenuState.Close();
-                    TolkHelper.Speak("Closed zone settings menu");
-                    Event.current.Use();
-                    break;
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                ZoneSettingsMenuState.ExecuteSelected();
+                Event.current.Use();
+                return;
             }
         }
 

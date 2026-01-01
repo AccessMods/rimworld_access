@@ -68,14 +68,55 @@ namespace RimWorldAccess
                 else
                 {
                     // Normal filter navigation (not editing slider)
-                    if (key == KeyCode.UpArrow)
+                    // Handle Escape: Clear search first if active, then exit filter mode
+                    if (key == KeyCode.Escape)
                     {
-                        ThingFilterNavigationState.SelectPrevious();
+                        if (ThingFilterNavigationState.HasActiveSearch)
+                        {
+                            ThingFilterNavigationState.ClearTypeaheadSearch();
+                            handled = true;
+                        }
+                        else
+                        {
+                            // Exit filter mode, return to policy list
+                            ThingFilterNavigationState.Deactivate();
+                            WindowlessFoodPolicyState.ReturnToPolicyList();
+                            handled = true;
+                        }
+                    }
+                    // Handle Backspace for typeahead
+                    else if (key == KeyCode.Backspace)
+                    {
+                        if (ThingFilterNavigationState.HasActiveSearch)
+                        {
+                            ThingFilterNavigationState.ProcessBackspace();
+                            handled = true;
+                        }
+                    }
+                    // Handle Arrow Up: Navigate (with search awareness)
+                    else if (key == KeyCode.UpArrow)
+                    {
+                        if (ThingFilterNavigationState.HasActiveSearch && !ThingFilterNavigationState.HasNoMatches)
+                        {
+                            ThingFilterNavigationState.SelectPreviousMatch();
+                        }
+                        else
+                        {
+                            ThingFilterNavigationState.SelectPrevious();
+                        }
                         handled = true;
                     }
+                    // Handle Arrow Down: Navigate (with search awareness)
                     else if (key == KeyCode.DownArrow)
                     {
-                        ThingFilterNavigationState.SelectNext();
+                        if (ThingFilterNavigationState.HasActiveSearch && !ThingFilterNavigationState.HasNoMatches)
+                        {
+                            ThingFilterNavigationState.SelectNextMatch();
+                        }
+                        else
+                        {
+                            ThingFilterNavigationState.SelectNext();
+                        }
                         handled = true;
                     }
                     else if (key == KeyCode.Space)
@@ -91,14 +132,20 @@ namespace RimWorldAccess
                     }
                     else if (key == KeyCode.LeftArrow)
                     {
-                        // For categories, left arrow collapses; for sliders, announces value
-                        ThingFilterNavigationState.ToggleExpand();
+                        // For categories, left arrow collapses; for non-categories, moves to parent
+                        ThingFilterNavigationState.Collapse();
                         handled = true;
                     }
                     else if (key == KeyCode.RightArrow)
                     {
-                        // For categories, right arrow expands; for sliders, announces value
-                        ThingFilterNavigationState.ToggleExpand();
+                        // For categories, right arrow expands or moves to first child; for end nodes, rejects
+                        ThingFilterNavigationState.Expand();
+                        handled = true;
+                    }
+                    // Handle * key - expand all sibling categories (WCAG tree view pattern)
+                    else if (key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8))
+                    {
+                        ThingFilterNavigationState.ExpandAllSiblings();
                         handled = true;
                     }
                     else if (key == KeyCode.A && Event.current.control)
@@ -111,12 +158,15 @@ namespace RimWorldAccess
                         ThingFilterNavigationState.DisallowAll();
                         handled = true;
                     }
-                    else if (key == KeyCode.Escape)
+                    // Handle typeahead character input (must be last to avoid conflicts)
+                    else if (Event.current.character != '\0' && !Event.current.control && !Event.current.alt)
                     {
-                        // Exit filter mode, return to policy list
-                        ThingFilterNavigationState.Deactivate();
-                        WindowlessFoodPolicyState.ReturnToPolicyList();
-                        handled = true;
+                        char c = Event.current.character;
+                        if (char.IsLetterOrDigit(c) || c == ' ')
+                        {
+                            ThingFilterNavigationState.ProcessTypeaheadCharacter(c);
+                            handled = true;
+                        }
                     }
                 }
             }

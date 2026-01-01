@@ -4,21 +4,29 @@ using System.Linq;
 using System.Text;
 using RimWorld;
 using Verse;
+using Verse.Sound;
 
 namespace RimWorldAccess
 {
     /// <summary>
     /// Manages the detail view for a specific research project.
-    /// Allows navigation through project information sections and starting/stopping research.
+    /// Uses a tree structure with expandable categories for prerequisites, unlocks, and dependents.
     /// </summary>
     public static class WindowlessResearchDetailState
     {
         private static bool isActive = false;
         private static ResearchProjectDef currentProject = null;
-        private static List<DetailSection> sections = new List<DetailSection>();
-        private static int currentSectionIndex = 0;
+        private static List<DetailNode> rootNodes = new List<DetailNode>();
+        private static List<DetailNode> flatNavigationList = new List<DetailNode>();
+        private static int currentIndex = 0;
+        private static HashSet<string> expandedNodes = new HashSet<string>();
+        private static Dictionary<string, string> lastChildIdPerParent = new Dictionary<string, string>();
+        private static Stack<ResearchProjectDef> navigationStack = new Stack<ResearchProjectDef>();
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         public static bool IsActive => isActive;
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+        public static bool HasNoMatches => typeahead.HasNoMatches;
 
         /// <summary>
         /// Opens the detail view for a specific research project.
@@ -27,63 +35,278 @@ namespace RimWorldAccess
         {
             currentProject = project;
             isActive = true;
-            sections = BuildDetailSections(project);
-            currentSectionIndex = 0;
-            AnnounceCurrentSection();
+            expandedNodes.Clear();
+            lastChildIdPerParent.Clear();
+            MenuHelper.ResetLevel("ResearchDetail");
+            typeahead.ClearSearch();
+            rootNodes = BuildDetailTree(project);
+            flatNavigationList = BuildFlatNavigationList();
+            currentIndex = 0;
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Closes the detail view and returns to the research menu.
+        /// Opens the detail view for a project, pushing the current one onto the navigation stack.
+        /// </summary>
+        public static void OpenWithBackNavigation(ResearchProjectDef project)
+        {
+            if (currentProject != null)
+            {
+                navigationStack.Push(currentProject);
+            }
+            Open(project);
+        }
+
+        /// <summary>
+        /// Closes the detail view. If there's a project in the stack, goes back to it.
         /// </summary>
         public static void Close()
         {
-            isActive = false;
-            currentProject = null;
-            sections.Clear();
-            TolkHelper.Speak("Returned to research menu");
+            if (navigationStack.Count > 0)
+            {
+                var previousProject = navigationStack.Pop();
+                Open(previousProject);
+                TolkHelper.Speak($"Back to {previousProject.LabelCap}");
+            }
+            else
+            {
+                isActive = false;
+                currentProject = null;
+                rootNodes.Clear();
+                flatNavigationList.Clear();
+                expandedNodes.Clear();
+                lastChildIdPerParent.Clear();
+                navigationStack.Clear();
+                MenuHelper.ResetLevel("ResearchDetail");
+                typeahead.ClearSearch();
+                TolkHelper.Speak("Returned to research menu");
+            }
         }
 
         /// <summary>
-        /// Navigates to the next section.
+        /// Navigates to the next item.
         /// </summary>
         public static void SelectNext()
         {
-            if (sections.Count == 0) return;
+            if (flatNavigationList.Count == 0) return;
 
-            currentSectionIndex = (currentSectionIndex + 1) % sections.Count;
-            AnnounceCurrentSection();
+            currentIndex = MenuHelper.SelectNext(currentIndex, flatNavigationList.Count);
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Navigates to the previous section.
+        /// Navigates to the previous item.
         /// </summary>
         public static void SelectPrevious()
         {
-            if (sections.Count == 0) return;
+            if (flatNavigationList.Count == 0) return;
 
-            currentSectionIndex--;
-            if (currentSectionIndex < 0)
-                currentSectionIndex = sections.Count - 1;
+            currentIndex = MenuHelper.SelectPrevious(currentIndex, flatNavigationList.Count);
 
-            AnnounceCurrentSection();
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Executes the action for the current section (e.g., starts research).
+        /// Expands the current category (Right arrow).
+        /// WCAG behavior:
+        /// - On closed node: Open node, focus stays on current item
+        /// - On open node: Move to first child
+        /// - On end node: Reject sound (feedback)
         /// </summary>
-        public static void ExecuteCurrentSection()
+        public static void Expand()
         {
-            if (sections.Count == 0 || currentProject == null) return;
+            if (flatNavigationList.Count == 0) return;
 
-            var section = sections[currentSectionIndex];
+            // Clear search when expanding to avoid navigation confusion
+            typeahead.ClearSearch();
 
-            if (section.Type == DetailSectionType.Action)
+            var current = flatNavigationList[currentIndex];
+
+            // End node (not expandable): reject
+            if (!current.IsExpandable)
             {
-                // Check if this is the start/stop research button
-                if (section.Title.Contains("Start") || section.Title.Contains("Stop"))
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return;
+            }
+
+            // No children: reject with message
+            if (current.Children == null || current.Children.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Cannot expand this item.");
+                return;
+            }
+
+            // Already expanded: move to first child (WCAG behavior)
+            if (current.IsExpanded)
+            {
+                MoveToFirstChild();
+                return;
+            }
+
+            // Closed node: expand it, focus STAYS on current item (WCAG behavior)
+            current.IsExpanded = true;
+            expandedNodes.Add(current.Id);
+            flatNavigationList = BuildFlatNavigationList();
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            // Keep currentIndex pointing to the same node (which is still current after rebuild)
+            // The node is now expanded, announce the state change
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            // Clear search when expanding to avoid navigation confusion
+            typeahead.ClearSearch();
+
+            var current = flatNavigationList[currentIndex];
+
+            // Get siblings (nodes with the same parent)
+            var siblings = current.Parent?.Children ?? rootNodes;
+
+            // Find all collapsed expandable siblings
+            var collapsedSiblings = siblings
+                .Where(s => s.IsExpandable && s.Children != null && s.Children.Count > 0 && !s.IsExpanded)
+                .ToList();
+
+            // Check if there are any expandable items at this level
+            var expandableSiblings = siblings
+                .Where(s => s.IsExpandable && s.Children != null && s.Children.Count > 0)
+                .ToList();
+
+            if (expandableSiblings.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("No categories to expand at this level");
+                return;
+            }
+
+            if (collapsedSiblings.Count == 0)
+            {
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("All categories already expanded at this level");
+                return;
+            }
+
+            // Expand all collapsed siblings
+            foreach (var sibling in collapsedSiblings)
+            {
+                sibling.IsExpanded = true;
+                expandedNodes.Add(sibling.Id);
+            }
+
+            // Rebuild the navigation list
+            flatNavigationList = BuildFlatNavigationList();
+
+            // Play success sound
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            // Announce result
+            string categoryWord = collapsedSiblings.Count == 1 ? "category" : "categories";
+            TolkHelper.Speak($"Expanded {collapsedSiblings.Count} {categoryWord}");
+        }
+
+        /// <summary>
+        /// Collapses the current category or navigates to parent (Left arrow).
+        /// WCAG behavior:
+        /// - On open node: Close node, focus stays on current item
+        /// - On closed node: Move to parent WITHOUT collapsing the parent
+        /// - On end node: Move to parent WITHOUT collapsing the parent
+        /// </summary>
+        public static void Collapse()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            // Clear search when collapsing to avoid navigation confusion
+            typeahead.ClearSearch();
+
+            var current = flatNavigationList[currentIndex];
+
+            // Case 1: Current is expanded category - collapse it, focus STAYS (WCAG behavior)
+            if (current.IsExpandable && current.IsExpanded)
+            {
+                current.IsExpanded = false;
+                expandedNodes.Remove(current.Id);
+                flatNavigationList = BuildFlatNavigationList();
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                AnnounceCurrentSelection();
+                return;
+            }
+
+            // Case 2: Navigate to parent WITHOUT collapsing it (WCAG behavior)
+            var parent = current.Parent;
+            if (parent != null)
+            {
+                // Save current position for potential future navigation back
+                lastChildIdPerParent[parent.Id] = current.Id;
+
+                // Find parent in flat list and move to it (do NOT collapse)
+                int parentIndex = flatNavigationList.IndexOf(parent);
+                if (parentIndex >= 0)
                 {
-                    ExecuteResearchAction();
+                    currentIndex = parentIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return;
                 }
+            }
+
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            TolkHelper.Speak("Already at top level");
+        }
+
+        /// <summary>
+        /// Executes the action for the current item (Enter key).
+        /// </summary>
+        public static void ExecuteCurrentItem()
+        {
+            if (flatNavigationList.Count == 0 || currentProject == null) return;
+
+            var current = flatNavigationList[currentIndex];
+
+            switch (current.Type)
+            {
+                case DetailNodeType.Category:
+                    // Toggle expand/collapse
+                    if (current.IsExpanded)
+                        Collapse();
+                    else
+                        Expand();
+                    break;
+
+                case DetailNodeType.ResearchItem:
+                    // Drill into this research project
+                    if (current.LinkedProject != null)
+                    {
+                        OpenWithBackNavigation(current.LinkedProject);
+                    }
+                    break;
+
+                case DetailNodeType.UnlockedItem:
+                    // Re-read the label (which contains the description inline)
+                    TolkHelper.Speak(current.Label);
+                    break;
+
+                case DetailNodeType.Action:
+                    ExecuteResearchAction();
+                    break;
+
+                case DetailNodeType.Info:
+                    // Read the content
+                    if (!string.IsNullOrEmpty(current.Content))
+                    {
+                        TolkHelper.Speak(current.Content);
+                    }
+                    break;
             }
         }
 
@@ -97,13 +320,9 @@ namespace RimWorldAccess
             // Check if already researching this project
             if (Find.ResearchManager.IsCurrentProject(currentProject))
             {
-                // Stop research
                 Find.ResearchManager.StopProject(currentProject);
                 TolkHelper.Speak($"Stopped research on {currentProject.LabelCap}");
-
-                // Rebuild sections to update button text
-                sections = BuildDetailSections(currentProject);
-                AnnounceCurrentSection();
+                RefreshTree();
                 return;
             }
 
@@ -130,7 +349,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Check study requirements (if applicable)
+            // Check study requirements
             if (currentProject.requiredAnalyzed != null && currentProject.requiredAnalyzed.Count > 0)
             {
                 if (!currentProject.AnalyzedThingsRequirementsMet)
@@ -140,13 +359,35 @@ namespace RimWorldAccess
                 }
             }
 
+            // Capture previous project before starting new one
+            var previousProject = Find.ResearchManager.GetProject();
+
             // Start research
             Find.ResearchManager.SetCurrentProject(currentProject);
-            TolkHelper.Speak($"Started research on {currentProject.LabelCap}");
 
-            // Rebuild sections to update button text and progress
-            sections = BuildDetailSections(currentProject);
-            AnnounceCurrentSection();
+            // Announce with replacement info if applicable
+            if (previousProject != null && previousProject != currentProject)
+            {
+                float previousProgress = previousProject.ProgressPercent * 100f;
+                TolkHelper.Speak($"Started research on {currentProject.LabelCap}. Stopped {previousProject.LabelCap} at {previousProgress:F0}% progress.");
+            }
+            else
+            {
+                TolkHelper.Speak($"Started research on {currentProject.LabelCap}");
+            }
+            RefreshTree();
+        }
+
+        /// <summary>
+        /// Refreshes the tree after changes (like starting/stopping research).
+        /// </summary>
+        private static void RefreshTree()
+        {
+            rootNodes = BuildDetailTree(currentProject);
+            flatNavigationList = BuildFlatNavigationList();
+            if (currentIndex >= flatNavigationList.Count)
+                currentIndex = Math.Max(0, flatNavigationList.Count - 1);
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -154,87 +395,393 @@ namespace RimWorldAccess
         /// </summary>
         private static string GetMissingPrerequisites()
         {
-            if (currentProject == null || currentProject.prerequisites == null)
+            if (currentProject == null)
                 return "Unknown";
 
-            var missing = currentProject.prerequisites
-                .Where(p => !p.IsFinished)
-                .Select(p => p.LabelCap.ToString());
+            var parts = new List<string>();
 
-            return string.Join(", ", missing);
+            // Visible prerequisites
+            if (currentProject.prerequisites != null)
+            {
+                var missing = currentProject.prerequisites
+                    .Where(p => !p.IsFinished)
+                    .Select(p => p.LabelCap.ToString());
+                parts.AddRange(missing);
+            }
+
+            // Hidden prerequisites - just mention they exist
+            if (currentProject.hiddenPrerequisites != null)
+            {
+                int missingHiddenCount = currentProject.hiddenPrerequisites.Count(p => !p.IsFinished);
+                if (missingHiddenCount > 0)
+                {
+                    string hiddenText = missingHiddenCount == 1
+                        ? "1 hidden prerequisite"
+                        : $"{missingHiddenCount} hidden prerequisites";
+                    parts.Add(hiddenText);
+                }
+            }
+
+            return parts.Count > 0 ? string.Join(", ", parts) : "Unknown";
         }
 
         /// <summary>
-        /// Builds the list of detail sections for the project.
+        /// Builds the tree structure for the detail view.
         /// </summary>
-        private static List<DetailSection> BuildDetailSections(ResearchProjectDef project)
+        private static List<DetailNode> BuildDetailTree(ResearchProjectDef project)
         {
-            var detailSections = new List<DetailSection>();
+            var nodes = new List<DetailNode>();
 
-            // Section 1: Description and Cost
-            detailSections.Add(new DetailSection
+            // Node 1: Description (Info, non-expandable)
+            nodes.Add(new DetailNode
             {
-                Type = DetailSectionType.Info,
-                Title = "Description",
-                Content = BuildDescriptionContent(project)
+                Id = "description",
+                Type = DetailNodeType.Info,
+                Label = "Description",
+                Content = BuildDescriptionContent(project),
+                IsExpandable = false
             });
 
-            // Section 2: Prerequisites
-            detailSections.Add(new DetailSection
-            {
-                Type = DetailSectionType.Info,
-                Title = "Prerequisites",
-                Content = BuildPrerequisitesContent(project)
-            });
+            // Node 2: Prerequisites (Category, expandable)
+            var prereqNode = BuildPrerequisitesNode(project);
+            if (prereqNode != null)
+                nodes.Add(prereqNode);
 
-            // Section 3: What This Unlocks
-            detailSections.Add(new DetailSection
-            {
-                Type = DetailSectionType.Info,
-                Title = "Unlocks",
-                Content = BuildUnlocksContent(project)
-            });
+            // Node 3: Unlocks (Category, expandable)
+            var unlocksNode = BuildUnlocksNode(project);
+            if (unlocksNode != null)
+                nodes.Add(unlocksNode);
 
-            // Section 4: What Depends On This
-            detailSections.Add(new DetailSection
-            {
-                Type = DetailSectionType.Info,
-                Title = "Dependents",
-                Content = BuildDependentsContent(project)
-            });
+            // Node 4: Dependents (Category, expandable)
+            var dependentsNode = BuildDependentsNode(project);
+            if (dependentsNode != null)
+                nodes.Add(dependentsNode);
 
-            // Section 5: Start/Stop Research Button
-            detailSections.Add(new DetailSection
+            // Node 5: Start/Stop Research (Action)
+            nodes.Add(new DetailNode
             {
-                Type = DetailSectionType.Action,
-                Title = Find.ResearchManager.IsCurrentProject(project) ? "Stop Research" : "Start Research",
+                Id = "action_research",
+                Type = DetailNodeType.Action,
+                Label = Find.ResearchManager.IsCurrentProject(project) ? "Stop Research" : "Start Research",
                 Content = Find.ResearchManager.IsCurrentProject(project)
                     ? "Press Enter to stop this research"
-                    : "Press Enter to start this research"
+                    : "Press Enter to start this research",
+                IsExpandable = false
             });
 
-            return detailSections;
+            return nodes;
         }
 
         /// <summary>
-        /// Builds the description and cost content section.
+        /// Builds the prerequisites node with children.
+        /// </summary>
+        private static DetailNode BuildPrerequisitesNode(ResearchProjectDef project)
+        {
+            var children = new List<DetailNode>();
+
+            // Research prerequisites (visible)
+            if (project.prerequisites != null && project.prerequisites.Count > 0)
+            {
+                foreach (var prereq in project.prerequisites.OrderBy(p => p.LabelCap.ToString()))
+                {
+                    string status = prereq.IsFinished ? "Completed" : "Locked";
+                    children.Add(new DetailNode
+                    {
+                        Id = $"prereq_{prereq.defName}",
+                        Type = DetailNodeType.ResearchItem,
+                        Label = $"{prereq.LabelCap} - cost: {prereq.CostApparent:F0} {status}",
+                        LinkedProject = prereq,
+                        IsExpandable = false
+                    });
+                }
+            }
+
+            // Hidden prerequisites - just show count without revealing what they are
+            if (project.hiddenPrerequisites != null && project.hiddenPrerequisites.Count > 0)
+            {
+                int missingHiddenCount = project.hiddenPrerequisites.Count(p => !p.IsFinished);
+                int totalHiddenCount = project.hiddenPrerequisites.Count;
+
+                string hiddenStatus = missingHiddenCount == 0 ? "All completed" : $"{missingHiddenCount} incomplete";
+                string hiddenLabel = totalHiddenCount == 1
+                    ? $"1 hidden prerequisite - {hiddenStatus}"
+                    : $"{totalHiddenCount} hidden prerequisites - {hiddenStatus}";
+
+                children.Add(new DetailNode
+                {
+                    Id = "hidden_prereqs",
+                    Type = DetailNodeType.Info,
+                    Label = hiddenLabel,
+                    IsExpandable = false
+                });
+            }
+
+            // Required research building
+            if (project.requiredResearchBuilding != null)
+            {
+                bool hasBench = project.PlayerHasAnyAppropriateResearchBench;
+                string benchStatus = hasBench ? "Available" : "Not available";
+                children.Add(new DetailNode
+                {
+                    Id = "required_bench",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires bench: {project.requiredResearchBuilding.LabelCap} - {benchStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Required research facilities
+            if (project.requiredResearchFacilities != null && project.requiredResearchFacilities.Count > 0)
+            {
+                foreach (var facility in project.requiredResearchFacilities)
+                {
+                    children.Add(new DetailNode
+                    {
+                        Id = $"required_facility_{facility.defName}",
+                        Type = DetailNodeType.Info,
+                        Label = $"Requires facility: {facility.LabelCap}",
+                        IsExpandable = false
+                    });
+                }
+            }
+
+            // Techprint requirement (Royalty DLC)
+            if (project.TechprintCount > 0)
+            {
+                int applied = project.TechprintsApplied;
+                int required = project.TechprintCount;
+                string techprintStatus = applied >= required ? "Complete" : $"{applied}/{required}";
+                children.Add(new DetailNode
+                {
+                    Id = "techprints",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires techprints: {techprintStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Mechanitor requirement (Biotech DLC)
+            if (project.requiresMechanitor)
+            {
+                string mechStatus = project.PlayerMechanitorRequirementMet ? "Met" : "Not met";
+                children.Add(new DetailNode
+                {
+                    Id = "mechanitor",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires mechanitor - {mechStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Required analyzed things (Biotech DLC)
+            if (project.requiredAnalyzed != null && project.requiredAnalyzed.Count > 0)
+            {
+                int completed = project.AnalyzedThingsCompleted;
+                int required = project.RequiredAnalyzedThingCount;
+                string analyzeStatus = completed >= required ? "Complete" : $"{completed}/{required}";
+                string thingNames = string.Join(", ", project.requiredAnalyzed.Select(t => t.LabelCap.ToString()));
+                children.Add(new DetailNode
+                {
+                    Id = "analyzed",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires analyzing: {thingNames} - {analyzeStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Grav engine inspection (Odyssey DLC)
+            if (project.requireGravEngineInspected)
+            {
+                string inspectStatus = project.InspectionRequirementsMet ? "Inspected" : "Not inspected";
+                children.Add(new DetailNode
+                {
+                    Id = "grav_engine",
+                    Type = DetailNodeType.Info,
+                    Label = $"Requires grav engine inspection - {inspectStatus}",
+                    IsExpandable = false
+                });
+            }
+
+            // Even if no prerequisites, show the node with a message
+            var node = new DetailNode
+            {
+                Id = "prerequisites",
+                Type = DetailNodeType.Category,
+                Label = children.Count > 0
+                    ? $"Prerequisites ({children.Count} items)"
+                    : "Prerequisites (none)",
+                IsExpandable = children.Count > 0,
+                Children = children
+            };
+
+            // Set parent references
+            foreach (var child in children)
+                child.Parent = node;
+
+            // Restore expansion state
+            node.IsExpanded = expandedNodes.Contains(node.Id);
+
+            return node;
+        }
+
+        /// <summary>
+        /// Builds the unlocks node with children.
+        /// </summary>
+        private static DetailNode BuildUnlocksNode(ResearchProjectDef project)
+        {
+            var children = new List<DetailNode>();
+
+            // Get all unlocked things
+            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            {
+                if (def.researchPrerequisites != null && def.researchPrerequisites.Contains(project))
+                {
+                    string category = def.building != null ? "Building" :
+                                     def.plant != null ? "Plant" : "Item";
+                    var itemNode = CreateUnlockedItemNode($"unlock_thing_{def.defName}", def.LabelCap, category, def.description);
+                    children.Add(itemNode);
+                }
+            }
+
+            // Get unlocked recipes
+            foreach (var def in DefDatabase<RecipeDef>.AllDefsListForReading)
+            {
+                if (def.researchPrerequisite == project ||
+                    (def.researchPrerequisites != null && def.researchPrerequisites.Contains(project)))
+                {
+                    // Use recipe description, or product description if available
+                    string description = def.description;
+                    if (string.IsNullOrEmpty(description) && def.ProducedThingDef != null)
+                    {
+                        description = def.ProducedThingDef.description;
+                    }
+                    var itemNode = CreateUnlockedItemNode($"unlock_recipe_{def.defName}", def.LabelCap, "Recipe", description);
+                    children.Add(itemNode);
+                }
+            }
+
+            // Sort by label
+            children = children.OrderBy(c => c.Label).ToList();
+
+            var node = new DetailNode
+            {
+                Id = "unlocks",
+                Type = DetailNodeType.Category,
+                Label = children.Count > 0
+                    ? $"Unlocks ({children.Count} items)"
+                    : "Unlocks (none)",
+                IsExpandable = children.Count > 0,
+                Children = children
+            };
+
+            // Set parent references
+            foreach (var child in children)
+                child.Parent = node;
+
+            // Restore expansion state
+            node.IsExpanded = expandedNodes.Contains(node.Id);
+
+            return node;
+        }
+
+        /// <summary>
+        /// Creates an unlocked item node with description inline in the label.
+        /// </summary>
+        private static DetailNode CreateUnlockedItemNode(string id, string label, string category, string description)
+        {
+            // Clean up description
+            string cleanDesc = "";
+            if (!string.IsNullOrEmpty(description))
+            {
+                cleanDesc = description;
+                if (cleanDesc.Contains("<"))
+                {
+                    cleanDesc = System.Text.RegularExpressions.Regex.Replace(cleanDesc, "<[^>]+>", "");
+                }
+                cleanDesc = cleanDesc.Trim();
+                cleanDesc = System.Text.RegularExpressions.Regex.Replace(cleanDesc, @"\s+", " ");
+            }
+
+            // Build label with description inline
+            string fullLabel = $"{label} ({category})";
+            if (!string.IsNullOrEmpty(cleanDesc))
+            {
+                fullLabel += $" - {cleanDesc}";
+            }
+
+            return new DetailNode
+            {
+                Id = id,
+                Type = DetailNodeType.UnlockedItem,
+                Label = fullLabel,
+                IsExpandable = false,
+                Children = new List<DetailNode>()
+            };
+        }
+
+        /// <summary>
+        /// Builds the dependents node with children.
+        /// </summary>
+        private static DetailNode BuildDependentsNode(ResearchProjectDef project)
+        {
+            var children = new List<DetailNode>();
+
+            var dependents = DefDatabase<ResearchProjectDef>.AllDefsListForReading
+                .Where(p => p.prerequisites != null && p.prerequisites.Contains(project))
+                .OrderBy(p => p.LabelCap.ToString())
+                .ToList();
+
+            foreach (var dep in dependents)
+            {
+                string status = dep.IsFinished ? "Completed" :
+                               dep.CanStartNow ? "Available" : "Locked";
+                children.Add(new DetailNode
+                {
+                    Id = $"dependent_{dep.defName}",
+                    Type = DetailNodeType.ResearchItem,
+                    Label = $"{dep.LabelCap} - cost: {dep.CostApparent:F0} {status}",
+                    LinkedProject = dep,
+                    IsExpandable = false
+                });
+            }
+
+            var node = new DetailNode
+            {
+                Id = "dependents",
+                Type = DetailNodeType.Category,
+                Label = children.Count > 0
+                    ? $"Dependents ({children.Count} items)"
+                    : "Dependents (none)",
+                IsExpandable = children.Count > 0,
+                Children = children
+            };
+
+            // Set parent references
+            foreach (var child in children)
+                child.Parent = node;
+
+            // Restore expansion state
+            node.IsExpanded = expandedNodes.Contains(node.Id);
+
+            return node;
+        }
+
+        /// <summary>
+        /// Builds the description content.
         /// </summary>
         private static string BuildDescriptionContent(ResearchProjectDef project)
         {
             var sb = new StringBuilder();
 
-            // Project name
             sb.AppendLine($"Project: {project.LabelCap}");
             sb.AppendLine();
 
-            // Description
             if (!string.IsNullOrEmpty(project.description))
             {
                 sb.AppendLine(project.description);
                 sb.AppendLine();
             }
 
-            // Cost
             if (project.CostApparent > 0)
             {
                 sb.AppendLine($"Research Cost: {project.CostApparent:F0}");
@@ -248,7 +795,6 @@ namespace RimWorldAccess
                 }
             }
 
-            // Progress
             if (Find.ResearchManager.IsCurrentProject(project))
             {
                 float progress = project.ProgressPercent * 100f;
@@ -267,13 +813,11 @@ namespace RimWorldAccess
                 sb.AppendLine("Status: Locked");
             }
 
-            // Required research bench
             if (project.requiredResearchBuilding != null)
             {
                 sb.AppendLine($"Required Bench: {project.requiredResearchBuilding.LabelCap}");
             }
 
-            // Required facilities
             if (project.requiredResearchFacilities != null && project.requiredResearchFacilities.Count > 0)
             {
                 sb.Append("Required Facilities: ");
@@ -284,228 +828,278 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Builds the prerequisites content section.
+        /// Flattens the tree for navigation.
         /// </summary>
-        private static string BuildPrerequisitesContent(ResearchProjectDef project)
+        private static List<DetailNode> BuildFlatNavigationList()
         {
-            var sb = new StringBuilder();
+            var flatList = new List<DetailNode>();
 
-            // Research prerequisites
-            if (project.prerequisites != null && project.prerequisites.Count > 0)
+            foreach (var node in rootNodes)
             {
-                sb.AppendLine("Research Prerequisites:");
-                foreach (var prereq in project.prerequisites)
-                {
-                    string status = prereq.IsFinished ? "✓" : "✗";
-                    sb.AppendLine($"  {status} {prereq.LabelCap}");
-                }
-            }
-            else
-            {
-                sb.AppendLine("No research prerequisites");
+                AddNodeToFlatList(node, flatList);
             }
 
-            // Techprint requirements
-            if (project.TechprintCount > 0)
-            {
-                sb.AppendLine();
-                int applied = Find.ResearchManager.GetTechprints(project);
-                sb.AppendLine($"Techprints: {applied} of {project.TechprintCount} applied");
-
-                if (!project.TechprintRequirementMet)
-                {
-                    sb.AppendLine($"Need {project.TechprintCount - applied} more techprints");
-                }
-            }
-
-            // Study requirements
-            if (project.requiredAnalyzed != null && project.requiredAnalyzed.Count > 0)
-            {
-                sb.AppendLine();
-                sb.AppendLine("Must Analyze:");
-                foreach (var thing in project.requiredAnalyzed)
-                {
-                    // Check if the thing has been analyzed
-                    var analysisID = thing.GetCompProperties<CompProperties_CompAnalyzableUnlockResearch>()?.analysisID ?? -1;
-                    Find.AnalysisManager.TryGetAnalysisProgress(analysisID, out var details);
-                    bool analyzed = details != null && details.Satisfied;
-                    string status = analyzed ? "✓" : "✗";
-                    sb.AppendLine($"  {status} {thing.LabelCap}");
-                }
-            }
-
-            // Overall status
-            sb.AppendLine();
-            if (project.PrerequisitesCompleted && project.TechprintRequirementMet && project.AnalyzedThingsRequirementsMet)
-            {
-                sb.AppendLine("All prerequisites met ✓");
-            }
-            else
-            {
-                sb.AppendLine("Prerequisites not met ✗");
-            }
-
-            return sb.ToString().TrimEnd();
+            return flatList;
         }
 
         /// <summary>
-        /// Builds the unlocks content section.
+        /// Recursively adds nodes to the flat list.
         /// </summary>
-        private static string BuildUnlocksContent(ResearchProjectDef project)
+        private static void AddNodeToFlatList(DetailNode node, List<DetailNode> flatList)
         {
-            var sb = new StringBuilder();
+            flatList.Add(node);
 
-            // Get all unlocked things
-            var unlockedBuildings = new List<string>();
-            var unlockedRecipes = new List<string>();
-            var unlockedPlants = new List<string>();
-            var unlockedOther = new List<string>();
-
-            // Check buildings
-            foreach (var def in DefDatabase<ThingDef>.AllDefsListForReading)
+            if (node.IsExpanded && node.Children != null)
             {
-                if (def.researchPrerequisites != null && def.researchPrerequisites.Contains(project))
+                foreach (var child in node.Children)
                 {
-                    if (def.building != null)
-                        unlockedBuildings.Add(def.LabelCap.ToString());
-                    else if (def.plant != null)
-                        unlockedPlants.Add(def.LabelCap.ToString());
-                    else
-                        unlockedOther.Add(def.LabelCap.ToString());
+                    AddNodeToFlatList(child, flatList);
                 }
             }
-
-            // Check recipes
-            foreach (var def in DefDatabase<RecipeDef>.AllDefsListForReading)
-            {
-                if (def.researchPrerequisite == project ||
-                    (def.researchPrerequisites != null && def.researchPrerequisites.Contains(project)))
-                {
-                    unlockedRecipes.Add(def.LabelCap.ToString());
-                }
-            }
-
-            // Display unlocks
-            int totalUnlocks = unlockedBuildings.Count + unlockedRecipes.Count + unlockedPlants.Count + unlockedOther.Count;
-
-            if (totalUnlocks == 0)
-            {
-                sb.AppendLine("This research doesn't directly unlock any items");
-                sb.AppendLine("(It may be a prerequisite for other research)");
-            }
-            else
-            {
-                sb.AppendLine($"This research unlocks {totalUnlocks} items:");
-                sb.AppendLine();
-
-                if (unlockedBuildings.Count > 0)
-                {
-                    sb.AppendLine("Buildings:");
-                    foreach (var item in unlockedBuildings.OrderBy(x => x))
-                        sb.AppendLine($"  • {item}");
-                    sb.AppendLine();
-                }
-
-                if (unlockedRecipes.Count > 0)
-                {
-                    sb.AppendLine("Recipes:");
-                    foreach (var item in unlockedRecipes.OrderBy(x => x))
-                        sb.AppendLine($"  • {item}");
-                    sb.AppendLine();
-                }
-
-                if (unlockedPlants.Count > 0)
-                {
-                    sb.AppendLine("Plants:");
-                    foreach (var item in unlockedPlants.OrderBy(x => x))
-                        sb.AppendLine($"  • {item}");
-                    sb.AppendLine();
-                }
-
-                if (unlockedOther.Count > 0)
-                {
-                    sb.AppendLine("Other:");
-                    foreach (var item in unlockedOther.OrderBy(x => x))
-                        sb.AppendLine($"  • {item}");
-                }
-            }
-
-            return sb.ToString().TrimEnd();
         }
 
         /// <summary>
-        /// Builds the dependents content section (research that requires this).
+        /// Gets the sibling position (1-based) and total count for an item.
         /// </summary>
-        private static string BuildDependentsContent(ResearchProjectDef project)
+        private static (int position, int total) GetSiblingPosition(DetailNode item)
         {
-            var sb = new StringBuilder();
-
-            // Find all research projects that depend on this one
-            var dependents = DefDatabase<ResearchProjectDef>.AllDefsListForReading
-                .Where(p => p.prerequisites != null && p.prerequisites.Contains(project))
-                .OrderBy(p => p.LabelCap.ToString())
-                .ToList();
-
-            if (dependents.Count == 0)
-            {
-                sb.AppendLine("No research projects require this as a prerequisite");
-            }
-            else
-            {
-                sb.AppendLine($"{dependents.Count} research projects require this:");
-                sb.AppendLine();
-
-                foreach (var dependent in dependents)
-                {
-                    string status = dependent.IsFinished ? "(Completed)" :
-                                   dependent.CanStartNow ? "(Available)" :
-                                   "(Locked)";
-                    sb.AppendLine($"  • {dependent.LabelCap} {status}");
-                }
-            }
-
-            return sb.ToString().TrimEnd();
+            var siblings = item.Parent?.Children ?? rootNodes;
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
         }
 
         /// <summary>
-        /// Announces the current section to the clipboard.
+        /// Gets the depth level of a node (0-based internally, 1-based for display).
         /// </summary>
-        private static void AnnounceCurrentSection()
+        private static int GetNodeLevel(DetailNode node)
         {
-            if (sections.Count == 0 || currentProject == null)
+            int level = 0;
+            var current = node;
+            while (current.Parent != null)
             {
-                TolkHelper.Speak("No detail sections available");
+                level++;
+                current = current.Parent;
+            }
+            return level;
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current item.
+        /// </summary>
+        private static void MoveToFirstChild()
+        {
+            var item = flatNavigationList[currentIndex];
+            if (item.Children != null && item.Children.Count > 0)
+            {
+                int firstChildIndex = flatNavigationList.IndexOf(item) + 1;
+                if (firstChildIndex < flatNavigationList.Count)
+                {
+                    currentIndex = firstChildIndex;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Announces the current selection using WCAG-compliant format.
+        /// Format: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
+        /// Level is only announced when it changes.
+        /// </summary>
+        private static void AnnounceCurrentSelection()
+        {
+            if (flatNavigationList.Count == 0 || currentProject == null)
+            {
+                TolkHelper.Speak("No items available");
                 return;
             }
 
-            var section = sections[currentSectionIndex];
-            int position = currentSectionIndex + 1;
+            var current = flatNavigationList[currentIndex];
 
-            StringBuilder announcement = new StringBuilder();
-            announcement.AppendLine($"Section {position} of {sections.Count}: {section.Title}");
-            announcement.AppendLine();
-            announcement.Append(section.Content);
+            // Get position info
+            var (position, total) = GetSiblingPosition(current);
+            int currentLevel = GetNodeLevel(current);
 
-            TolkHelper.Speak(announcement.ToString());
+            // Get level prefix (only announced when level changes)
+            string levelPrefix = MenuHelper.GetLevelPrefix("ResearchDetail", currentLevel);
+
+            // Build announcement: "level N. {name} {state}. {X of Y}."
+            var sb = new StringBuilder();
+            sb.Append(levelPrefix);
+            sb.Append(current.Label);
+
+            // Add expand/collapse state for expandable categories
+            if (current.Type == DetailNodeType.Category && current.IsExpandable)
+            {
+                sb.Append(current.IsExpanded ? " expanded" : " collapsed");
+            }
+
+            // Add position
+            sb.Append($". {MenuHelper.FormatPosition(position - 1, total)}.");
+
+            // For info nodes, append content after main announcement
+            if (current.Type == DetailNodeType.Info && !string.IsNullOrEmpty(current.Content))
+            {
+                sb.Append("\n\n");
+                sb.Append(current.Content);
+            }
+
+            TolkHelper.Speak(sb.ToString());
+        }
+
+        /// <summary>
+        /// Clears the typeahead search and announces "Search cleared".
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Processes backspace for typeahead search.
+        /// </summary>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0) currentIndex = newIndex;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes a character input for typeahead search.
+        /// </summary>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0) { currentIndex = newIndex; AnnounceWithSearch(); }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the next match in the typeahead search results.
+        /// </summary>
+        public static bool SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int next = typeahead.GetNextMatch(currentIndex);
+            if (next >= 0)
+            {
+                currentIndex = next;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the previous match in the typeahead search results.
+        /// </summary>
+        public static bool SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int prev = typeahead.GetPreviousMatch(currentIndex);
+            if (prev >= 0)
+            {
+                currentIndex = prev;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Gets the labels of all visible items in the navigation list.
+        /// </summary>
+        private static List<string> GetVisibleItemLabels()
+        {
+            var labels = new List<string>();
+            foreach (var node in flatNavigationList)
+            {
+                labels.Add(node.Label);
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with typeahead search info.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (flatNavigationList.Count == 0) return;
+
+            var current = flatNavigationList[currentIndex];
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{current.Label}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentSelection();
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the navigation list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (flatNavigationList.Count == 0) return;
+            currentIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the navigation list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (flatNavigationList.Count == 0) return;
+            currentIndex = flatNavigationList.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
         }
     }
 
     /// <summary>
-    /// Represents a section in the research detail view.
+    /// Represents a node in the research detail tree.
     /// </summary>
-    public class DetailSection
+    public class DetailNode
     {
-        public DetailSectionType Type { get; set; }
-        public string Title { get; set; }
+        public string Id { get; set; }
+        public DetailNodeType Type { get; set; }
+        public string Label { get; set; }
         public string Content { get; set; }
+        public bool IsExpandable { get; set; }
+        public bool IsExpanded { get; set; }
+        public List<DetailNode> Children { get; set; } = new List<DetailNode>();
+        public DetailNode Parent { get; set; }
+        public ResearchProjectDef LinkedProject { get; set; }
     }
 
     /// <summary>
-    /// Type of detail section.
+    /// Type of detail node.
     /// </summary>
-    public enum DetailSectionType
+    public enum DetailNodeType
     {
-        Info,
-        Action
+        Info,           // Description section
+        Category,       // Prerequisites, Unlocks, Dependents headers
+        ResearchItem,   // A research project that can be drilled into
+        UnlockedItem,   // A building/recipe that can be inspected
+        Action          // Start/Stop research button
     }
 }

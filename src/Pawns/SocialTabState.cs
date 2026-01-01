@@ -128,17 +128,17 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex + 1) % sections.Count;
+                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.RelationsList:
                     if (relations.Count > 0)
-                        relationIndex = (relationIndex + 1) % relations.Count;
+                        relationIndex = MenuHelper.SelectNext(relationIndex, relations.Count);
                     break;
 
                 case MenuLevel.SocialLogList:
                     if (socialLog.Count > 0)
-                        logIndex = (logIndex + 1) % socialLog.Count;
+                        logIndex = MenuHelper.SelectNext(logIndex, socialLog.Count);
                     break;
             }
 
@@ -151,17 +151,17 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex - 1 + sections.Count) % sections.Count;
+                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.RelationsList:
                     if (relations.Count > 0)
-                        relationIndex = (relationIndex - 1 + relations.Count) % relations.Count;
+                        relationIndex = MenuHelper.SelectPrevious(relationIndex, relations.Count);
                     break;
 
                 case MenuLevel.SocialLogList:
                     if (socialLog.Count > 0)
-                        logIndex = (logIndex - 1 + socialLog.Count) % socialLog.Count;
+                        logIndex = MenuHelper.SelectPrevious(logIndex, socialLog.Count);
                     break;
             }
 
@@ -258,7 +258,7 @@ namespace RimWorldAccess
             {
                 case MenuLevel.SectionMenu:
                     sb.AppendLine($"Social - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {sectionIndex + 1} of {sections.Count}");
+                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
                     sb.AppendLine("Press Enter to open");
                     break;
 
@@ -290,7 +290,7 @@ namespace RimWorldAccess
                         sb.AppendLine($"My opinion: {relation.MyOpinion:+0;-0;0}");
                         sb.AppendLine($"Their opinion: {relation.TheirOpinion:+0;-0;0}");
                         sb.AppendLine($"Situation: {relation.Situation}");
-                        sb.AppendLine($"Relation {relationIndex + 1} of {relations.Count}");
+                        sb.AppendLine($"Relation {MenuHelper.FormatPosition(relationIndex, relations.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -324,7 +324,7 @@ namespace RimWorldAccess
                             sb.AppendLine();
                         }
 
-                        sb.AppendLine($"Interaction {logIndex + 1} of {socialLog.Count}");
+                        sb.AppendLine($"Interaction {MenuHelper.FormatPosition(logIndex, socialLog.Count)}");
                     }
                     break;
             }

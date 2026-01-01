@@ -127,21 +127,21 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex + 1) % sections.Count;
+                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.MasterSettingsList:
-                    settingIndex = (settingIndex + 1) % settingNames.Count;
+                    settingIndex = MenuHelper.SelectNext(settingIndex, settingNames.Count);
                     break;
 
                 case MenuLevel.ChangeMaster:
                     if (masterSettings != null && masterSettings.AvailableMasters.Count > 0)
-                        masterChoiceIndex = (masterChoiceIndex + 1) % (masterSettings.AvailableMasters.Count + 1); // +1 for "None"
+                        masterChoiceIndex = MenuHelper.SelectNext(masterChoiceIndex, masterSettings.AvailableMasters.Count + 1); // +1 for "None"
                     break;
 
                 case MenuLevel.TrainablesList:
                     if (trainables.Count > 0)
-                        trainableIndex = (trainableIndex + 1) % trainables.Count;
+                        trainableIndex = MenuHelper.SelectNext(trainableIndex, trainables.Count);
                     break;
             }
 
@@ -154,21 +154,21 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex - 1 + sections.Count) % sections.Count;
+                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.MasterSettingsList:
-                    settingIndex = (settingIndex - 1 + settingNames.Count) % settingNames.Count;
+                    settingIndex = MenuHelper.SelectPrevious(settingIndex, settingNames.Count);
                     break;
 
                 case MenuLevel.ChangeMaster:
                     if (masterSettings != null && masterSettings.AvailableMasters.Count > 0)
-                        masterChoiceIndex = (masterChoiceIndex - 1 + masterSettings.AvailableMasters.Count + 1) % (masterSettings.AvailableMasters.Count + 1);
+                        masterChoiceIndex = MenuHelper.SelectPrevious(masterChoiceIndex, masterSettings.AvailableMasters.Count + 1);
                     break;
 
                 case MenuLevel.TrainablesList:
                     if (trainables.Count > 0)
-                        trainableIndex = (trainableIndex - 1 + trainables.Count) % trainables.Count;
+                        trainableIndex = MenuHelper.SelectPrevious(trainableIndex, trainables.Count);
                     break;
             }
 
@@ -309,7 +309,7 @@ namespace RimWorldAccess
             {
                 case MenuLevel.SectionMenu:
                     sb.AppendLine($"Training - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {sectionIndex + 1} of {sections.Count}");
+                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
                     sb.AppendLine("Press Enter to open");
                     break;
 
@@ -339,7 +339,7 @@ namespace RimWorldAccess
                             sb.AppendLine($"Current: {status}");
                         }
 
-                        sb.AppendLine($"Setting {settingIndex + 1} of {settingNames.Count}");
+                        sb.AppendLine($"Setting {MenuHelper.FormatPosition(settingIndex, settingNames.Count)}");
                         sb.AppendLine("Press Enter to change");
                     }
                     break;
@@ -354,7 +354,7 @@ namespace RimWorldAccess
                         }
 
                         sb.AppendLine($"Master: {masterName}");
-                        sb.AppendLine($"Option {masterChoiceIndex + 1} of {masterSettings.AvailableMasters.Count + 1}");
+                        sb.AppendLine($"Option {MenuHelper.FormatPosition(masterChoiceIndex, masterSettings.AvailableMasters.Count + 1)}");
                         sb.AppendLine("Press Enter to confirm");
                     }
                     break;
@@ -370,7 +370,7 @@ namespace RimWorldAccess
                         {
                             sb.AppendLine($"Progress: {trainable.CurrentSteps} / {trainable.RequiredSteps}");
                         }
-                        sb.AppendLine($"Skill {trainableIndex + 1} of {trainables.Count}");
+                        sb.AppendLine($"Skill {MenuHelper.FormatPosition(trainableIndex, trainables.Count)}");
                         sb.AppendLine("Press Space to toggle, Enter for details");
                     }
                     break;

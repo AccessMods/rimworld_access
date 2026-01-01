@@ -74,12 +74,12 @@ namespace RimWorldAccess
         {
             if (currentLevel == StorytellerSelectionLevel.StorytellerList)
             {
-                selectedStorytellerIndex = (selectedStorytellerIndex + 1) % storytellers.Count;
+                selectedStorytellerIndex = MenuHelper.SelectNext(selectedStorytellerIndex, storytellers.Count);
                 ApplyStorytellerSelection();
             }
             else // DifficultyList
             {
-                selectedDifficultyIndex = (selectedDifficultyIndex + 1) % difficulties.Count;
+                selectedDifficultyIndex = MenuHelper.SelectNext(selectedDifficultyIndex, difficulties.Count);
                 ApplyDifficultySelection();
             }
 
@@ -93,12 +93,12 @@ namespace RimWorldAccess
         {
             if (currentLevel == StorytellerSelectionLevel.StorytellerList)
             {
-                selectedStorytellerIndex = (selectedStorytellerIndex - 1 + storytellers.Count) % storytellers.Count;
+                selectedStorytellerIndex = MenuHelper.SelectPrevious(selectedStorytellerIndex, storytellers.Count);
                 ApplyStorytellerSelection();
             }
             else // DifficultyList
             {
-                selectedDifficultyIndex = (selectedDifficultyIndex - 1 + difficulties.Count) % difficulties.Count;
+                selectedDifficultyIndex = MenuHelper.SelectPrevious(selectedDifficultyIndex, difficulties.Count);
                 ApplyDifficultySelection();
             }
 

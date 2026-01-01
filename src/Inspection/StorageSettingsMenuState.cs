@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
 using UnityEngine;
 
@@ -18,6 +19,7 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static StorageSettings currentSettings = null;
         private static HashSet<string> expandedCategories = new HashSet<string>(); // Track which categories are expanded
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         private enum MenuItemType
         {
@@ -70,6 +72,8 @@ namespace RimWorldAccess
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
             isActive = true;
+            MenuHelper.ResetLevel("StorageSettings");
+            typeahead.ClearSearch();
 
             BuildMenuItems();
             AnnounceCurrentSelection();
@@ -87,6 +91,8 @@ namespace RimWorldAccess
             isActive = false;
             currentSettings = null;
             expandedCategories.Clear();
+            MenuHelper.ResetLevel("StorageSettings");
+            typeahead.ClearSearch();
         }
 
         /// <summary>
@@ -214,7 +220,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -223,7 +229,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -231,6 +237,9 @@ namespace RimWorldAccess
         {
             if (menuItems == null || selectedIndex >= menuItems.Count)
                 return;
+
+            // Clear search when expanding to avoid "no more search results" confusion
+            typeahead.ClearSearch();
 
             MenuItem item = menuItems[selectedIndex];
 
@@ -242,20 +251,25 @@ namespace RimWorldAccess
                     break;
 
                 case MenuItemType.Category:
-                    // Only expand if collapsed
+                    TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
+                    if (node == null) break;
+
                     if (!item.isExpanded)
                     {
-                        TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
-                        if (node != null)
-                        {
-                            expandedCategories.Add(node.catDef.defName);
-                            RebuildMenu();
-                            TolkHelper.Speak($"Expanded: {item.label}");
-                        }
+                        // WCAG: Expand node, focus stays on current item
+                        expandedCategories.Add(node.catDef.defName);
+                        RebuildMenu();
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection(); // Re-announce with new state
                     }
                     else
                     {
-                        TolkHelper.Speak($"{item.label} (already expanded)");
+                        // WCAG: Already expanded, try to move to first child
+                        if (!MoveToFirstChild())
+                        {
+                            // No children found, play reject sound
+                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                        }
                     }
                     break;
 
@@ -265,8 +279,8 @@ namespace RimWorldAccess
                 case MenuItemType.QualityRange:
                 case MenuItemType.ClearAll:
                 case MenuItemType.AllowAll:
-                    // Right arrow doesn't apply to these types
-                    TolkHelper.Speak("Press Enter to select");
+                    // End node - play reject sound per WCAG
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     break;
             }
         }
@@ -275,6 +289,9 @@ namespace RimWorldAccess
         {
             if (menuItems == null || selectedIndex >= menuItems.Count)
                 return;
+
+            // Clear search when collapsing to avoid "no more search results" confusion
+            typeahead.ClearSearch();
 
             MenuItem item = menuItems[selectedIndex];
 
@@ -289,33 +306,35 @@ namespace RimWorldAccess
                     // If expanded, collapse it
                     if (item.isExpanded)
                     {
+                        // WCAG: Collapse node, focus stays on current item
                         TreeNode_ThingCategory node = item.data as TreeNode_ThingCategory;
                         if (node != null)
                         {
                             expandedCategories.Remove(node.catDef.defName);
                             RebuildMenu();
-                            TolkHelper.Speak($"Collapsed: {item.label}");
+                            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                            AnnounceCurrentSelection(); // Re-announce with new state
                         }
                     }
                     else
                     {
-                        // If not expanded, navigate to parent category
-                        NavigateToParent();
+                        // WCAG: Already collapsed, move to parent without collapsing
+                        MoveToParent();
                     }
                     break;
 
                 case MenuItemType.ThingDef:
                 case MenuItemType.SpecialFilter:
-                    // Navigate to parent category
-                    NavigateToParent();
+                    // WCAG: Leaf item, move to parent
+                    MoveToParent();
                     break;
 
                 case MenuItemType.HitPointsRange:
                 case MenuItemType.QualityRange:
                 case MenuItemType.ClearAll:
                 case MenuItemType.AllowAll:
-                    // Left arrow doesn't apply to these types
-                    TolkHelper.Speak("Press Enter to select");
+                    // Top-level items with no parent - play reject sound
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     break;
             }
         }
@@ -644,28 +663,303 @@ namespace RimWorldAccess
             selectedIndex = Mathf.Clamp(selectedIndex, 0, menuItems.Count - 1);
         }
 
+        /// <summary>
+        /// Gets the sibling position (X of Y) for a menu item.
+        /// Siblings are items with the same parent.
+        /// </summary>
+        private static (int position, int total) GetSiblingPosition(MenuItem item)
+        {
+            var siblings = menuItems.Where(m => m.parent == item.parent).ToList();
+            int position = siblings.IndexOf(item) + 1;
+            return (position, siblings.Count);
+        }
+
+        /// <summary>
+        /// Moves focus to the first child of the current item.
+        /// Returns true if a child was found and focus moved, false otherwise.
+        /// </summary>
+        private static bool MoveToFirstChild()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return false;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            // Find first child in the flat list
+            for (int i = selectedIndex + 1; i < menuItems.Count; i++)
+            {
+                if (menuItems[i].parent == item)
+                {
+                    selectedIndex = i;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Moves focus to the parent of the current item.
+        /// Plays reject sound if no parent exists.
+        /// </summary>
+        private static void MoveToParent()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            if (item.parent == null)
+            {
+                // No parent - play reject sound
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return;
+            }
+
+            // Find parent in the menu list
+            for (int i = 0; i < menuItems.Count; i++)
+            {
+                if (menuItems[i] == item.parent)
+                {
+                    selectedIndex = i;
+                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // Parent not found in visible list (shouldn't happen, but handle gracefully)
+            SoundDefOf.ClickReject.PlayOneShotOnCamera();
+        }
 
         private static void AnnounceCurrentSelection()
         {
             if (selectedIndex >= 0 && selectedIndex < menuItems.Count)
             {
                 MenuItem item = menuItems[selectedIndex];
-                string announcement = item.label;
 
-                // Add state information
-                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
-                {
-                    string state = item.isAllowed ? "Allowed" : "Disallowed";
-                    announcement += $" ({state})";
-                }
+                // Get sibling position
+                var (position, total) = GetSiblingPosition(item);
 
+                // Build announcement in WCAG format: "[level N. ]{name} {state}. {X of Y}. {allowed}."
+                string prefix = MenuHelper.GetLevelPrefix("StorageSettings", item.indentLevel);
+                string announcement = prefix + item.label;
+
+                // Add expand/collapse state for categories
                 if (item.type == MenuItemType.Category)
                 {
-                    string expandState = item.isExpanded ? "Expanded" : "Collapsed";
-                    announcement += $" [{expandState}]";
+                    string expandState = item.isExpanded ? "expanded" : "collapsed";
+                    announcement += $" {expandState}";
+                }
+
+                // Add period after label+state, then sibling position
+                announcement += $". {MenuHelper.FormatPosition(position - 1, total)}";
+
+                // Add allowed/disallowed state at the end for context with period
+                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
+                {
+                    string allowState = item.isAllowed ? "allowed" : "disallowed";
+                    announcement += $". {allowState}.";
                 }
 
                 TolkHelper.Speak(announcement);
+            }
+        }
+
+        /// <summary>
+        /// Expands all sibling categories at the same level as the current item.
+        /// WCAG tree view pattern: * key expands all siblings.
+        /// </summary>
+        public static void ExpandAllSiblings()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem currentItem = menuItems[selectedIndex];
+            MenuItem parent = currentItem.parent; // null means root level
+
+            // Find all collapsed sibling categories
+            int expandedCount = 0;
+            foreach (var item in menuItems)
+            {
+                // Must be same parent (sibling) and be a collapsed category
+                if (item.parent == parent && item.type == MenuItemType.Category && !item.isExpanded)
+                {
+                    var node = item.data as TreeNode_ThingCategory;
+                    if (node != null)
+                    {
+                        expandedCategories.Add(node.catDef.defName);
+                        expandedCount++;
+                    }
+                }
+            }
+
+            if (expandedCount > 0)
+            {
+                RebuildMenu();
+                typeahead.ClearSearch(); // Clear search since visible items changed
+                if (expandedCount == 1)
+                    TolkHelper.Speak("Expanded 1 category");
+                else
+                    TolkHelper.Speak($"Expanded {expandedCount} categories");
+            }
+            else
+            {
+                // Check if there are any sibling categories at all
+                bool hasAnySiblingCategories = menuItems.Any(m => m.parent == parent && m.type == MenuItemType.Category);
+                if (hasAnySiblingCategories)
+                    TolkHelper.Speak("All categories already expanded at this level");
+                else
+                    TolkHelper.Speak("No categories to expand at this level");
+            }
+        }
+
+        /// <summary>
+        /// Jumps to the first item in the navigation list.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the navigation list.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+            selectedIndex = menuItems.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Checks if typeahead search has an active search buffer.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Checks if typeahead search has no matches.
+        /// </summary>
+        public static bool HasNoMatches => typeahead.HasNoMatches;
+
+        /// <summary>
+        /// Clears the current typeahead search and announces that the search was cleared.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Processes a backspace key for typeahead search.
+        /// </summary>
+        /// <returns>True if backspace was handled.</returns>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0) selectedIndex = newIndex;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes a character input for typeahead search.
+        /// </summary>
+        /// <param name="c">The character typed.</param>
+        /// <returns>True if the character was processed.</returns>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            // Character validation is now done by the caller using KeyCode
+            // Accept the character as-is since it was already validated
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0) { selectedIndex = newIndex; AnnounceWithSearch(); }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the next matching item when search is active.
+        /// </summary>
+        /// <returns>True if navigation occurred.</returns>
+        public static bool SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int next = typeahead.GetNextMatch(selectedIndex);
+            if (next >= 0)
+            {
+                selectedIndex = next;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the previous matching item when search is active.
+        /// </summary>
+        /// <returns>True if navigation occurred.</returns>
+        public static bool SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int prev = typeahead.GetPreviousMatch(selectedIndex);
+            if (prev >= 0)
+            {
+                selectedIndex = prev;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Gets labels from visible items for typeahead search.
+        /// </summary>
+        private static List<string> GetVisibleItemLabels()
+        {
+            var labels = new List<string>();
+            if (menuItems != null)
+            {
+                foreach (var item in menuItems)
+                {
+                    labels.Add(item.label);
+                }
+            }
+            return labels;
+        }
+
+        /// <summary>
+        /// Announces the current selection with search context.
+        /// </summary>
+        private static void AnnounceWithSearch()
+        {
+            if (menuItems == null || selectedIndex < 0 || selectedIndex >= menuItems.Count) return;
+
+            string label = menuItems[selectedIndex].label;
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{label}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentSelection();
             }
         }
     }

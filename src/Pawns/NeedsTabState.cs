@@ -124,17 +124,17 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex + 1) % sections.Count;
+                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.NeedsList:
                     if (needs.Count > 0)
-                        needIndex = (needIndex + 1) % needs.Count;
+                        needIndex = MenuHelper.SelectNext(needIndex, needs.Count);
                     break;
 
                 case MenuLevel.ThoughtsList:
                     if (thoughts.Count > 0)
-                        thoughtIndex = (thoughtIndex + 1) % thoughts.Count;
+                        thoughtIndex = MenuHelper.SelectNext(thoughtIndex, thoughts.Count);
                     break;
             }
 
@@ -147,17 +147,17 @@ namespace RimWorldAccess
             switch (currentLevel)
             {
                 case MenuLevel.SectionMenu:
-                    sectionIndex = (sectionIndex - 1 + sections.Count) % sections.Count;
+                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
                     break;
 
                 case MenuLevel.NeedsList:
                     if (needs.Count > 0)
-                        needIndex = (needIndex - 1 + needs.Count) % needs.Count;
+                        needIndex = MenuHelper.SelectPrevious(needIndex, needs.Count);
                     break;
 
                 case MenuLevel.ThoughtsList:
                     if (thoughts.Count > 0)
-                        thoughtIndex = (thoughtIndex - 1 + thoughts.Count) % thoughts.Count;
+                        thoughtIndex = MenuHelper.SelectPrevious(thoughtIndex, thoughts.Count);
                     break;
             }
 
@@ -257,7 +257,7 @@ namespace RimWorldAccess
             {
                 case MenuLevel.SectionMenu:
                     sb.AppendLine($"Needs - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {sectionIndex + 1} of {sections.Count}");
+                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
                     sb.AppendLine("Press Enter to open");
                     break;
 
@@ -266,7 +266,7 @@ namespace RimWorldAccess
                     {
                         var need = needs[needIndex];
                         sb.AppendLine($"{need.Label}: {need.Percentage:F0}%{need.Arrow}");
-                        sb.AppendLine($"Need {needIndex + 1} of {needs.Count}");
+                        sb.AppendLine($"Need {MenuHelper.FormatPosition(needIndex, needs.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;
@@ -286,7 +286,7 @@ namespace RimWorldAccess
                         string effectStr = thought.MoodEffect >= 0 ? $"+{thought.MoodEffect:F0}" : $"{thought.MoodEffect:F0}";
                         string stackStr = thought.StackCount > 1 ? $" x{thought.StackCount}" : "";
                         sb.AppendLine($"{thought.Label}{stackStr}: {effectStr}");
-                        sb.AppendLine($"Thought {thoughtIndex + 1} of {thoughts.Count}");
+                        sb.AppendLine($"Thought {MenuHelper.FormatPosition(thoughtIndex, thoughts.Count)}");
                         sb.AppendLine("Press Enter for details");
                     }
                     break;

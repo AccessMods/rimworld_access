@@ -175,7 +175,7 @@ namespace RimWorldAccess
             if (maxIndex <= 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % (maxIndex + 1);
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, maxIndex + 1);
             AnnounceCurrentSelection();
         }
 
@@ -199,7 +199,7 @@ namespace RimWorldAccess
             if (maxIndex <= 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + maxIndex + 1) % (maxIndex + 1);
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, maxIndex + 1);
             AnnounceCurrentSelection();
         }
 

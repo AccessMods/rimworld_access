@@ -72,7 +72,7 @@ namespace RimWorldAccess
             if (availableTabs == null || availableTabs.Count == 0)
                 return;
 
-            selectedTabIndex = (selectedTabIndex + 1) % availableTabs.Count;
+            selectedTabIndex = MenuHelper.SelectNext(selectedTabIndex, availableTabs.Count);
             AnnounceCurrentTab();
         }
 
@@ -84,7 +84,7 @@ namespace RimWorldAccess
             if (availableTabs == null || availableTabs.Count == 0)
                 return;
 
-            selectedTabIndex = (selectedTabIndex - 1 + availableTabs.Count) % availableTabs.Count;
+            selectedTabIndex = MenuHelper.SelectPrevious(selectedTabIndex, availableTabs.Count);
             AnnounceCurrentTab();
         }
 

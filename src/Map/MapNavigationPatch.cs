@@ -28,6 +28,7 @@ namespace RimWorldAccess
                 WorldNavigationState.IsActive ||
                 WindowlessDialogState.IsActive ||
                 WindowlessFloatMenuState.IsActive ||
+                ArchitectTreeState.IsActive ||
                 WindowlessPauseMenuState.IsActive ||
                 NotificationMenuState.IsActive ||
                 QuestMenuState.IsActive ||
@@ -71,9 +72,10 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Prefix patch that intercepts arrow key input before the camera's normal panning behavior.
+        /// Returns false to skip original CameraDriver.Update() when menus are active (prevents camera panning in menus).
         /// </summary>
         [HarmonyPrefix]
-        public static void Prefix(CameraDriver __instance)
+        public static bool Prefix(CameraDriver __instance)
         {
             // Reset per-frame flag
             hasAnnouncedThisFrame = false;
@@ -85,19 +87,20 @@ namespace RimWorldAccess
             if (Find.CurrentMap == null)
             {
                 MapNavigationState.Reset();
-                return;
+                return true; // Let original run
             }
 
             // Don't process arrow keys if any dialog or window that prevents camera motion is open
             if (Find.WindowStack != null && Find.WindowStack.WindowsPreventCameraMotion)
             {
-                return;
+                return true; // Let original run (it will also respect this flag)
             }
 
-            // Don't process arrow keys if map navigation is suppressed (e.g., when menus are open)
+            // When menus are open, skip the original CameraDriver.Update() entirely
+            // This prevents arrow keys from panning the camera while in menus
             if (MapNavigationState.SuppressMapNavigation)
             {
-                return;
+                return false; // SKIP original - don't let camera pan in menus
             }
 
             // Prevent processing input multiple times in the same frame
@@ -105,7 +108,7 @@ namespace RimWorldAccess
             int currentFrame = Time.frameCount;
             if (lastProcessedFrame == currentFrame)
             {
-                return;
+                return true;
             }
             lastProcessedFrame = currentFrame;
 
@@ -119,19 +122,19 @@ namespace RimWorldAccess
                 TolkHelper.Speak(initialInfo);
                 MapNavigationState.LastAnnouncedInfo = initialInfo;
                 hasAnnouncedThisFrame = true;
-                return;
+                return true;
             }
 
             // Check for pawn selection cycling (comma and period keys)
             if (Input.GetKeyDown(KeyCode.Period))
             {
                 HandlePawnCycling(true, __instance);
-                return;
+                return true;
             }
             else if (Input.GetKeyDown(KeyCode.Comma))
             {
                 HandlePawnCycling(false, __instance);
-                return;
+                return true;
             }
 
             // Check for arrow key input
@@ -152,13 +155,13 @@ namespace RimWorldAccess
                 {
                     MapNavigationState.CycleJumpModeForward();
                     hasAnnouncedThisFrame = true;
-                    return;
+                    return true;
                 }
                 else if (Input.GetKeyDown(KeyCode.DownArrow))
                 {
                     MapNavigationState.CycleJumpModeBackward();
                     hasAnnouncedThisFrame = true;
-                    return;
+                    return true;
                 }
             }
 
@@ -274,6 +277,10 @@ namespace RimWorldAccess
                 // This is done by preventing the KeyBindingDefOf checks from succeeding
                 // Note: We're using Input.GetKeyDown instead of KeyBindingDefOf to intercept earlier
             }
+
+            // Let original CameraDriver.Update() run for non-arrow-key functionality
+            // (zoom, following, etc.) - we've already handled our arrow key navigation above
+            return true;
         }
 
         /// <summary>

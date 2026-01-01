@@ -209,14 +209,22 @@ namespace RimWorldAccess
             }
 
             // Find root categories (categories with no parent or whose parent isn't in our tree)
+            // Skip the actual "Root" ThingCategoryDef and treat its children as top-level
             List<CategoryNode> rootCategories = new List<CategoryNode>();
             foreach (var kvp in categoryNodes)
             {
                 ThingCategoryDef category = kvp.Key;
                 CategoryNode node = kvp.Value;
 
-                // This is a root if it has no parent or its parent isn't in our category set
-                if (category.parent == null || !categoryNodes.ContainsKey(category.parent))
+                // Skip the actual "Root" category - we'll show its children instead
+                if (category == ThingCategoryDefOf.Root)
+                    continue;
+
+                // This is a root if it has no parent, its parent isn't in our category set,
+                // or its parent is the "Root" category (which we're skipping)
+                if (category.parent == null ||
+                    !categoryNodes.ContainsKey(category.parent) ||
+                    category.parent == ThingCategoryDefOf.Root)
                 {
                     rootCategories.Add(node);
                 }

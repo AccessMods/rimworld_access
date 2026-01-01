@@ -103,7 +103,7 @@ namespace RimWorldAccess
             if (allPolicies.Count == 0)
                 return;
 
-            selectedPolicyIndex = (selectedPolicyIndex + 1) % allPolicies.Count;
+            selectedPolicyIndex = MenuHelper.SelectNext(selectedPolicyIndex, allPolicies.Count);
             selectedPolicy = allPolicies[selectedPolicyIndex];
             UpdateClipboard();
         }
@@ -116,10 +116,7 @@ namespace RimWorldAccess
             if (allPolicies.Count == 0)
                 return;
 
-            selectedPolicyIndex--;
-            if (selectedPolicyIndex < 0)
-                selectedPolicyIndex = allPolicies.Count - 1;
-
+            selectedPolicyIndex = MenuHelper.SelectPrevious(selectedPolicyIndex, allPolicies.Count);
             selectedPolicy = allPolicies[selectedPolicyIndex];
             UpdateClipboard();
         }
@@ -151,7 +148,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextAction()
         {
-            selectedActionIndex = (selectedActionIndex + 1) % policyActions.Length;
+            selectedActionIndex = MenuHelper.SelectNext(selectedActionIndex, policyActions.Length);
             UpdateClipboard();
         }
 
@@ -160,9 +157,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousAction()
         {
-            selectedActionIndex--;
-            if (selectedActionIndex < 0)
-                selectedActionIndex = policyActions.Length - 1;
+            selectedActionIndex = MenuHelper.SelectPrevious(selectedActionIndex, policyActions.Length);
             UpdateClipboard();
         }
 
@@ -325,7 +320,7 @@ namespace RimWorldAccess
                 {
                     bool isDefault = Current.Game?.foodRestrictionDatabase?.DefaultFoodRestriction() == selectedPolicy;
                     string defaultMarker = isDefault ? " (default)" : "";
-                    TolkHelper.Speak($"Food policy {selectedPolicyIndex + 1}/{allPolicies.Count}: {selectedPolicy.label}{defaultMarker}. Press Tab for actions.");
+                    TolkHelper.Speak($"{selectedPolicy.label}{defaultMarker}. {MenuHelper.FormatPosition(selectedPolicyIndex, allPolicies.Count)}. Press Tab for actions.");
                 }
                 else
                 {
@@ -335,7 +330,7 @@ namespace RimWorldAccess
             else if (currentMode == NavigationMode.PolicyActions)
             {
                 string action = policyActions[selectedActionIndex];
-                TolkHelper.Speak($"Action {selectedActionIndex + 1}/{policyActions.Length}: {action}. Press Enter to execute, Tab/Shift+Tab or arrows to navigate, Escape to return to policy list.");
+                TolkHelper.Speak($"{action}. {MenuHelper.FormatPosition(selectedActionIndex, policyActions.Length)}. Press Enter to execute, Tab/Shift+Tab or arrows to navigate, Escape to return to policy list.");
             }
         }
     }

@@ -14,6 +14,15 @@ namespace RimWorldAccess
     public static class InspectionTreeBuilder
     {
         /// <summary>
+        /// Helper method to add a child to a parent and set the parent reference.
+        /// </summary>
+        private static void AddChild(InspectionTreeItem parent, InspectionTreeItem child)
+        {
+            child.Parent = parent;
+            parent.Children.Add(child);
+        }
+
+        /// <summary>
         /// Builds the root tree for all objects at a position.
         /// </summary>
         public static InspectionTreeItem BuildTree(List<object> objects)
@@ -29,7 +38,7 @@ namespace RimWorldAccess
 
             foreach (var obj in objects)
             {
-                root.Children.Add(BuildObjectItem(obj, 0));
+                AddChild(root, BuildObjectItem(obj, 0));
             }
 
             return root;
@@ -69,7 +78,7 @@ namespace RimWorldAccess
 
             foreach (var category in categories)
             {
-                objectItem.Children.Add(BuildCategoryItem(obj, category, objectItem.IndentLevel + 1));
+                AddChild(objectItem, BuildCategoryItem(obj, category, objectItem.IndentLevel + 1));
             }
         }
 
@@ -516,7 +525,7 @@ namespace RimWorldAccess
                 };
 
                 gearItem.OnActivate = () => BuildGearItemsChildren(gearItem, pawn, gearCat);
-                parentItem.Children.Add(gearItem);
+                AddChild(parentItem, gearItem);
             }
         }
 
@@ -559,7 +568,7 @@ namespace RimWorldAccess
                 };
 
                 item.OnActivate = () => BuildGearActionChildren(item, pawn, gearItem);
-                gearCatItem.Children.Add(item);
+                AddChild(gearCatItem, item);
             }
         }
 
@@ -585,7 +594,7 @@ namespace RimWorldAccess
                 };
 
                 actionItem.OnActivate = () => ExecuteGearAction(pawn, gear, action);
-                gearItem.Children.Add(actionItem);
+                AddChild(gearItem, actionItem);
             }
         }
 
@@ -649,7 +658,7 @@ namespace RimWorldAccess
                 };
 
                 skillItem.OnActivate = () => BuildSkillDetailChildren(skillItem, skill);
-                parentItem.Children.Add(skillItem);
+                AddChild(parentItem, skillItem);
             }
         }
 
@@ -687,7 +696,7 @@ namespace RimWorldAccess
                 IsExpandable = false
             };
 
-            skillItem.Children.Add(detailItem);
+            AddChild(skillItem, detailItem);
         }
 
         /// <summary>
@@ -709,7 +718,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             relationsItem.OnActivate = () => BuildSocialRelationsChildren(relationsItem, pawn);
-            parentItem.Children.Add(relationsItem);
+            AddChild(parentItem, relationsItem);
 
             // Add Social Interactions as expandable item
             var interactionsItem = new InspectionTreeItem
@@ -722,7 +731,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             interactionsItem.OnActivate = () => BuildSocialInteractionsChildren(interactionsItem, pawn);
-            parentItem.Children.Add(interactionsItem);
+            AddChild(parentItem, interactionsItem);
 
             // Add Ideology if applicable
             if (ModsConfig.IdeologyActive && pawn.ideo != null)
@@ -737,7 +746,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
                 ideologyItem.OnActivate = () => BuildIdeologyChildren(ideologyItem, pawn);
-                parentItem.Children.Add(ideologyItem);
+                AddChild(parentItem, ideologyItem);
             }
         }
 
@@ -760,7 +769,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noRelationsItem);
+                AddChild(parentItem, noRelationsItem);
                 return;
             }
 
@@ -777,7 +786,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
                 relationItem.OnActivate = () => BuildRelationDetailChildren(relationItem, relation);
-                parentItem.Children.Add(relationItem);
+                AddChild(parentItem, relationItem);
             }
         }
 
@@ -804,7 +813,7 @@ namespace RimWorldAccess
                     IndentLevel = relationItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                relationItem.Children.Add(detailItem);
+                AddChild(relationItem, detailItem);
             }
         }
 
@@ -827,7 +836,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noInteractionsItem);
+                AddChild(parentItem, noInteractionsItem);
                 return;
             }
 
@@ -847,7 +856,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
                 interactionItem.OnActivate = () => BuildInteractionDetailChildren(interactionItem, interaction);
-                parentItem.Children.Add(interactionItem);
+                AddChild(parentItem, interactionItem);
             }
         }
 
@@ -866,7 +875,7 @@ namespace RimWorldAccess
                 IndentLevel = interactionItem.IndentLevel + 1,
                 IsExpandable = false
             };
-            interactionItem.Children.Add(detailItem);
+            AddChild(interactionItem, detailItem);
 
             if (interaction.IsFaded)
             {
@@ -877,7 +886,7 @@ namespace RimWorldAccess
                     IndentLevel = interactionItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                interactionItem.Children.Add(fadedItem);
+                AddChild(interactionItem, fadedItem);
             }
         }
 
@@ -899,7 +908,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noIdeologyItem);
+                AddChild(parentItem, noIdeologyItem);
                 return;
             }
 
@@ -911,7 +920,7 @@ namespace RimWorldAccess
                 IndentLevel = parentItem.IndentLevel + 1,
                 IsExpandable = false
             };
-            parentItem.Children.Add(ideoNameItem);
+            AddChild(parentItem, ideoNameItem);
 
             // Add certainty
             var certaintyItem = new InspectionTreeItem
@@ -921,7 +930,7 @@ namespace RimWorldAccess
                 IndentLevel = parentItem.IndentLevel + 1,
                 IsExpandable = false
             };
-            parentItem.Children.Add(certaintyItem);
+            AddChild(parentItem, certaintyItem);
 
             // Add role if available
             if (!string.IsNullOrEmpty(ideologyInfo.RoleName))
@@ -933,7 +942,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(roleItem);
+                AddChild(parentItem, roleItem);
             }
 
             // Add detailed certainty info
@@ -953,7 +962,7 @@ namespace RimWorldAccess
                         IndentLevel = parentItem.IndentLevel + 1,
                         IsExpandable = false
                     };
-                    parentItem.Children.Add(detailItem);
+                    AddChild(parentItem, detailItem);
                 }
             }
 
@@ -974,7 +983,7 @@ namespace RimWorldAccess
                         IndentLevel = parentItem.IndentLevel + 1,
                         IsExpandable = false
                     };
-                    parentItem.Children.Add(detailItem);
+                    AddChild(parentItem, detailItem);
                 }
             }
         }
@@ -1001,7 +1010,7 @@ namespace RimWorldAccess
                 WindowlessInspectionState.Close();
                 HealthTabState.OpenOperations(pawn);
             };
-            parentItem.Children.Add(operationsItem);
+            AddChild(parentItem, operationsItem);
 
             // Add Health Settings option
             var healthSettingsItem = new InspectionTreeItem
@@ -1017,7 +1026,7 @@ namespace RimWorldAccess
                 WindowlessInspectionState.Close();
                 HealthTabState.OpenMedicalSettings(pawn);
             };
-            parentItem.Children.Add(healthSettingsItem);
+            AddChild(parentItem, healthSettingsItem);
 
             // Add overall health state
             var stateItem = new InspectionTreeItem
@@ -1027,7 +1036,7 @@ namespace RimWorldAccess
                 IndentLevel = parentItem.IndentLevel + 1,
                 IsExpandable = false
             };
-            parentItem.Children.Add(stateItem);
+            AddChild(parentItem, stateItem);
 
             // Add bleeding info if applicable
             if (pawn.health.hediffSet.BleedRateTotal > 0.01f)
@@ -1039,7 +1048,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(bleedingItem);
+                AddChild(parentItem, bleedingItem);
             }
 
             // Add pain level if applicable
@@ -1053,7 +1062,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(painItem);
+                AddChild(parentItem, painItem);
             }
 
             // Add Conditions as expandable subcategory
@@ -1072,7 +1081,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
                 conditionsItem.OnActivate = () => BuildConditionsChildren(conditionsItem, pawn);
-                parentItem.Children.Add(conditionsItem);
+                AddChild(parentItem, conditionsItem);
             }
             else
             {
@@ -1083,7 +1092,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noConditionsItem);
+                AddChild(parentItem, noConditionsItem);
             }
 
             // Add key capacities
@@ -1099,7 +1108,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
                 capacitiesItem.OnActivate = () => BuildCapacitiesChildren(capacitiesItem, pawn);
-                parentItem.Children.Add(capacitiesItem);
+                AddChild(parentItem, capacitiesItem);
             }
         }
 
@@ -1206,7 +1215,7 @@ namespace RimWorldAccess
                 };
 
                 bodyPartItem.OnActivate = () => BuildBodyPartConditionsChildren(bodyPartItem, pawn, part, partHediffs);
-                parentItem.Children.Add(bodyPartItem);
+                AddChild(parentItem, bodyPartItem);
             }
         }
 
@@ -1234,7 +1243,7 @@ namespace RimWorldAccess
                 };
 
                 hediffItem.OnActivate = () => BuildHediffDetailChildren(hediffItem, hediff, pawn);
-                bodyPartItem.Children.Add(hediffItem);
+                AddChild(bodyPartItem, hediffItem);
             }
         }
 
@@ -1267,7 +1276,7 @@ namespace RimWorldAccess
                             IndentLevel = hediffItem.IndentLevel + 1,
                             IsExpandable = false
                         };
-                        hediffItem.Children.Add(effectItem);
+                        AddChild(hediffItem, effectItem);
                     }
                 }
             }
@@ -1288,7 +1297,7 @@ namespace RimWorldAccess
                     IndentLevel = hediffItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                hediffItem.Children.Add(separatorItem);
+                AddChild(hediffItem, separatorItem);
 
                 var descItem = new InspectionTreeItem
                 {
@@ -1297,7 +1306,7 @@ namespace RimWorldAccess
                     IndentLevel = hediffItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                hediffItem.Children.Add(descItem);
+                AddChild(hediffItem, descItem);
             }
         }
 
@@ -1336,7 +1345,7 @@ namespace RimWorldAccess
                         IndentLevel = parentItem.IndentLevel + 1,
                         IsExpandable = false
                     };
-                    parentItem.Children.Add(capacityItem);
+                    AddChild(parentItem, capacityItem);
                 }
             }
         }
@@ -1358,7 +1367,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noMoodItem);
+                AddChild(parentItem, noMoodItem);
                 return;
             }
 
@@ -1377,7 +1386,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noThoughtsItem);
+                AddChild(parentItem, noThoughtsItem);
                 return;
             }
 
@@ -1417,7 +1426,7 @@ namespace RimWorldAccess
                     IsExpandable = false
                 };
 
-                parentItem.Children.Add(thoughtItem);
+                AddChild(parentItem, thoughtItem);
 
                 thoughtGroup.Clear();
             }
@@ -1455,7 +1464,7 @@ namespace RimWorldAccess
                     IsExpandable = false
                 };
 
-                categoryItem.Children.Add(detailItem);
+                AddChild(categoryItem, detailItem);
             }
         }
 
@@ -1478,7 +1487,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             combatLogItem.OnActivate = () => BuildCombatLogEntries(combatLogItem, pawn);
-            parentItem.Children.Add(combatLogItem);
+            AddChild(parentItem, combatLogItem);
 
             // Add Social Log as expandable subcategory
             var socialLogItem = new InspectionTreeItem
@@ -1491,7 +1500,7 @@ namespace RimWorldAccess
                 IsExpanded = false
             };
             socialLogItem.OnActivate = () => BuildSocialLogEntries(socialLogItem, pawn);
-            parentItem.Children.Add(socialLogItem);
+            AddChild(parentItem, socialLogItem);
         }
 
         /// <summary>
@@ -1537,7 +1546,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noEntriesItem);
+                AddChild(parentItem, noEntriesItem);
                 return;
             }
 
@@ -1561,7 +1570,7 @@ namespace RimWorldAccess
                     };
                 }
 
-                parentItem.Children.Add(logItem);
+                AddChild(parentItem, logItem);
             }
         }
 
@@ -1602,7 +1611,7 @@ namespace RimWorldAccess
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
-                parentItem.Children.Add(noEntriesItem);
+                AddChild(parentItem, noEntriesItem);
                 return;
             }
 
@@ -1626,7 +1635,7 @@ namespace RimWorldAccess
                     };
                 }
 
-                parentItem.Children.Add(logItem);
+                AddChild(parentItem, logItem);
             }
         }
     }

@@ -102,7 +102,6 @@ namespace RimWorldAccess
             selectedMaterial = null;
             selectedCells.Clear();
 
-            TolkHelper.Speak("Architect menu opened. Select a category");
             Log.Message("Entered architect category selection");
         }
 

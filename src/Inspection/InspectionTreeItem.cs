@@ -25,6 +25,7 @@ namespace RimWorldAccess
         public bool IsExpandable { get; set; }
         public bool IsExpanded { get; set; }
         public List<InspectionTreeItem> Children { get; set; }
+        public InspectionTreeItem Parent { get; set; }  // Reference to parent item for upward navigation
         public object Data { get; set; }  // Associated data (Pawn, Building, SkillRecord, etc.)
         public Action OnActivate { get; set; }  // Action to execute when Enter is pressed
         public Action OnDelete { get; set; }  // Action to execute when Delete is pressed (for canceling jobs, etc.)
