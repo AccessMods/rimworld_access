@@ -1584,83 +1584,90 @@ namespace RimWorldAccess
 
             // ===== PRIORITY 4.75: Handle scanner keys (always available during map navigation) =====
             // Only process scanner keys if in gameplay with map navigation initialized
-            // IMPORTANT: Don't process scanner keys when any accessibility menu is active
+            // IMPORTANT: Don't process scanner keys when any accessibility menu is active,
+            // EXCEPT during placement mode (architect build or designator from gizmos)
             if (Current.ProgramState == ProgramState.Playing &&
                 Find.CurrentMap != null &&
                 MapNavigationState.IsInitialized &&
                 (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                !ZoneCreationState.IsInCreationMode &&
-                !KeyboardHelper.IsAnyAccessibilityMenuActive())
+                !ZoneCreationState.IsInCreationMode)
             {
-                bool handled = false;
-                bool ctrl = Event.current.control;
-                bool shift = Event.current.shift;
-                bool alt = Event.current.alt;
+                // Check placement mode here (after verifying we're in gameplay)
+                bool inPlacementMode = ArchitectState.IsInPlacementMode ||
+                    (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null);
 
-                if (key == KeyCode.PageDown)
+                if (!KeyboardHelper.IsAnyAccessibilityMenuActive() || inPlacementMode)
                 {
-                    if (alt)
-                    {
-                        ScannerState.NextBulkItem();
-                    }
-                    else if (ctrl)
-                    {
-                        ScannerState.NextCategory();
-                    }
-                    else if (shift)
-                    {
-                        ScannerState.NextSubcategory();
-                    }
-                    else
-                    {
-                        ScannerState.NextItem();
-                    }
-                    handled = true;
-                }
-                else if (key == KeyCode.PageUp)
-                {
-                    if (alt)
-                    {
-                        ScannerState.PreviousBulkItem();
-                    }
-                    else if (ctrl)
-                    {
-                        ScannerState.PreviousCategory();
-                    }
-                    else if (shift)
-                    {
-                        ScannerState.PreviousSubcategory();
-                    }
-                    else
-                    {
-                        ScannerState.PreviousItem();
-                    }
-                    handled = true;
-                }
-                else if (key == KeyCode.Home)
-                {
-                    if (alt)
-                    {
-                        // Alt+Home: Toggle auto-jump mode
-                        ScannerState.ToggleAutoJumpMode();
-                    }
-                    else
-                    {
-                        // Home: Jump to current item
-                        ScannerState.JumpToCurrent();
-                    }
-                    handled = true;
-                }
-                else if (key == KeyCode.End)
-                {
-                    ScannerState.ReadDistanceAndDirection();
-                    handled = true;
-                }
+                    bool handled = false;
+                    bool ctrl = Event.current.control;
+                    bool shift = Event.current.shift;
+                    bool alt = Event.current.alt;
 
-                if (handled)
-                {
-                    Event.current.Use();
-                    return;
+                    if (key == KeyCode.PageDown)
+                    {
+                        if (alt)
+                        {
+                            ScannerState.NextBulkItem();
+                        }
+                        else if (ctrl)
+                        {
+                            ScannerState.NextCategory();
+                        }
+                        else if (shift)
+                        {
+                            ScannerState.NextSubcategory();
+                        }
+                        else
+                        {
+                            ScannerState.NextItem();
+                        }
+                        handled = true;
+                    }
+                    else if (key == KeyCode.PageUp)
+                    {
+                        if (alt)
+                        {
+                            ScannerState.PreviousBulkItem();
+                        }
+                        else if (ctrl)
+                        {
+                            ScannerState.PreviousCategory();
+                        }
+                        else if (shift)
+                        {
+                            ScannerState.PreviousSubcategory();
+                        }
+                        else
+                        {
+                            ScannerState.PreviousItem();
+                        }
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        if (alt)
+                        {
+                            // Alt+Home: Toggle auto-jump mode
+                            ScannerState.ToggleAutoJumpMode();
+                        }
+                        else
+                        {
+                            // Home: Jump to current item
+                            ScannerState.JumpToCurrent();
+                        }
+                        handled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        ScannerState.ReadDistanceAndDirection();
+                        handled = true;
+                    }
+
+                    if (handled)
+                    {
+                        Event.current.Use();
+                        return;
+                    }
                 }
             }
 
