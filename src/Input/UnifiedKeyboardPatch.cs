@@ -298,7 +298,7 @@ namespace RimWorldAccess
                 !CaravanStatsState.IsActive)
             {
                 // Block all map-specific keys - world scanner handles PageUp/PageDown/Home/End above
-                if (key == KeyCode.A || key == KeyCode.Z ||
+                if (key == KeyCode.A ||
                     key == KeyCode.G || key == KeyCode.L || key == KeyCode.Q ||
                     key == KeyCode.Return || key == KeyCode.KeypadEnter ||
                     key == KeyCode.P || key == KeyCode.S ||
@@ -1839,28 +1839,6 @@ namespace RimWorldAccess
                 if (key == KeyCode.Backspace)
                 {
                     StorageSettingsMenuState.ProcessBackspace();
-                    Event.current.Use();
-                    return;
-                }
-            }
-
-            // ===== PRIORITY 4.7792: Handle zone settings menu typeahead if active =====
-            if (ZoneSettingsMenuState.IsActive)
-            {
-                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-                if (isLetter || isNumber)
-                {
-                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                    ZoneSettingsMenuState.ProcessTypeaheadCharacter(c);
-                    Event.current.Use();
-                    return;
-                }
-
-                if (key == KeyCode.Backspace)
-                {
-                    ZoneSettingsMenuState.ProcessBackspace();
                     Event.current.Use();
                     return;
                 }
