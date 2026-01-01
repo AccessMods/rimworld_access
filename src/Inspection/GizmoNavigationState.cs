@@ -871,6 +871,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the label for a room stats gizmo by accessing the building and room.
+        /// Uses shared TileInfoHelper.GetRoomStatsInfo() for consistent formatting.
         /// </summary>
         private static string GetRoomStatsLabel(Gizmo gizmo)
         {
@@ -882,11 +883,10 @@ namespace RimWorldAccess
                 if (buildingField != null)
                 {
                     var building = buildingField.GetValue(gizmo) as Building;
-                    if (building?.GetRoom() != null)
+                    Room room = Gizmo_RoomStats.GetRoomToShowStatsFor(building);
+                    if (room != null)
                     {
-                        var room = building.GetRoom();
-                        string roleName = room.Role?.label ?? "room";
-                        return $"Room Stats: {roleName.CapitalizeFirst()}";
+                        return TileInfoHelper.GetRoomStatsInfo(room);
                     }
                 }
             }
