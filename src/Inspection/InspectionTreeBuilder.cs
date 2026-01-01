@@ -250,6 +250,12 @@ namespace RimWorldAccess
                        BuildingComponentsHelper.GetDiscoverableComponents(building).Any(c => c.CategoryName == category && !c.IsReadOnly);
             }
 
+            // Check for zone-specific actionable categories
+            if (obj is Zone zone)
+            {
+                return category == "Storage" && zone is IStoreSettingsParent;
+            }
+
             return false;
         }
 
@@ -282,6 +288,21 @@ namespace RimWorldAccess
                 {
                     WindowlessInspectionState.Close();
                     PrisonerTabState.Open(pawn);
+                    return;
+                }
+            }
+
+            // Handle zone-specific actions
+            if (obj is Zone zone)
+            {
+                if (category == "Storage" && zone is IStoreSettingsParent zoneStorageParent)
+                {
+                    var settings = zoneStorageParent.GetStoreSettings();
+                    if (settings != null)
+                    {
+                        WindowlessInspectionState.Close();
+                        StorageSettingsMenuState.Open(settings);
+                    }
                     return;
                 }
             }
