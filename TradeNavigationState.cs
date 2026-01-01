@@ -110,7 +110,7 @@ namespace RimWorldAccess
             // Announce opening with controls
             string traderName = cachedTrader.TraderName ?? "Unknown Trader";
             string traderKind = cachedTrader.TraderKind?.label ?? "trader";
-            string controls = "Controls: Up/Down: Navigate | Left/Right: Switch categories | Enter: Adjust quantity | T: Accept trade | G: Toggle gift mode | B: Balance | Escape: Cancel";
+            string controls = "Controls: Up/Down: Navigate | Left/Right: Switch categories | Enter: Adjust quantity | Alt+A: Accept trade | Alt+G: Toggle gift mode | Alt+B: Balance | Escape: Cancel";
             TolkHelper.Speak($"Trading with {traderName} ({traderKind}). {controls}");
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();

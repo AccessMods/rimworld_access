@@ -213,57 +213,71 @@ namespace RimWorldAccess
                 }
             }
 
-            // ===== PRIORITY 0.5: Handle world navigation special keys (Home/End/PageUp/PageDown/Comma/Period/S/Q) =====
+            // ===== PRIORITY 0.5: Handle world scanner keys (PageUp/PageDown/Home/End) =====
             // Allow these keys when choosing destination, but not when in the formation dialog itself
-            // BUT: Skip if any world-map menu is active - they handle their own input
+            // BUT: Skip if caravan stats is active - it handles its own input
             if (WorldNavigationState.IsActive &&
-                !SettlementBrowserState.IsActive &&
-                !QuestLocationsBrowserState.IsActive &&
                 !CaravanStatsState.IsActive &&
                 !QuestMenuState.IsActive &&
                 (!CaravanFormationState.IsActive || CaravanFormationState.IsChoosingDestination) &&
                 !WindowlessDialogState.IsActive)
             {
                 bool handled = false;
+                bool alt = Event.current.alt;
+                bool ctrl = Event.current.control;
+                bool shift = Event.current.shift;
 
-                if (key == KeyCode.Home)
+                // Page Down: Next item (Ctrl = next category)
+                if (key == KeyCode.PageDown && !shift && !alt)
                 {
-                    WorldNavigationState.JumpToHome();
+                    if (ctrl)
+                        WorldScannerState.NextCategory();
+                    else
+                        WorldScannerState.NextItem();
                     handled = true;
                 }
-                else if (key == KeyCode.End)
+                // Page Up: Previous item (Ctrl = previous category)
+                else if (key == KeyCode.PageUp && !shift && !alt)
                 {
-                    WorldNavigationState.JumpToNearestCaravan();
+                    if (ctrl)
+                        WorldScannerState.PreviousCategory();
+                    else
+                        WorldScannerState.PreviousItem();
                     handled = true;
                 }
-                else if (key == KeyCode.PageDown)
+                // Home: Jump to scanner item (Alt = home settlement)
+                else if (key == KeyCode.Home && !shift && !ctrl)
                 {
-                    WorldNavigationState.CycleToNextSettlement();
+                    if (alt)
+                        WorldNavigationState.JumpToHome();
+                    else
+                        WorldScannerState.JumpToCurrent();
                     handled = true;
                 }
-                else if (key == KeyCode.PageUp)
+                // End: Read distance/direction (Alt = nearest caravan)
+                else if (key == KeyCode.End && !shift && !ctrl)
                 {
-                    WorldNavigationState.CycleToPreviousSettlement();
+                    if (alt)
+                        WorldNavigationState.JumpToNearestCaravan();
+                    else
+                        WorldScannerState.ReadDistanceAndDirection();
                     handled = true;
                 }
-                else if (key == KeyCode.Period && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                // Alt+J: Toggle auto-jump mode
+                else if (key == KeyCode.J && alt && !shift && !ctrl)
+                {
+                    WorldScannerState.ToggleAutoJumpMode();
+                    handled = true;
+                }
+                // Comma/Period: Cycle caravans
+                else if (key == KeyCode.Period && !shift && !ctrl && !alt)
                 {
                     WorldNavigationState.CycleToNextCaravan();
                     handled = true;
                 }
-                else if (key == KeyCode.Comma && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                else if (key == KeyCode.Comma && !shift && !ctrl && !alt)
                 {
                     WorldNavigationState.CycleToPreviousCaravan();
-                    handled = true;
-                }
-                else if (key == KeyCode.S && !Event.current.shift && !Event.current.control && !Event.current.alt)
-                {
-                    WorldNavigationState.OpenSettlementBrowser();
-                    handled = true;
-                }
-                else if (key == KeyCode.Q && !Event.current.shift && !Event.current.control && !Event.current.alt)
-                {
-                    WorldNavigationState.OpenQuestLocationsBrowser();
                     handled = true;
                 }
 
@@ -277,22 +291,18 @@ namespace RimWorldAccess
             // ===== EARLY BLOCK: If in world view, block most map-specific keys =====
             // Don't block when choosing destination (allow map interaction)
             // Don't block Enter/Escape when menus are active (need them for menu navigation)
-            // Skip this block if any world-map menu is active (they need their own input handling)
             if (WorldNavigationState.IsActive &&
                 !CaravanFormationState.IsActive &&
                 !WindowlessFloatMenuState.IsActive &&
                 !QuestMenuState.IsActive &&
-                !QuestLocationsBrowserState.IsActive &&
-                !SettlementBrowserState.IsActive &&
                 !CaravanStatsState.IsActive)
             {
-                // Block all map-specific keys (settlement browser is handled in WorldNavigationPatch with High priority)
-                if (key == KeyCode.I || key == KeyCode.A || key == KeyCode.Z ||
+                // Block all map-specific keys - world scanner handles PageUp/PageDown/Home/End above
+                if (key == KeyCode.A || key == KeyCode.Z ||
                     key == KeyCode.G || key == KeyCode.L || key == KeyCode.Q ||
                     key == KeyCode.Return || key == KeyCode.KeypadEnter ||
-                    key == KeyCode.RightBracket || key == KeyCode.P ||
+                    key == KeyCode.P || key == KeyCode.S ||
                     key == KeyCode.F2 || key == KeyCode.F3 || key == KeyCode.F6 || key == KeyCode.F7 ||
-                    key == KeyCode.PageUp || key == KeyCode.PageDown ||
                     key == KeyCode.R || key == KeyCode.T || key == KeyCode.Tab ||
                     (key == KeyCode.M && Event.current.alt) ||
                     (key == KeyCode.H && Event.current.alt) ||
@@ -301,8 +311,6 @@ namespace RimWorldAccess
                     (key == KeyCode.F && Event.current.alt))
                 {
                     // These keys should not work in world view - they're map-specific
-                    // World navigation keys (arrows, home, end, S, I for tile info, Tab in settlement browser)
-                    // are all handled by WorldNavigationPatch which runs with High priority before this patch
                     return;
                 }
             }
@@ -492,32 +500,33 @@ namespace RimWorldAccess
                     TradeNavigationState.EnterQuantityMode();
                     handled = true;
                 }
-                else if (key == KeyCode.T && !shift && !ctrl && !alt)
+                // Alt+key shortcuts (to not conflict with typeahead)
+                else if (alt && key == KeyCode.A)
                 {
                     TradeNavigationState.AcceptTrade();
                     handled = true;
                 }
-                else if (key == KeyCode.R && !shift && !ctrl && !alt)
+                else if (alt && key == KeyCode.R && !shift)
                 {
                     TradeNavigationState.ResetCurrentItem();
                     handled = true;
                 }
-                else if (key == KeyCode.R && shift)
+                else if (alt && key == KeyCode.R && shift)
                 {
                     TradeNavigationState.ResetAll();
                     handled = true;
                 }
-                else if (key == KeyCode.G && !shift && !ctrl && !alt)
+                else if (alt && key == KeyCode.G)
                 {
                     TradeNavigationState.ToggleGiftMode();
                     handled = true;
                 }
-                else if (key == KeyCode.P && !shift && !ctrl && !alt)
+                else if (alt && key == KeyCode.P)
                 {
                     TradeNavigationState.ShowPriceBreakdown();
                     handled = true;
                 }
-                else if (key == KeyCode.B && !shift && !ctrl && !alt)
+                else if (alt && key == KeyCode.B)
                 {
                     TradeNavigationState.AnnounceTradeBalance();
                     handled = true;
@@ -532,17 +541,13 @@ namespace RimWorldAccess
                     TradeNavigationState.AdjustQuantity(1);
                     handled = true;
                 }
-                // Handle typeahead characters (letters and numbers except those used for commands)
+                // Handle typeahead characters (letters and numbers - commands now use Alt+ so no exclusions needed)
                 else
                 {
                     bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
                     bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
 
-                    // Exclude letters used for commands: T (accept trade), R (reset), G (gift), P (price), B (balance)
-                    bool isExcludedLetter = key == KeyCode.T || key == KeyCode.R || key == KeyCode.G ||
-                                           key == KeyCode.P || key == KeyCode.B;
-
-                    if ((isLetter || isNumber) && !shift && !ctrl && !alt && !isExcludedLetter)
+                    if ((isLetter || isNumber) && !shift && !ctrl && !alt)
                     {
                         char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
                         TradeNavigationState.ProcessTypeaheadCharacter(c);
@@ -2668,6 +2673,10 @@ namespace RimWorldAccess
             // ===== PRIORITY 10: Handle right bracket ] key for colonist orders =====
             if (key == KeyCode.RightBracket)
             {
+                // Don't process if in world view - WorldNavigationPatch handles ] there
+                if (Find.World?.renderer?.wantedMode == RimWorld.Planet.WorldRenderMode.Planet)
+                    return;
+
                 // Only process during normal gameplay with a valid map
                 if (Find.CurrentMap == null)
                     return;

@@ -57,18 +57,36 @@ namespace RimWorldAccess
                     {
                         summary.Append($", {settlement.Label}");
 
-                        // Add faction info
+                        // Add faction info - only what's visible on the world map tooltip
                         if (settlement.Faction != null)
                         {
                             if (settlement.Faction == Faction.OfPlayer)
                             {
-                                summary.Append(" (Player)");
+                                summary.Append(" (Player colony)");
                             }
                             else
                             {
+                                // Faction name
+                                summary.Append($" ({settlement.Faction.Name}");
+
+                                // Relationship with goodwill (visible on inspect pane)
                                 string relationship = settlement.Faction.HostileTo(Faction.OfPlayer) ? "Hostile" :
-                                                     settlement.Faction.PlayerRelationKind.GetLabel();
-                                summary.Append($" ({settlement.Faction.Name}, {relationship})");
+                                                     settlement.Faction.PlayerRelationKind.GetLabelCap();
+                                int goodwill = settlement.Faction.PlayerGoodwill;
+                                string goodwillStr = goodwill >= 0 ? $"+{goodwill}" : goodwill.ToString();
+                                summary.Append($", {relationship} {goodwillStr}");
+
+                                summary.Append(")");
+
+                                // Title required for trading (shown on inspect pane for Empire)
+                                if (settlement.TraderKind != null)
+                                {
+                                    RoyalTitleDef titleRequired = settlement.TraderKind.TitleRequiredToTrade;
+                                    if (titleRequired != null)
+                                    {
+                                        summary.Append($". Requires {titleRequired.GetLabelCapForBothGenders()} title to trade");
+                                    }
+                                }
                             }
                         }
                     }
@@ -86,7 +104,7 @@ namespace RimWorldAccess
                         }
                     }
 
-                    // If no settlement or caravan, list other world objects
+                    // If no settlement or caravan, list other world objects (like sites)
                     if (settlement == null && caravan == null)
                     {
                         WorldObject firstObject = objectsAtTile.FirstOrDefault();
@@ -96,6 +114,13 @@ namespace RimWorldAccess
                         }
                     }
                 }
+            }
+
+            // Add quest information for this tile (includes difficulty and description)
+            string questInfo = GetQuestInfoForTile(planetTile);
+            if (!string.IsNullOrEmpty(questInfo))
+            {
+                summary.Append($". {questInfo}");
             }
 
             return summary.ToString();
@@ -161,10 +186,31 @@ namespace RimWorldAccess
                         {
                             if (settlement.Faction != null)
                             {
-                                string relationship = settlement.Faction == Faction.OfPlayer ? "Player" :
-                                                     settlement.Faction.HostileTo(Faction.OfPlayer) ? "Hostile" :
-                                                     settlement.Faction.PlayerRelationKind.GetLabel();
-                                info.Append($" ({settlement.Faction.Name}, {relationship})");
+                                if (settlement.Faction == Faction.OfPlayer)
+                                {
+                                    info.Append(" (Player colony)");
+                                }
+                                else
+                                {
+                                    // Only show what's visible on the world map inspect pane
+                                    string relationship = settlement.Faction.HostileTo(Faction.OfPlayer) ? "Hostile" :
+                                                         settlement.Faction.PlayerRelationKind.GetLabelCap();
+                                    int goodwill = settlement.Faction.PlayerGoodwill;
+                                    string goodwillStr = goodwill >= 0 ? $"+{goodwill}" : goodwill.ToString();
+                                    info.AppendLine();
+                                    info.AppendLine($"    Faction: {settlement.Faction.Name}");
+                                    info.AppendLine($"    Relationship: {relationship} ({goodwillStr})");
+
+                                    // Title required for trading (shown on inspect pane for Empire)
+                                    if (settlement.TraderKind != null)
+                                    {
+                                        RoyalTitleDef titleRequired = settlement.TraderKind.TitleRequiredToTrade;
+                                        if (titleRequired != null)
+                                        {
+                                            info.Append($"    Requires {titleRequired.GetLabelCapForBothGenders()} title to trade");
+                                        }
+                                    }
+                                }
                             }
                         }
                         else if (obj is Caravan caravan)
@@ -182,6 +228,14 @@ namespace RimWorldAccess
                         info.AppendLine();
                     }
                 }
+            }
+
+            // Add quest information
+            string questInfo = GetDetailedQuestInfoForTile(planetTile);
+            if (!string.IsNullOrEmpty(questInfo))
+            {
+                info.AppendLine("\nQuest Targets:");
+                info.Append(questInfo);
             }
 
             return info.ToString().TrimEnd();
@@ -269,6 +323,167 @@ namespace RimWorldAccess
             return Find.WorldObjects.Caravans
                 .Where(c => c.Faction == Faction.OfPlayer)
                 .ToList();
+        }
+
+        /// <summary>
+        /// Gets quest information for a tile (if any quests target this tile).
+        /// Includes difficulty and brief description for direct tile announcements.
+        /// </summary>
+        public static string GetQuestInfoForTile(PlanetTile planetTile)
+        {
+            if (!planetTile.Valid || Find.QuestManager == null)
+                return null;
+
+            List<string> questInfos = new List<string>();
+
+            var activeQuests = Find.QuestManager.questsInDisplayOrder
+                .Where(q => q.State == QuestState.Ongoing && !q.hidden && !q.hiddenInUI)
+                .ToList();
+
+            foreach (Quest quest in activeQuests)
+            {
+                bool isQuestTarget = false;
+
+                foreach (GlobalTargetInfo target in quest.QuestLookTargets)
+                {
+                    if (!target.IsValid || !target.IsWorldTarget)
+                        continue;
+
+                    PlanetTile targetTile = PlanetTile.Invalid;
+
+                    if (target.HasWorldObject && target.WorldObject != null)
+                    {
+                        targetTile = target.WorldObject.Tile;
+                    }
+                    else if (target.Tile.Valid)
+                    {
+                        targetTile = target.Tile;
+                    }
+
+                    if (targetTile.Valid && targetTile == planetTile)
+                    {
+                        isQuestTarget = true;
+                        break;
+                    }
+                }
+
+                if (isQuestTarget)
+                {
+                    string questName = quest.name.StripTags();
+                    StringBuilder questEntry = new StringBuilder();
+                    questEntry.Append($"Quest: {questName}");
+
+                    // Add difficulty rating as text (avoid unicode symbols that screen readers may not handle)
+                    if (quest.challengeRating > 0)
+                    {
+                        string difficulty = quest.challengeRating == 1 ? "1 star" : $"{quest.challengeRating} stars";
+                        questEntry.Append($" ({difficulty})");
+                    }
+
+                    // Add description (first two sentences or up to 250 chars)
+                    string questDesc = quest.description.ToString().StripTags();
+                    if (!string.IsNullOrEmpty(questDesc))
+                    {
+                        // Find second sentence end or use first 250 characters
+                        int firstPeriod = questDesc.IndexOf('.');
+                        int secondPeriod = firstPeriod > 0 ? questDesc.IndexOf('.', firstPeriod + 1) : -1;
+
+                        if (secondPeriod > 0 && secondPeriod < 250)
+                        {
+                            questDesc = questDesc.Substring(0, secondPeriod + 1);
+                        }
+                        else if (firstPeriod > 0 && firstPeriod < 250)
+                        {
+                            questDesc = questDesc.Substring(0, firstPeriod + 1);
+                        }
+                        else if (questDesc.Length > 250)
+                        {
+                            questDesc = questDesc.Substring(0, 247) + "...";
+                        }
+                        questEntry.Append($" - {questDesc}");
+                    }
+
+                    questInfos.Add(questEntry.ToString());
+                }
+            }
+
+            if (questInfos.Count == 0)
+                return null;
+
+            return string.Join(" | ", questInfos);
+        }
+
+        /// <summary>
+        /// Gets detailed quest information for a tile (for the I key detailed view).
+        /// </summary>
+        public static string GetDetailedQuestInfoForTile(PlanetTile planetTile)
+        {
+            if (!planetTile.Valid || Find.QuestManager == null)
+                return null;
+
+            StringBuilder info = new StringBuilder();
+
+            var activeQuests = Find.QuestManager.questsInDisplayOrder
+                .Where(q => q.State == QuestState.Ongoing && !q.hidden && !q.hiddenInUI)
+                .ToList();
+
+            foreach (Quest quest in activeQuests)
+            {
+                bool isQuestTarget = false;
+
+                foreach (GlobalTargetInfo target in quest.QuestLookTargets)
+                {
+                    if (!target.IsValid || !target.IsWorldTarget)
+                        continue;
+
+                    PlanetTile targetTile = PlanetTile.Invalid;
+
+                    if (target.HasWorldObject && target.WorldObject != null)
+                    {
+                        targetTile = target.WorldObject.Tile;
+                    }
+                    else if (target.Tile.Valid)
+                    {
+                        targetTile = target.Tile;
+                    }
+
+                    if (targetTile.Valid && targetTile == planetTile)
+                    {
+                        isQuestTarget = true;
+                        break;
+                    }
+                }
+
+                if (isQuestTarget)
+                {
+                    string questName = quest.name.StripTags();
+                    string questDesc = quest.description.ToString().StripTags();
+
+                    info.AppendLine($"Quest: {questName}");
+
+                    // Add challenge rating if available (use text instead of unicode symbols)
+                    if (quest.challengeRating > 0)
+                    {
+                        string difficulty = quest.challengeRating == 1 ? "1 star" : $"{quest.challengeRating} stars";
+                        info.AppendLine($"  Difficulty: {difficulty}");
+                    }
+
+                    // Add description (truncate if too long)
+                    if (!string.IsNullOrEmpty(questDesc))
+                    {
+                        if (questDesc.Length > 200)
+                            questDesc = questDesc.Substring(0, 197) + "...";
+                        info.AppendLine($"  Description: {questDesc}");
+                    }
+
+                    info.AppendLine();
+                }
+            }
+
+            if (info.Length == 0)
+                return null;
+
+            return info.ToString().TrimEnd();
         }
     }
 }

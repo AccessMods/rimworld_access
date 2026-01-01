@@ -30,9 +30,9 @@ namespace RimWorldAccess
 
             try
             {
-                // Get the message text
-                string messageText = __instance.text.ToString();
-                string title = __instance.title ?? "";
+                // Get the message text and strip color/formatting tags
+                string messageText = __instance.text.ToString().StripTags();
+                string title = (__instance.title ?? "").StripTags();
 
                 // Build announcement
                 string announcement = "";

@@ -269,8 +269,8 @@ namespace RimWorldAccess
 
         private static string BuildDialogAnnouncement()
         {
-            string title = DialogElementExtractor.GetDialogTitle(currentDialog);
-            string message = DialogElementExtractor.GetDialogMessage(currentDialog);
+            string title = DialogElementExtractor.GetDialogTitle(currentDialog)?.StripTags() ?? "";
+            string message = DialogElementExtractor.GetDialogMessage(currentDialog)?.StripTags() ?? "";
 
             string announcement = "Dialog opened. ";
 

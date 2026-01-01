@@ -626,6 +626,10 @@ namespace RimWorldAccess
 
             try
             {
+                // Enter destination selection mode BEFORE removing dialog
+                // (PostClose checks this flag to avoid clearing currentDialog)
+                isChoosingDestination = true;
+
                 // Close the dialog temporarily (don't clear currentDialog - we need it to return)
                 if (Find.WindowStack != null)
                 {
@@ -634,9 +638,6 @@ namespace RimWorldAccess
 
                 // Switch to world view
                 CameraJumper.TryShowWorld();
-
-                // Enter destination selection mode
-                isChoosingDestination = true;
 
                 // Make sure world navigation is active
                 if (!WorldNavigationState.IsActive)
@@ -661,13 +662,24 @@ namespace RimWorldAccess
             if (currentDialog == null)
             {
                 TolkHelper.Speak("No dialog available", SpeechPriority.High);
+                Log.Warning("RimWorld Access: SetDestination called but currentDialog is null");
+                isChoosingDestination = false;
+                return;
+            }
+
+            if (!destinationTile.Valid)
+            {
+                TolkHelper.Speak("Invalid destination tile", SpeechPriority.High);
+                Log.Warning($"RimWorld Access: SetDestination called with invalid tile: {destinationTile}");
                 isChoosingDestination = false;
                 return;
             }
 
             try
             {
-                // Call Notify_ChoseRoute to properly set destination and calculate exit tile
+                Log.Message($"RimWorld Access: Setting caravan destination to tile {destinationTile.tileId}");
+
+                // Get the method before we do anything
                 MethodInfo notifyChoseRouteMethod = AccessTools.Method(typeof(Dialog_FormCaravan), "Notify_ChoseRoute");
                 if (notifyChoseRouteMethod == null)
                 {
@@ -676,37 +688,38 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // This sets destinationTile, calculates startingTile, and updates other state
-                notifyChoseRouteMethod.Invoke(currentDialog, new object[] { destinationTile });
-
-                // Also set the route via the world route planner for visual feedback
-                if (Find.WorldRoutePlanner != null)
-                {
-                    Find.WorldRoutePlanner.Start(currentDialog);
-                    Find.WorldRoutePlanner.TryAddWaypoint(destinationTile, true);
-                    Find.WorldRoutePlanner.Stop();
-                }
-
-                // Return to map view
+                // Return to map view first
                 CameraJumper.TryHideWorld();
 
-                // Reopen the dialog
+                // Reopen the dialog BEFORE calling Notify_ChoseRoute (matches game behavior)
                 if (Find.WindowStack != null)
                 {
                     Find.WindowStack.Add(currentDialog);
                 }
 
-                // Exit destination selection mode
+                // Exit destination selection mode BEFORE calling Notify_ChoseRoute
+                // (so PostOpen doesn't think we're still choosing)
                 isChoosingDestination = false;
+
+                // Now call Notify_ChoseRoute to set destination and calculate exit tile
+                notifyChoseRouteMethod.Invoke(currentDialog, new object[] { destinationTile });
+
+                // Verify the destination was set by reading it back
+                FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
+                if (destTileField != null)
+                {
+                    PlanetTile setTile = (PlanetTile)destTileField.GetValue(currentDialog);
+                    Log.Message($"RimWorld Access: After Notify_ChoseRoute, destinationTile is now: {setTile.tileId}, Valid: {setTile.Valid}");
+                }
 
                 // Announce destination set
                 string tileInfo = WorldInfoHelper.GetTileSummary(destinationTile);
-                TolkHelper.Speak($"Destination set to {tileInfo}. Returning to caravan formation dialog.");
+                TolkHelper.Speak($"Destination set to {tileInfo}.");
             }
             catch (Exception ex)
             {
                 TolkHelper.Speak($"Failed to set destination: {ex.Message}", SpeechPriority.High);
-                Log.Error($"RimWorld Access: Failed to set caravan destination: {ex.Message}");
+                Log.Error($"RimWorld Access: Failed to set caravan destination: {ex}");
                 isChoosingDestination = false;
             }
         }
@@ -992,14 +1005,12 @@ namespace RimWorldAccess
                     FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
                     if (destTileField != null)
                     {
-                        var destTileObj = destTileField.GetValue(currentDialog);
-                        PropertyInfo validProp = destTileObj.GetType().GetProperty("Valid");
-                        bool isValid = validProp != null && (bool)validProp.GetValue(destTileObj);
+                        // Cast boxed value directly to PlanetTile struct
+                        PlanetTile destTile = (PlanetTile)destTileField.GetValue(currentDialog);
 
-                        if (isValid && Find.WorldGrid != null)
+                        if (destTile.Valid && Find.WorldGrid != null)
                         {
-                            int destTileIndex = (int)destTileObj;
-                            string tileName = WorldInfoHelper.GetTileSummary(destTileIndex);
+                            string tileName = WorldInfoHelper.GetTileSummary(destTile);
                             statsEntries.Add($"Destination: {tileName}");
 
                             // Get ETA
@@ -1016,12 +1027,13 @@ namespace RimWorldAccess
                         }
                         else
                         {
-                            statsEntries.Add("Destination: Not set");
+                            statsEntries.Add("Destination: Not set (use Alt+D to choose)");
                         }
                     }
                 }
-                catch
+                catch (Exception destEx)
                 {
+                    Log.Warning($"RimWorld Access: Failed to get destination info: {destEx.Message}");
                     statsEntries.Add("Destination: Not set");
                 }
             }

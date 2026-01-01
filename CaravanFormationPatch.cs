@@ -25,11 +25,16 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Patch for PostClose to deactivate keyboard navigation when the dialog closes.
+        /// Don't close if we're in destination selection mode (dialog was temporarily removed).
         /// </summary>
         [HarmonyPatch("PostClose")]
         [HarmonyPostfix]
         public static void PostClose_Postfix()
         {
+            // Don't close state if we're choosing a destination - we'll reopen the dialog
+            if (CaravanFormationState.IsChoosingDestination)
+                return;
+
             CaravanFormationState.Close();
         }
 
