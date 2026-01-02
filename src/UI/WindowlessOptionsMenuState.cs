@@ -70,6 +70,9 @@ namespace RimWorldAccess
 
             // Save all preferences when closing, like the native options dialog
             Prefs.Save();
+
+            // Save RimWorld Access settings
+            RimWorldAccessMod_Settings.Settings?.Write();
         }
 
         /// <summary>
@@ -163,9 +166,15 @@ namespace RimWorldAccess
             }
             else
             {
-                // Close menu and return to pause menu
+                // Close menu
                 Close();
-                WindowlessPauseMenuState.Open();
+
+                // Only return to pause menu if in-game (not at main menu)
+                if (Current.ProgramState == ProgramState.Playing)
+                {
+                    WindowlessPauseMenuState.Open();
+                }
+                // At main menu, just close - main menu navigation handles itself
             }
         }
 
@@ -331,7 +340,7 @@ namespace RimWorldAccess
                 if (currentLevel == OptionsMenuLevel.CategoryList)
                 {
                     itemName = categories[selectedCategoryIndex].Name;
-                    TolkHelper.Speak($"Category: {itemName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"{itemName}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
                 }
                 else
                 {
@@ -350,13 +359,21 @@ namespace RimWorldAccess
             if (currentLevel == OptionsMenuLevel.CategoryList)
             {
                 string categoryName = categories[selectedCategoryIndex].Name;
-                TolkHelper.Speak($"Category: {categoryName}. {MenuHelper.FormatPosition(selectedCategoryIndex, categories.Count)}");
+                string positionPart = MenuHelper.FormatPosition(selectedCategoryIndex, categories.Count);
+                string announcement = string.IsNullOrEmpty(positionPart)
+                    ? $"{categoryName}."
+                    : $"{categoryName}. {positionPart}";
+                TolkHelper.Speak(announcement);
             }
             else // SettingsList
             {
                 var setting = categories[selectedCategoryIndex].Settings[selectedSettingIndex];
                 var currentSettings = categories[selectedCategoryIndex].Settings;
-                TolkHelper.Speak($"{setting.GetAnnouncement()}. {MenuHelper.FormatPosition(selectedSettingIndex, currentSettings.Count)}");
+                string positionPart = MenuHelper.FormatPosition(selectedSettingIndex, currentSettings.Count);
+                string announcement = string.IsNullOrEmpty(positionPart)
+                    ? $"{setting.GetAnnouncement()}."
+                    : $"{setting.GetAnnouncement()}. {positionPart}";
+                TolkHelper.Speak(announcement);
             }
         }
 
@@ -564,6 +581,16 @@ namespace RimWorldAccess
                 dev.Settings.Add(new CheckboxSetting("Close Log Window On Escape", () => Prefs.CloseLogWindowOnEscape, v => Prefs.CloseLogWindowOnEscape = v));
                 categories.Add(dev);
             }
+
+            // RimWorld Access settings - directly editable here
+            var accessSettings = new OptionCategory("RimWorld Access");
+            accessSettings.Settings.Add(new CheckboxSetting("Wrap Navigation",
+                () => RimWorldAccessMod_Settings.Settings?.WrapNavigation ?? false,
+                v => { if (RimWorldAccessMod_Settings.Settings != null) RimWorldAccessMod_Settings.Settings.WrapNavigation = v; }));
+            accessSettings.Settings.Add(new CheckboxSetting("Announce Position",
+                () => RimWorldAccessMod_Settings.Settings?.AnnouncePosition ?? true,
+                v => { if (RimWorldAccessMod_Settings.Settings != null) RimWorldAccessMod_Settings.Settings.AnnouncePosition = v; }));
+            categories.Add(accessSettings);
 
             // Mod Settings Category - list all mods that have settings
             var modSettings = new OptionCategory("Mod Settings");

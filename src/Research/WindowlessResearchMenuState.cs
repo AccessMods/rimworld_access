@@ -713,7 +713,11 @@ namespace RimWorldAccess
                 siblings = current.Parent.Children;
             }
             int siblingPosition = siblings.IndexOf(current) + 1;
-            announcement += $". {MenuHelper.FormatPosition(siblingPosition - 1, siblings.Count)}.";
+            string positionPart = MenuHelper.FormatPosition(siblingPosition - 1, siblings.Count);
+            announcement += string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
+
+            // Add level suffix at the end (only announced when level changes)
+            announcement += MenuHelper.GetLevelSuffix("ResearchMenu", current.Level);
 
             // Add level suffix at the end (only announced when level changes)
             announcement += MenuHelper.GetLevelSuffix("ResearchMenu", current.Level);

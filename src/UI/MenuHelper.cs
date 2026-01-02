@@ -14,9 +14,12 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Formats position as "X of Y" (1-indexed).
+        /// Returns empty string if AnnouncePosition setting is disabled.
         /// </summary>
         public static string FormatPosition(int index, int total)
         {
+            if (RimWorldAccessMod_Settings.Settings?.AnnouncePosition == false)
+                return "";
             return $"{index + 1} of {total}";
         }
 
@@ -55,28 +58,38 @@ namespace RimWorldAccess
             lastAnnouncedLevels.Remove(menuKey);
         }
 
-        // ===== NAVIGATION (NO WRAPPING) =====
+        // ===== NAVIGATION =====
 
         /// <summary>
-        /// Moves to next item. Returns new index. Does NOT wrap.
+        /// Moves to next item. Returns new index.
+        /// Wraps to beginning if WrapNavigation setting is enabled.
         /// </summary>
         public static int SelectNext(int currentIndex, int count)
         {
             if (count == 0) return 0;
             if (currentIndex < count - 1)
                 return currentIndex + 1;
-            return currentIndex; // Stay at end
+
+            // At end: wrap or stay based on setting
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
+                return 0;
+            return currentIndex;
         }
 
         /// <summary>
-        /// Moves to previous item. Returns new index. Does NOT wrap.
+        /// Moves to previous item. Returns new index.
+        /// Wraps to end if WrapNavigation setting is enabled.
         /// </summary>
         public static int SelectPrevious(int currentIndex, int count)
         {
             if (count == 0) return 0;
             if (currentIndex > 0)
                 return currentIndex - 1;
-            return currentIndex; // Stay at start
+
+            // At start: wrap or stay based on setting
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
+                return count - 1;
+            return currentIndex;
         }
 
         /// <summary>

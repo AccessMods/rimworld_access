@@ -451,18 +451,20 @@ namespace RimWorldAccess
 
             MenuItem item = menuItems[selectedIndex];
             var (position, total) = GetSiblingPosition(item);
+            string positionPart = MenuHelper.FormatPosition(position - 1, total);
+            string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
 
             string announcement = "";
 
             if (item.type == MenuItemType.Category)
             {
                 string expandState = item.isExpanded ? "expanded" : "collapsed";
-                announcement = $"{item.label}, {expandState}. {position} of {total}.";
+                announcement = $"{item.label}, {expandState}{positionSection}";
             }
             else
             {
                 // Designator
-                announcement = $"{item.label}. {position} of {total}.";
+                announcement = $"{item.label}{positionSection}";
             }
 
             // Add level suffix at the end (only announced when level changes)

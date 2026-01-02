@@ -697,7 +697,9 @@ namespace RimWorldAccess
                 }
                 // Build full announcement: "{name} {state}. {X} of {Y}. level N"
                 string levelSuffix = MenuHelper.GetLevelSuffix("Inspection", adjustedLevel);
-                string announcement = $"{label}{stateIndicator}. {MenuHelper.FormatPosition(position - 1, total)}.{levelSuffix}";
+                string positionPart = MenuHelper.FormatPosition(position - 1, total);
+                string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
+                string announcement = $"{label}{stateIndicator}{positionSection}{levelSuffix}";
 
                 TolkHelper.Speak(announcement);
             }
