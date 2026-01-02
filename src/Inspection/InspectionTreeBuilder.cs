@@ -253,7 +253,9 @@ namespace RimWorldAccess
             // Check for zone-specific actionable categories
             if (obj is Zone zone)
             {
-                return category == "Storage" && zone is IStoreSettingsParent;
+                string renameLabel = "Rename".Translate().ToString();
+                return (category == "Storage" && zone is IStoreSettingsParent)
+                    || category == renameLabel;
             }
 
             return false;
@@ -295,6 +297,14 @@ namespace RimWorldAccess
             // Handle zone-specific actions
             if (obj is Zone zone)
             {
+                string renameLabel = "Rename".Translate().ToString();
+                if (category == renameLabel)
+                {
+                    WindowlessInspectionState.Close();
+                    ZoneRenameState.Open(zone);
+                    return;
+                }
+
                 if (category == "Storage" && zone is IStoreSettingsParent zoneStorageParent)
                 {
                     var settings = zoneStorageParent.GetStoreSettings();

@@ -156,6 +156,7 @@ namespace RimWorldAccess
             else if (obj is Zone zone)
             {
                 categories.Add("Overview");
+                categories.Add("Rename".Translate().ToString());
 
                 // Zone_Stockpile implements IStoreSettingsParent, so add Storage category
                 if (zone is IStoreSettingsParent)
