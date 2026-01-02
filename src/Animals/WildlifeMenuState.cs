@@ -11,14 +11,10 @@ namespace RimWorldAccess
         public static bool IsActive { get; private set; } = false;
 
         private static List<Pawn> wildlifeList = new List<Pawn>();
-        private static int currentAnimalIndex = 0;
-        private static int currentColumnIndex = 0;
-        private static int sortColumnIndex = 4; // Default: Body Size (matches PawnTable_Wildlife)
-        private static bool sortDescending = true; // Default: descending (matches PawnTable_Wildlife)
-        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
+        private static TabularMenuHelper<Pawn> tableHelper;
 
-        public static TypeaheadSearchHelper Typeahead => typeahead;
-        public static int CurrentAnimalIndex => currentAnimalIndex;
+        public static TypeaheadSearchHelper Typeahead => tableHelper?.Typeahead;
+        public static int CurrentAnimalIndex => tableHelper?.CurrentRowIndex ?? 0;
 
         public static void Open()
         {
@@ -49,9 +45,18 @@ namespace RimWorldAccess
             // Apply default sort (by body size descending, then by label)
             wildlifeList = WildlifeMenuHelper.DefaultSort(wildlifeList);
 
-            currentAnimalIndex = 0;
-            currentColumnIndex = 0;
-            typeahead.ClearSearch();
+            // Initialize table helper
+            tableHelper = new TabularMenuHelper<Pawn>(
+                getColumnCount: WildlifeMenuHelper.GetTotalColumnCount,
+                getItemLabel: WildlifeMenuHelper.GetAnimalName,
+                getColumnName: WildlifeMenuHelper.GetColumnName,
+                getColumnValue: WildlifeMenuHelper.GetColumnValue,
+                sortByColumn: (items, col, desc) => WildlifeMenuHelper.SortWildlifeByColumn(items.ToList(), col, desc),
+                defaultSortColumn: 4,  // BodySize
+                defaultSortDescending: true
+            );
+            tableHelper.Reset(4, true);
+
             IsActive = true;
 
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
@@ -65,7 +70,7 @@ namespace RimWorldAccess
         {
             IsActive = false;
             wildlifeList.Clear();
-            typeahead.ClearSearch();
+            tableHelper?.ClearSearch();
             SoundDefOf.TabClose.PlayOneShotOnCamera();
             TolkHelper.Speak("Wildlife menu closed");
         }
@@ -73,9 +78,7 @@ namespace RimWorldAccess
         public static void SelectNextAnimal()
         {
             if (wildlifeList.Count == 0) return;
-
-            // Wrap around to first when at end
-            currentAnimalIndex = (currentAnimalIndex + 1) % wildlifeList.Count;
+            tableHelper.SelectNextRow(wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -83,27 +86,21 @@ namespace RimWorldAccess
         public static void SelectPreviousAnimal()
         {
             if (wildlifeList.Count == 0) return;
-
-            // Wrap around to last when at start
-            currentAnimalIndex = (currentAnimalIndex - 1 + wildlifeList.Count) % wildlifeList.Count;
+            tableHelper.SelectPreviousRow(wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
 
         public static void SelectNextColumn()
         {
-            int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            // Wrap around to first column when at end
-            currentColumnIndex = (currentColumnIndex + 1) % totalColumns;
+            tableHelper.SelectNextColumn();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
 
         public static void SelectPreviousColumn()
         {
-            int totalColumns = WildlifeMenuHelper.GetTotalColumnCount();
-            // Wrap around to last column when at start
-            currentColumnIndex = (currentColumnIndex - 1 + totalColumns) % totalColumns;
+            tableHelper.SelectPreviousColumn();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: false);
         }
@@ -112,22 +109,8 @@ namespace RimWorldAccess
         {
             if (wildlifeList.Count == 0) return;
 
-            Pawn currentAnimal = wildlifeList[currentAnimalIndex];
-            string columnName = WildlifeMenuHelper.GetColumnName(currentColumnIndex);
-            string columnValue = WildlifeMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
-            string position = MenuHelper.FormatPosition(currentAnimalIndex, wildlifeList.Count);
-
-            string announcement;
-            if (includeAnimalName)
-            {
-                string animalName = WildlifeMenuHelper.GetAnimalName(currentAnimal);
-                announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
-            }
-            else
-            {
-                announcement = $"{columnName}: {columnValue}";
-            }
-
+            Pawn currentAnimal = wildlifeList[tableHelper.CurrentRowIndex];
+            string announcement = tableHelper.BuildCellAnnouncement(currentAnimal, wildlifeList.Count, includeAnimalName);
             TolkHelper.Speak(announcement);
         }
 
@@ -135,9 +118,9 @@ namespace RimWorldAccess
         {
             if (wildlifeList.Count == 0) return;
 
-            Pawn currentAnimal = wildlifeList[currentAnimalIndex];
+            Pawn currentAnimal = wildlifeList[tableHelper.CurrentRowIndex];
 
-            if (!WildlifeMenuHelper.IsColumnInteractive(currentColumnIndex))
+            if (!WildlifeMenuHelper.IsColumnInteractive(tableHelper.CurrentColumnIndex))
             {
                 // Just re-announce for non-interactive columns
                 SoundDefOf.Click.PlayOneShotOnCamera();
@@ -146,7 +129,7 @@ namespace RimWorldAccess
             }
 
             // Handle interaction based on column type
-            WildlifeMenuHelper.ColumnType type = (WildlifeMenuHelper.ColumnType)currentColumnIndex;
+            WildlifeMenuHelper.ColumnType type = (WildlifeMenuHelper.ColumnType)tableHelper.CurrentColumnIndex;
 
             switch (type)
             {
@@ -201,40 +184,9 @@ namespace RimWorldAccess
 
         public static void ToggleSortByCurrentColumn()
         {
-            if (sortColumnIndex == currentColumnIndex)
-            {
-                // Same column - toggle direction
-                sortDescending = !sortDescending;
-            }
-            else
-            {
-                // New column - sort ascending
-                sortColumnIndex = currentColumnIndex;
-                sortDescending = false;
-            }
+            wildlifeList = tableHelper.ToggleSortByCurrentColumn(wildlifeList, out string direction).ToList();
 
-            // Re-sort the list
-            wildlifeList = WildlifeMenuHelper.SortWildlifeByColumn(wildlifeList, sortColumnIndex, sortDescending);
-
-            // Try to keep the same animal selected
-            Pawn currentAnimal = null;
-            if (currentAnimalIndex < wildlifeList.Count)
-            {
-                currentAnimal = wildlifeList[currentAnimalIndex];
-            }
-
-            if (currentAnimal != null)
-            {
-                currentAnimalIndex = wildlifeList.IndexOf(currentAnimal);
-                if (currentAnimalIndex < 0) currentAnimalIndex = 0;
-            }
-            else
-            {
-                currentAnimalIndex = 0;
-            }
-
-            string direction = sortDescending ? "descending" : "ascending";
-            string columnName = WildlifeMenuHelper.GetColumnName(sortColumnIndex);
+            string columnName = tableHelper.GetCurrentColumnName();
 
             SoundDefOf.Click.PlayOneShotOnCamera();
             TolkHelper.Speak($"Sorted by {columnName} ({direction})");
@@ -247,11 +199,10 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets a list of animal names for typeahead search.
-        /// Searches by animal name only, not by column values.
         /// </summary>
         public static List<string> GetItemLabels()
         {
-            return wildlifeList.Select(p => WildlifeMenuHelper.GetAnimalName(p)).ToList();
+            return tableHelper.GetItemLabels(wildlifeList);
         }
 
         /// <summary>
@@ -261,7 +212,7 @@ namespace RimWorldAccess
         {
             if (index >= 0 && index < wildlifeList.Count)
             {
-                currentAnimalIndex = index;
+                tableHelper.CurrentRowIndex = index;
             }
         }
 
@@ -270,18 +221,13 @@ namespace RimWorldAccess
         /// </summary>
         public static void HandleTypeahead(char c)
         {
-            var labels = GetItemLabels();
-            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            if (tableHelper.HandleTypeahead(c, wildlifeList, out _))
             {
-                if (newIndex >= 0)
-                {
-                    currentAnimalIndex = newIndex;
-                    AnnounceWithSearch();
-                }
+                AnnounceWithSearch();
             }
             else
             {
-                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+                TolkHelper.Speak($"No matches for '{tableHelper.Typeahead.LastFailedSearch}'");
             }
         }
 
@@ -290,16 +236,11 @@ namespace RimWorldAccess
         /// </summary>
         public static void HandleBackspace()
         {
-            if (!typeahead.HasActiveSearch)
+            if (!tableHelper.Typeahead.HasActiveSearch)
                 return;
 
-            var labels = GetItemLabels();
-            if (typeahead.ProcessBackspace(labels, out int newIndex))
-            {
-                if (newIndex >= 0)
-                    currentAnimalIndex = newIndex;
-                AnnounceWithSearch();
-            }
+            tableHelper.HandleBackspace(wildlifeList, out _);
+            AnnounceWithSearch();
         }
 
         /// <summary>
@@ -313,20 +254,8 @@ namespace RimWorldAccess
                 return;
             }
 
-            Pawn currentAnimal = wildlifeList[currentAnimalIndex];
-            string animalName = WildlifeMenuHelper.GetAnimalName(currentAnimal);
-            string columnName = WildlifeMenuHelper.GetColumnName(currentColumnIndex);
-            string columnValue = WildlifeMenuHelper.GetColumnValue(currentAnimal, currentColumnIndex);
-            string position = MenuHelper.FormatPosition(currentAnimalIndex, wildlifeList.Count);
-
-            string announcement = $"{animalName} - {columnName}: {columnValue}. {position}";
-
-            // Add search context if active
-            if (typeahead.HasActiveSearch)
-            {
-                announcement += $", match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} for '{typeahead.SearchBuffer}'";
-            }
-
+            Pawn currentAnimal = wildlifeList[tableHelper.CurrentRowIndex];
+            string announcement = tableHelper.BuildCellAnnouncementWithSearch(currentAnimal, wildlifeList.Count);
             TolkHelper.Speak(announcement);
         }
 
@@ -338,8 +267,7 @@ namespace RimWorldAccess
             if (wildlifeList.Count == 0)
                 return;
 
-            currentAnimalIndex = 0;
-            typeahead.ClearSearch();
+            tableHelper.JumpToFirst(wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
@@ -352,8 +280,7 @@ namespace RimWorldAccess
             if (wildlifeList.Count == 0)
                 return;
 
-            currentAnimalIndex = wildlifeList.Count - 1;
-            typeahead.ClearSearch();
+            tableHelper.JumpToLast(wildlifeList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
         }
