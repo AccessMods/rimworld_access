@@ -116,24 +116,14 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
-            // Add items
+            // Add items (grouped by label)
             if (items.Count > 0)
             {
                 if (addedSomething) sb.Append(", ");
-                if (items.Count == 1)
-                {
-                    string itemLabel = items[0].LabelShort;
-                    CompForbiddable forbiddable = items[0].TryGetComp<CompForbiddable>();
-                    if (forbiddable != null && forbiddable.Forbidden)
-                    {
-                        itemLabel = "Forbidden " + itemLabel;
-                    }
-                    sb.Append(itemLabel);
-                }
-                else
-                {
-                    sb.Append($"{items.Count} items");
-                }
+
+                var groupedItems = GroupItemsByLabel(items);
+                sb.Append(string.Join(", ", groupedItems));
+
                 addedSomething = true;
             }
 
@@ -865,6 +855,44 @@ namespace RimWorldAccess
                 label = GenText.SplitCamelCase(def.defName);
             }
             return label;
+        }
+
+        /// <summary>
+        /// Groups items by their label and returns formatted strings with counts.
+        /// Forbidden items are grouped separately from non-forbidden items.
+        /// Format: "name" for single items, "name Nx" for multiple identical items.
+        /// </summary>
+        private static List<string> GroupItemsByLabel(List<Thing> items)
+        {
+            var result = new List<string>();
+
+            // Group by label + forbidden status
+            var groups = new Dictionary<string, int>();
+
+            foreach (var item in items)
+            {
+                string label = item.LabelShort;
+                CompForbiddable forbiddable = item.TryGetComp<CompForbiddable>();
+                bool isForbidden = forbiddable != null && forbiddable.Forbidden;
+
+                string key = isForbidden ? "Forbidden " + label : label;
+
+                if (groups.TryGetValue(key, out var count))
+                    groups[key] = count + 1;
+                else
+                    groups[key] = 1;
+            }
+
+            // Format each group
+            foreach (var kvp in groups)
+            {
+                if (kvp.Value > 1)
+                    result.Add($"{kvp.Key} {kvp.Value}x");
+                else
+                    result.Add(kvp.Key);
+            }
+
+            return result;
         }
     }
 }
