@@ -11,6 +11,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository == 'shane12300/rimworld_access'
     runs-on: windows-2022
     permissions:
       contents: write
