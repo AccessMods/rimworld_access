@@ -1,0 +1,80 @@
+name: Build Dev Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: dev-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+        env:
+          CI: true
+
+      - name: Verify build output
+        run: |
+          $expected = @(
+            "release/RimWorldAccess/Assemblies/rimworld_access.dll",
+            "release/RimWorldAccess/About/About.xml",
+            "release/RimWorldAccess/Tolk.dll",
+            "release/RimWorldAccess/nvdaControllerClient64.dll"
+          )
+          foreach ($file in $expected) {
+            if (-not (Test-Path $file)) {
+              Write-Error "Missing: $file"
+              exit 1
+            }
+          }
+          Write-Host "All expected files present"
+
+      - name: Create ZIP
+        run: Compress-Archive -Path release/RimWorldAccess/* -DestinationPath RimWorldAccess-dev.zip
+
+      - name: Update Dev Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: "Dev Build"
+          body: |
+            **Automated development build from master branch.**
+
+            Commit: ${{ github.sha }}
+
+            This release is automatically updated with every push to master.
+            It is intended for experienced players who want to test the very
+            latest features and fixes that might not work properly, or that have
+            not yet been fully documented.
+            For stable releases, see the versioned releases.
+          prerelease: true
+          files: RimWorldAccess-dev.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

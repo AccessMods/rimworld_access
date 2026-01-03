@@ -52,8 +52,8 @@
     <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4633" />
   </ItemGroup>
 
-  <!-- Post-build: Copy mod files to RimWorld Mods folder -->
-  <Target Name="DeployMod" AfterTargets="Build">
+  <!-- Post-build: Copy mod files to RimWorld Mods folder (skip in CI) -->
+  <Target Name="DeployMod" AfterTargets="Build" Condition="'$(CI)' != 'true'">
     <Message Text="--- Deploying RimWorld Access mod to $(ModOutputDir) ---" Importance="high" />
 
     <!-- Create mod folder structure -->
