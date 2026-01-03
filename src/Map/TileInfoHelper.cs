@@ -27,7 +27,7 @@ namespace RimWorldAccess
                 return $"unseen, {position.x}, {position.z}";
             var sb = new StringBuilder();
 
-            // Check visibility from drafted pawn FIRST (if one is selected)
+            // Check visibility from drafted pawn (if one is selected)
             bool notVisible = false;
             Pawn selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
             if (selectedPawn != null && selectedPawn.Drafted && selectedPawn.Spawned && selectedPawn.Map == map)
@@ -35,7 +35,6 @@ namespace RimWorldAccess
                 // Check if pawn can see this position using line of sight
                 if (!GenSight.LineOfSight(selectedPawn.Position, position, map))
                 {
-                    sb.Append("not visible");
                     notVisible = true;
                 }
             }
@@ -61,7 +60,7 @@ namespace RimWorldAccess
                     items.Add(thing);
             }
 
-            bool addedSomething = notVisible;
+            bool addedSomething = false;
 
             // Add individual pawns (most important)
             foreach (var pawn in pawns.Take(3))
@@ -186,6 +185,12 @@ namespace RimWorldAccess
                 sb.Append($", {position.x}, {position.z}");
             else
                 sb.Append($"{position.x}, {position.z}");
+
+            // Add visibility status after coordinates when drafted pawn cannot see this position
+            if (notVisible)
+            {
+                sb.Append(", not visible");
+            }
 
             return sb.ToString();
         }
