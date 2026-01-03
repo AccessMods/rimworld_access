@@ -1714,19 +1714,19 @@ namespace RimWorldAccess
                 bool handled = false;
                 var typeahead = NotificationMenuState.Typeahead;
 
-                // Handle Home - jump to first (only in list view, not detail view)
-                if (key == KeyCode.Home && !NotificationMenuState.IsInDetailView)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
                     NotificationMenuState.JumpToFirst();
                     handled = true;
                 }
-                // Handle End - jump to last (only in list view, not detail view)
-                else if (key == KeyCode.End && !NotificationMenuState.IsInDetailView)
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
                 {
                     NotificationMenuState.JumpToLast();
                     handled = true;
                 }
-                // Handle Escape - clear search FIRST, then go back
+                // Handle Escape - clear search FIRST, then close menu
                 else if (key == KeyCode.Escape)
                 {
                     if (typeahead.HasActiveSearch)
@@ -1737,20 +1737,20 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        NotificationMenuState.GoBack();
+                        NotificationMenuState.CloseMenu();
                         handled = true;
                     }
                 }
-                // Handle Backspace for search (only in list view)
-                else if (key == KeyCode.Backspace && !NotificationMenuState.IsInDetailView)
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace)
                 {
                     NotificationMenuState.HandleBackspace();
                     handled = true;
                 }
-                // Handle Down arrow (use typeahead if active with matches, in list view)
+                // Handle Down arrow - navigate notification list
                 else if (key == KeyCode.DownArrow)
                 {
-                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
                     {
                         // Navigate through matches only when there ARE matches
                         int newIndex = typeahead.GetNextMatch(NotificationMenuState.CurrentIndex);
@@ -1767,10 +1767,10 @@ namespace RimWorldAccess
                     }
                     handled = true;
                 }
-                // Handle Up arrow (use typeahead if active with matches, in list view)
+                // Handle Up arrow - navigate notification list
                 else if (key == KeyCode.UpArrow)
                 {
-                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
                     {
                         // Navigate through matches only when there ARE matches
                         int newIndex = typeahead.GetPreviousMatch(NotificationMenuState.CurrentIndex);
@@ -1787,11 +1787,25 @@ namespace RimWorldAccess
                     }
                     handled = true;
                 }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                // Handle Left arrow - navigate to previous button
+                else if (key == KeyCode.LeftArrow)
                 {
-                    NotificationMenuState.OpenDetailOrJump();
+                    NotificationMenuState.SelectPreviousButton();
                     handled = true;
                 }
+                // Handle Right arrow - navigate to next button
+                else if (key == KeyCode.RightArrow)
+                {
+                    NotificationMenuState.SelectNextButton();
+                    handled = true;
+                }
+                // Handle Enter - activate current button
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    NotificationMenuState.ActivateCurrentButton();
+                    handled = true;
+                }
+                // Handle Delete - delete letter
                 else if (key == KeyCode.Delete)
                 {
                     NotificationMenuState.DeleteSelected();
@@ -1804,30 +1818,25 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // Handle typeahead only in list view, not detail view
-                if (!NotificationMenuState.IsInDetailView)
+                // Handle typeahead characters
+                // Handle * key - consume to prevent passthrough
+                bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+                if (isStarKey)
                 {
-                    // Handle * key - consume to prevent passthrough
-                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-                    bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
-                    if (isStarKey)
-                    {
-                        Event.current.Use();
-                        return;
-                    }
+                    Event.current.Use();
+                    return;
+                }
 
-                    // Handle typeahead characters
-                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                // Handle typeahead characters for search
+                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
 
-                    if (isLetter || isNumber)
-                    {
-                        char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                        NotificationMenuState.HandleTypeahead(c);
-                        Event.current.Use();
-                        return;
-                    }
+                if (isLetter || isNumber)
+                {
+                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                    NotificationMenuState.HandleTypeahead(c);
+                    Event.current.Use();
+                    return;
                 }
             }
 

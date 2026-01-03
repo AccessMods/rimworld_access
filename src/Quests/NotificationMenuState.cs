@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Verse;
 using RimWorld;
@@ -10,16 +11,16 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Manages the windowless notification menu state for viewing messages, letters, and alerts.
-    /// Provides hierarchical navigation with detail views for each notification type.
-    /// Press L to open, navigate with arrows, Enter to view details, Enter on detail to jump to target.
+    /// Shows full letter text immediately with button navigation via Left/Right arrows.
+    /// Press L to open, Up/Down to navigate list, Left/Right to navigate buttons, Enter to activate button.
     /// </summary>
     public static class NotificationMenuState
     {
         private static bool isActive = false;
-        private static bool isInDetailView = false;
         private static List<NotificationItem> notifications = null;
         private static int currentIndex = 0;
-        private static int detailScrollIndex = 0; // For scrolling through long explanations
+        private static int currentButtonIndex = 0;
+        private static readonly List<ButtonInfo> currentButtons = new List<ButtonInfo>();
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
@@ -28,7 +29,6 @@ namespace RimWorldAccess
         public static bool IsActive => isActive;
         public static TypeaheadSearchHelper Typeahead => typeahead;
         public static int CurrentIndex => currentIndex;
-        public static bool IsInDetailView => isInDetailView;
 
         /// <summary>
         /// Opens the notification menu and collects all messages, letters, and alerts.
@@ -51,10 +51,12 @@ namespace RimWorldAccess
             }
 
             isActive = true;
-            isInDetailView = false;
             currentIndex = 0;
-            detailScrollIndex = 0;
+            currentButtonIndex = 0;
             typeahead.ClearSearch();
+
+            // Collect buttons for the first notification
+            RefreshButtonsForCurrentNotification();
 
             // Announce the first notification
             AnnounceCurrentSelection();
@@ -66,10 +68,10 @@ namespace RimWorldAccess
         public static void Close()
         {
             isActive = false;
-            isInDetailView = false;
             notifications = null;
             currentIndex = 0;
-            detailScrollIndex = 0;
+            currentButtonIndex = 0;
+            currentButtons.Clear();
             typeahead.ClearSearch();
         }
 
@@ -81,15 +83,9 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            // If in detail view, scroll down through explanation
-            if (isInDetailView)
-            {
-                detailScrollIndex++;
-                AnnounceCurrentSelection();
-                return;
-            }
-
             currentIndex = MenuHelper.SelectNext(currentIndex, notifications.Count);
+            currentButtonIndex = 0;
+            RefreshButtonsForCurrentNotification();
             AnnounceCurrentSelection();
         }
 
@@ -101,63 +97,141 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            // If in detail view, scroll up through explanation
-            if (isInDetailView)
-            {
-                detailScrollIndex = Math.Max(0, detailScrollIndex - 1);
-                AnnounceCurrentSelection();
-                return;
-            }
-
             currentIndex = MenuHelper.SelectPrevious(currentIndex, notifications.Count);
+            currentButtonIndex = 0;
+            RefreshButtonsForCurrentNotification();
             AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Opens the detail view for the current notification, or jumps to target if already in detail view.
+        /// Navigates to the next button (Right arrow).
         /// </summary>
-        public static void OpenDetailOrJump()
+        public static void SelectNextButton()
         {
-            if (notifications == null || notifications.Count == 0)
-                return;
-
-            if (currentIndex < 0 || currentIndex >= notifications.Count)
-                return;
-
-            NotificationItem item = notifications[currentIndex];
-
-            // If already in detail view, try to jump to target
-            if (isInDetailView)
+            if (currentButtons == null || currentButtons.Count == 0)
             {
-                JumpToTarget(item);
+                TolkHelper.Speak("No buttons available");
+                return;
             }
-            else
+
+            currentButtonIndex = (currentButtonIndex + 1) % currentButtons.Count;
+            AnnounceCurrentButton();
+        }
+
+        /// <summary>
+        /// Navigates to the previous button (Left arrow).
+        /// </summary>
+        public static void SelectPreviousButton()
+        {
+            if (currentButtons == null || currentButtons.Count == 0)
             {
-                // Enter detail view
-                isInDetailView = true;
-                detailScrollIndex = 0;
-                typeahead.ClearSearch();
-                AnnounceCurrentSelection();
+                TolkHelper.Speak("No buttons available");
+                return;
+            }
+
+            currentButtonIndex = (currentButtonIndex - 1 + currentButtons.Count) % currentButtons.Count;
+            AnnounceCurrentButton();
+        }
+
+        /// <summary>
+        /// Activates the currently selected button (Enter key).
+        /// </summary>
+        public static void ActivateCurrentButton()
+        {
+            if (currentButtons == null || currentButtons.Count == 0)
+            {
+                TolkHelper.Speak("No buttons available");
+                return;
+            }
+
+            if (currentButtonIndex < 0 || currentButtonIndex >= currentButtons.Count)
+                return;
+
+            ButtonInfo button = currentButtons[currentButtonIndex];
+
+            if (button.IsDisabled)
+            {
+                string disabledMsg = string.IsNullOrEmpty(button.DisabledReason)
+                    ? $"{button.Label} is disabled"
+                    : $"{button.Label} is disabled: {button.DisabledReason}";
+                TolkHelper.Speak(disabledMsg);
+                return;
+            }
+
+            string buttonLabel = button.Label;
+
+            // Execute the button action
+            try
+            {
+                button.Action?.Invoke();
+
+                // After executing action, refresh notifications (button may have removed the letter)
+                notifications = CollectNotifications();
+
+                if (notifications.Count == 0)
+                {
+                    Close();
+                    TolkHelper.Speak($"Activated {buttonLabel}. No notifications remaining");
+                    return;
+                }
+
+                // Adjust current index if needed
+                if (currentIndex >= notifications.Count)
+                {
+                    currentIndex = notifications.Count - 1;
+                }
+
+                // Refresh buttons for current notification
+                currentButtonIndex = 0;
+                RefreshButtonsForCurrentNotification();
+
+                // Check if the action was a jump (common case)
+                if (buttonLabel.ToLower().Contains("jump") || buttonLabel.ToLower().Contains("location"))
+                {
+                    // For jump actions, close the menu after jumping
+                    Close();
+                    TolkHelper.Speak($"Jumped to location");
+                }
+                else
+                {
+                    // For other actions, stay in menu and announce new state
+                    TolkHelper.Speak($"Activated {buttonLabel}");
+                    AnnounceCurrentSelection();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"RimWorld Access: Failed to activate button: {ex.Message}");
+                TolkHelper.Speak("Failed to activate button");
             }
         }
 
         /// <summary>
-        /// Goes back from detail view to list view.
+        /// Closes the notification menu (Escape key).
         /// </summary>
-        public static void GoBack()
+        public static void CloseMenu()
         {
-            if (isInDetailView)
-            {
-                isInDetailView = false;
-                detailScrollIndex = 0;
-                typeahead.ClearSearch();
-                AnnounceCurrentSelection();
-            }
-            else
-            {
-                Close();
-                TolkHelper.Speak("Notification menu closed");
-            }
+            Close();
+            TolkHelper.Speak("Notification menu closed");
+        }
+
+        /// <summary>
+        /// Announces the currently selected button.
+        /// </summary>
+        private static void AnnounceCurrentButton()
+        {
+            if (currentButtons == null || currentButtons.Count == 0)
+                return;
+
+            if (currentButtonIndex < 0 || currentButtonIndex >= currentButtons.Count)
+                return;
+
+            ButtonInfo button = currentButtons[currentButtonIndex];
+            string announcement = button.IsDisabled
+                ? $"{button.Label} (disabled). Button. {MenuHelper.FormatPosition(currentButtonIndex, currentButtons.Count)}"
+                : $"{button.Label}. Button. {MenuHelper.FormatPosition(currentButtonIndex, currentButtons.Count)}";
+
+            TolkHelper.Speak(announcement);
         }
 
         /// <summary>
@@ -209,9 +283,9 @@ namespace RimWorldAccess
                 currentIndex = notifications.Count - 1;
             }
 
-            // Reset detail view state
-            isInDetailView = false;
-            detailScrollIndex = 0;
+            // Reset button state and refresh buttons for new current notification
+            currentButtonIndex = 0;
+            RefreshButtonsForCurrentNotification();
 
             // Announce deletion and current position
             TolkHelper.Speak($"Deleted {deletedLabel}");
@@ -305,7 +379,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the currently selected notification to the clipboard.
+        /// Announces the currently selected notification with full text and button info.
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -317,77 +391,407 @@ namespace RimWorldAccess
 
             NotificationItem item = notifications[currentIndex];
 
-            if (isInDetailView)
+            string typeLabel = item.Type == NotificationType.Message ? "Message" :
+                              item.Type == NotificationType.Letter ? "Letter" :
+                              "Alert";
+
+            // Build announcement with full text
+            string announcement = $"{typeLabel}: {item.Label}";
+
+            // Add full explanation text (all lines joined)
+            if (item.ExplanationLines.Length > 0)
             {
-                // In detail view, show full explanation
-                string announcement = BuildDetailAnnouncement(item);
-                TolkHelper.Speak(announcement);
+                string fullText = string.Join(" ", item.ExplanationLines);
+                announcement += $". {fullText}";
             }
-            else
+
+            // Add button info if available
+            if (currentButtons != null && currentButtons.Count > 0)
             {
-                // In list view, show summary
-                string typeLabel = item.Type == NotificationType.Message ? "Message" :
-                                  item.Type == NotificationType.Letter ? "Letter" :
-                                  "Alert";
-                string announcement = $"{typeLabel}: {item.Label}. {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
-                TolkHelper.Speak(announcement);
+                ButtonInfo button = currentButtons[currentButtonIndex];
+                string buttonLabel = button.IsDisabled ? $"{button.Label} (disabled)" : button.Label;
+                announcement += $". {buttonLabel}. Button. {MenuHelper.FormatPosition(currentButtonIndex, currentButtons.Count)}";
+            }
+
+            // Add position in list
+            announcement += $". {MenuHelper.FormatPosition(currentIndex, notifications.Count)}";
+
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Refreshes the button list for the current notification.
+        /// </summary>
+        private static void RefreshButtonsForCurrentNotification()
+        {
+            currentButtons.Clear();
+            currentButtonIndex = 0;
+
+            if (notifications == null || notifications.Count == 0)
+                return;
+
+            if (currentIndex < 0 || currentIndex >= notifications.Count)
+                return;
+
+            NotificationItem item = notifications[currentIndex];
+
+            // Handle different notification types
+            switch (item.Type)
+            {
+                case NotificationType.Letter:
+                    ExtractLetterButtons(item);
+                    break;
+                case NotificationType.Alert:
+                    ExtractAlertButtons(item);
+                    break;
+                case NotificationType.Message:
+                    // Messages don't have buttons
+                    break;
             }
         }
 
         /// <summary>
-        /// Builds the detail announcement for a notification.
+        /// Extracts buttons from a letter notification.
         /// </summary>
-        private static string BuildDetailAnnouncement(NotificationItem item)
+        private static void ExtractLetterButtons(NotificationItem item)
         {
-            string announcement = "";
+            Letter letter = item.GetSourceLetter();
+            if (letter == null)
+                return;
 
-            // Only show type label on first view (detailScrollIndex == 0)
-            if (detailScrollIndex == 0)
+            // Extract buttons from ChoiceLetter
+            if (letter is ChoiceLetter choiceLetter)
             {
-                string typeLabel = item.Type == NotificationType.Message ? "Message" :
-                                  item.Type == NotificationType.Letter ? "Letter" :
-                                  "Alert";
-                announcement = $"{typeLabel} Details: {item.Label}";
-
-                // If there are explanation lines, show the first one
-                if (item.ExplanationLines.Length > 0)
+                try
                 {
-                    announcement += $"\n{item.ExplanationLines[0]}";
-                }
+                    // Get the Choices property
+                    PropertyInfo choicesProperty = typeof(ChoiceLetter).GetProperty("Choices",
+                        BindingFlags.Public | BindingFlags.Instance);
 
-                // Add navigation hints only on first view
-                if (item.ExplanationLines.Length > 1)
-                {
-                    announcement += "\nPress Down for more";
-                }
+                    if (choicesProperty != null)
+                    {
+                        var choices = choicesProperty.GetValue(choiceLetter) as IEnumerable<DiaOption>;
+                        if (choices != null)
+                        {
+                            foreach (DiaOption option in choices)
+                            {
+                                // Get the text field (protected)
+                                FieldInfo textField = typeof(DiaOption).GetField("text",
+                                    BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                                string label = textField?.GetValue(option)?.ToString() ?? "Unknown";
 
-                // Announce jump availability
-                if (item.HasValidTarget)
-                {
-                    announcement += "\nPress Enter to jump to target location";
-                }
-                else
-                {
-                    announcement += "\nNo target location available";
-                }
+                                // Skip "Close" button (already handled by Delete key)
+                                if (label.ToLower().Contains("close") || label == "Close".Translate())
+                                    continue;
 
-                announcement += "\nPress Escape to go back";
+                                // Create button info with accessible action wrapper
+                                ButtonInfo buttonInfo = new ButtonInfo
+                                {
+                                    Label = label,
+                                    Action = CreateAccessibleAction(option, letter, label),
+                                    IsDisabled = option.disabled,
+                                    DisabledReason = option.disabledReason
+                                };
+
+                                currentButtons.Add(buttonInfo);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"RimWorld Access: Failed to extract letter buttons: {ex.Message}");
+                }
             }
-            else if (detailScrollIndex > 0 && detailScrollIndex < item.ExplanationLines.Length)
+        }
+
+        /// <summary>
+        /// Extracts buttons from an alert notification.
+        /// Alerts can have targets to jump to or custom click actions (like opening research).
+        /// </summary>
+        private static void ExtractAlertButtons(NotificationItem item)
+        {
+            Alert alert = item.GetSourceAlert();
+            if (alert == null)
+                return;
+
+            try
             {
-                // Show subsequent explanation lines without the type header
-                announcement = item.ExplanationLines[detailScrollIndex];
+                // Check alert type and create appropriate button
+                string alertTypeName = alert.GetType().Name;
+
+                // Research alerts - open research menu
+                if (alertTypeName.Contains("Research") || alertTypeName.Contains("NeedResearch"))
+                {
+                    currentButtons.Add(new ButtonInfo
+                    {
+                        Label = "Open Research",
+                        Action = () => {
+                            Close();
+                            WindowlessResearchMenuState.Open();
+                        },
+                        IsDisabled = false
+                    });
+                    return;
+                }
+
+                // Check if alert has targets to jump to
+                var reportMethod = alert.GetType().GetMethod("GetReport",
+                    BindingFlags.Public | BindingFlags.Instance);
+
+                if (reportMethod != null)
+                {
+                    var report = reportMethod.Invoke(alert, null);
+                    if (report is AlertReport alertReport)
+                    {
+                        // Collect all valid targets
+                        var targets = new List<GlobalTargetInfo>();
+                        if (alertReport.culpritsThings != null)
+                        {
+                            targets.AddRange(
+                                alertReport.culpritsThings
+                                    .Where(thing => thing != null)
+                                    .Select(thing => new GlobalTargetInfo(thing)));
+                        }
+                        if (alertReport.culpritsPawns != null)
+                        {
+                            targets.AddRange(
+                                alertReport.culpritsPawns
+                                    .Where(pawn => pawn != null)
+                                    .Select(pawn => new GlobalTargetInfo(pawn)));
+                        }
+                        if (alertReport.culpritsTargets != null)
+                        {
+                            targets.AddRange(alertReport.culpritsTargets.Where(t => t.IsValid));
+                        }
+                        if (alertReport.culpritTarget.HasValue && alertReport.culpritTarget.Value.IsValid)
+                        {
+                            targets.Add(alertReport.culpritTarget.Value);
+                        }
+
+                        // Create a button for each target or a single "Jump to target" button
+                        if (targets.Count == 1)
+                        {
+                            var target = targets[0];
+                            currentButtons.Add(new ButtonInfo
+                            {
+                                Label = $"Jump to {GetTargetDescription(target)}",
+                                Action = CreateJumpToTargetAction(target),
+                                IsDisabled = false
+                            });
+                        }
+                        else if (targets.Count > 1)
+                        {
+                            // Multiple targets - create buttons for each (up to first 5)
+                            int count = Math.Min(targets.Count, 5);
+                            for (int i = 0; i < count; i++)
+                            {
+                                var target = targets[i];
+                                int index = i + 1;
+                                currentButtons.Add(new ButtonInfo
+                                {
+                                    Label = $"Jump to {GetTargetDescription(target)} ({index} of {targets.Count})",
+                                    Action = CreateJumpToTargetAction(target),
+                                    IsDisabled = false
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // If no buttons were created, try to use the alert's default OnClick
+                if (currentButtons.Count == 0)
+                {
+                    var onClickMethod = alert.GetType().GetMethod("OnClick",
+                        BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+
+                    if (onClickMethod != null)
+                    {
+                        currentButtons.Add(new ButtonInfo
+                        {
+                            Label = "Activate",
+                            Action = () => {
+                                try
+                                {
+                                    onClickMethod.Invoke(alert, null);
+                                    TolkHelper.Speak("Alert activated");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Warning($"RimWorld Access: Failed to activate alert: {ex.Message}");
+                                }
+                            },
+                            IsDisabled = false
+                        });
+                    }
+                }
             }
-            else if (detailScrollIndex >= item.ExplanationLines.Length && item.ExplanationLines.Length > 0)
+            catch (Exception ex)
             {
-                // Past the end of content
-                string typeLabel = item.Type == NotificationType.Message ? "message" :
-                                  item.Type == NotificationType.Letter ? "letter" :
-                                  "alert";
-                announcement = $"At end of {typeLabel}";
+                Log.Warning($"RimWorld Access: Failed to extract alert buttons: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Creates an action that jumps to a target and updates the cursor.
+        /// </summary>
+        private static Action CreateJumpToTargetAction(GlobalTargetInfo target)
+        {
+            return () => {
+                if (target.IsValid)
+                {
+                    CameraJumper.TryJumpAndSelect(target);
+
+                    // Update mod's cursor position
+                    if (MapNavigationState.IsInitialized)
+                    {
+                        if (target.HasThing)
+                            MapNavigationState.CurrentCursorPosition = target.Thing.Position;
+                        else if (target.Cell.IsValid)
+                            MapNavigationState.CurrentCursorPosition = target.Cell;
+                    }
+
+                    Close();
+                    TolkHelper.Speak($"Jumped to {GetTargetDescription(target)}");
+                }
+            };
+        }
+
+        /// <summary>
+        /// Creates an accessible action wrapper for a letter button.
+        /// Handles Jump to Location, View Quest, Research hyperlinks, etc.
+        /// </summary>
+        private static Action CreateAccessibleAction(DiaOption option, Letter letter, string label)
+        {
+            // Check for Jump to Location
+            if (IsJumpAction(label))
+            {
+                return () => {
+                    GlobalTargetInfo target = letter.lookTargets?.TryGetPrimaryTarget() ?? GlobalTargetInfo.Invalid;
+                    if (target.IsValid)
+                    {
+                        CameraJumper.TryJumpAndSelect(target);
+
+                        // Update mod's cursor position
+                        if (MapNavigationState.IsInitialized)
+                        {
+                            if (target.HasThing)
+                                MapNavigationState.CurrentCursorPosition = target.Thing.Position;
+                            else if (target.Cell.IsValid)
+                                MapNavigationState.CurrentCursorPosition = target.Cell;
+                        }
+
+                        Find.LetterStack.RemoveLetter(letter);
+                        Close();
+                        TolkHelper.Speak($"Jumped to {GetTargetDescription(target)}");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak("Target location is not valid");
+                    }
+                };
             }
 
-            return announcement;
+            // Check for View in Quests Tab
+            if (IsViewQuestAction(label) && letter is ChoiceLetter choiceLetter && choiceLetter.quest != null)
+            {
+                Quest quest = choiceLetter.quest;
+                return () => {
+                    Close();
+                    QuestMenuState.OpenAndSelectQuest(quest);
+                };
+            }
+
+            // Check for Research hyperlinks
+            if (option.hyperlink.def is ResearchProjectDef researchDef)
+            {
+                return () => {
+                    Close();
+                    WindowlessResearchMenuState.OpenAndSelectProject(researchDef);
+                };
+            }
+
+            // Check for item/hediff info cards - announce and use vanilla for now
+            if (option.hyperlink.def != null)
+            {
+                return () => {
+                    TolkHelper.Speak($"Opening info card for {option.hyperlink.Label}");
+                    option.action?.Invoke();
+                };
+            }
+
+            // Default: use vanilla action
+            return () => {
+                option.action?.Invoke();
+            };
+        }
+
+        /// <summary>
+        /// Checks if the button label indicates a Jump to Location action.
+        /// </summary>
+        private static bool IsJumpAction(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+                return false;
+
+            string lowerLabel = label.ToLower();
+            return lowerLabel.Contains("jump") ||
+                   lowerLabel.Contains("location") ||
+                   label == "JumpToLocation".Translate();
+        }
+
+        /// <summary>
+        /// Checks if the button label indicates a View Quest action.
+        /// </summary>
+        private static bool IsViewQuestAction(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+                return false;
+
+            string lowerLabel = label.ToLower();
+            return lowerLabel.Contains("quest") ||
+                   (lowerLabel.Contains("view") && lowerLabel.Contains("related")) ||
+                   label.Contains("ViewRelatedQuest".Translate());
+        }
+
+        /// <summary>
+        /// Gets a human-readable description of a target location.
+        /// </summary>
+        private static string GetTargetDescription(GlobalTargetInfo target)
+        {
+            if (!target.IsValid)
+                return "unknown location";
+
+            if (target.HasThing)
+            {
+                Thing thing = target.Thing;
+                if (thing is Pawn pawn)
+                    return pawn.LabelShort;
+                return thing.LabelShort ?? thing.def?.label ?? "thing";
+            }
+
+            if (target.Cell.IsValid)
+            {
+                return $"position {target.Cell.x}, {target.Cell.z}";
+            }
+
+            if (target.HasWorldObject)
+            {
+                return target.WorldObject.LabelShort ?? "world location";
+            }
+
+            return "target location";
+        }
+
+        /// <summary>
+        /// Represents a button/option for a letter.
+        /// </summary>
+        private class ButtonInfo
+        {
+            public string Label { get; set; }
+            public Action Action { get; set; }
+            public bool IsDisabled { get; set; }
+            public string DisabledReason { get; set; }
         }
 
         /// <summary>
@@ -450,7 +854,9 @@ namespace RimWorldAccess
                 return;
 
             currentIndex = MenuHelper.JumpToFirst();
+            currentButtonIndex = 0;
             typeahead.ClearSearch();
+            RefreshButtonsForCurrentNotification();
             AnnounceCurrentSelection();
         }
 
@@ -463,7 +869,9 @@ namespace RimWorldAccess
                 return;
 
             currentIndex = MenuHelper.JumpToLast(notifications.Count);
+            currentButtonIndex = 0;
             typeahead.ClearSearch();
+            RefreshButtonsForCurrentNotification();
             AnnounceCurrentSelection();
         }
 
@@ -698,6 +1106,14 @@ namespace RimWorldAccess
             public Letter GetSourceLetter()
             {
                 return sourceObject as Letter;
+            }
+
+            /// <summary>
+            /// Gets the source Alert object if this is an alert notification.
+            /// </summary>
+            public Alert GetSourceAlert()
+            {
+                return sourceObject as Alert;
             }
 
             /// <summary>
