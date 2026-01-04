@@ -948,9 +948,9 @@ namespace RimWorldAccess
                 case "Structure": return 2;
                 case "Furniture": return 3;
                 case "Production": return 4;
-                case "Power": return 5;
+                case "Security": return 5;
                 case "Temperature": return 6;
-                case "Security": return 7;
+                case "Power": return 7;
                 default: return 8;
             }
         }
