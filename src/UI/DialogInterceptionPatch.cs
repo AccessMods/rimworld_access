@@ -41,6 +41,25 @@ namespace RimWorldAccess
                 return true;
             }
 
+            // Special handling for Dialog_AssignBuildingOwner (bed/throne owner assignment)
+            if (window is Dialog_AssignBuildingOwner assignDialog)
+            {
+                // Extract the assignable component via reflection
+                var assignableField = typeof(Dialog_AssignBuildingOwner).GetField("assignable",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (assignableField != null)
+                {
+                    var assignable = assignableField.GetValue(assignDialog) as CompAssignableToPawn;
+                    if (assignable?.parent is Building_Bed bed)
+                    {
+                        BedAssignmentState.Open(bed);
+                        return false; // Prevent dialog from being added
+                    }
+                }
+                // Fallback: let it through if not a bed or couldn't extract
+                return true;
+            }
+
             // Check if this dialog should be intercepted
             if (!ShouldInterceptDialog(window))
                 return true; // Allow normal behavior
