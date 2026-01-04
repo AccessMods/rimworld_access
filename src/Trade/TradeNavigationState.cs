@@ -630,8 +630,13 @@ namespace RimWorldAccess
 
             if (!result.Accepted)
             {
-                TolkHelper.Speak($"Cannot complete trade: {result.Reason}", SpeechPriority.High);
-                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                // Only announce if there's an actual reason - the TradeDealTryExecutePatch
+                // may have already announced the failure for affordability issues
+                if (!string.IsNullOrEmpty(result.Reason))
+                {
+                    TolkHelper.Speak($"Cannot complete trade: {result.Reason}", SpeechPriority.High);
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                }
                 return;
             }
 
