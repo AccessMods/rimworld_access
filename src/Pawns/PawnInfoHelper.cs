@@ -161,18 +161,7 @@ namespace RimWorldAccess
 
                     if (wholeBodyConditions.Count > 0)
                     {
-                        // Count how many whole-body hediffs were filtered out
-                        int totalWholeBody = hediffs
-                            .Where(h => h.Visible && h.Part == null)
-                            .Count();
-                        int filteredCount = totalWholeBody - wholeBodyConditions.Count;
-
-                        string headerText = "\nConditions";
-                        if (filteredCount > 0)
-                        {
-                            headerText += $" ({filteredCount} filtered)";
-                        }
-                        sb.AppendLine($"{headerText}.");
+                        sb.AppendLine("\nConditions.");
 
                         foreach (var condition in wholeBodyConditions)
                         {

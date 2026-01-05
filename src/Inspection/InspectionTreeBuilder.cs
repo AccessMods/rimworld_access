@@ -1030,12 +1030,20 @@ namespace RimWorldAccess
             var hediffs = pawn.health.hediffSet.hediffs;
             if (hediffs != null && hediffs.Count > 0)
             {
-                int visibleHediffCount = hediffs.Count(h => h.Visible);
+                int totalVisible = hediffs.Count(h => h.Visible);
+                int afterFiltering = hediffs.Count(h => h.Visible && !IsSurgicallyRemovedPart(h, pawn));
+                int filteredCount = totalVisible - afterFiltering;
+
+                string conditionsLabel = $"Conditions ({afterFiltering})";
+                if (filteredCount > 0)
+                {
+                    conditionsLabel += $" ({filteredCount} filtered)";
+                }
 
                 var conditionsItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.SubCategory,
-                    Label = $"Conditions ({visibleHediffCount})",
+                    Label = conditionsLabel,
                     Data = pawn,
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = true,
