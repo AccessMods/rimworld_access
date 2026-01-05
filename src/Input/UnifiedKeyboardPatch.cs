@@ -379,27 +379,48 @@ namespace RimWorldAccess
                 Log.Message($"RimWorld Access: Area painting active, handling key {key}");
                 bool handled = false;
 
-                if (key == KeyCode.Space)
+                // Tab key - toggle between box selection and single tile selection modes
+                if (key == KeyCode.Tab)
+                {
+                    // Cancel any active rectangle selection when switching modes
+                    if (AreaPaintingState.HasRectangleStart)
+                    {
+                        AreaPaintingState.CancelRectangle();
+                    }
+
+                    AreaPaintingState.ToggleSelectionMode();
+                    handled = true;
+                }
+                else if (key == KeyCode.Space)
                 {
                     Log.Message("RimWorld Access: Space pressed in area painting mode");
                     IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
-                    if (!AreaPaintingState.HasRectangleStart)
+                    if (AreaPaintingState.SelectionMode == AreaSelectionMode.SingleTile)
                     {
-                        // No start corner yet - set it
-                        AreaPaintingState.SetRectangleStart(currentPosition);
-                    }
-                    else if (AreaPaintingState.IsInPreviewMode)
-                    {
-                        // We have a preview - confirm this rectangle
-                        AreaPaintingState.ConfirmRectangle();
+                        // Single tile mode - toggle the current cell
+                        AreaPaintingState.ToggleStageCell();
                     }
                     else
                     {
-                        // Start is set but no end yet - update to create preview at current position
-                        AreaPaintingState.UpdatePreview(currentPosition);
-                        // Then confirm it
-                        AreaPaintingState.ConfirmRectangle();
+                        // Box selection mode - set corners and confirm rectangles
+                        if (!AreaPaintingState.HasRectangleStart)
+                        {
+                            // No start corner yet - set it
+                            AreaPaintingState.SetRectangleStart(currentPosition);
+                        }
+                        else if (AreaPaintingState.IsInPreviewMode)
+                        {
+                            // We have a preview - confirm this rectangle
+                            AreaPaintingState.ConfirmRectangle();
+                        }
+                        else
+                        {
+                            // Start is set but no end yet - update to create preview at current position
+                            AreaPaintingState.UpdatePreview(currentPosition);
+                            // Then confirm it
+                            AreaPaintingState.ConfirmRectangle();
+                        }
                     }
                     handled = true;
                 }

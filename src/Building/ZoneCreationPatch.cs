@@ -43,6 +43,18 @@ namespace RimWorldAccess
             bool shiftHeld = Event.current.shift;
             IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
+            // Tab key - toggle between box selection and single tile selection modes
+            if (key == KeyCode.Tab)
+            {
+                // Cancel any active rectangle selection when switching modes
+                if (ZoneCreationState.HasRectangleStart)
+                {
+                    ZoneCreationState.CancelRectangle();
+                }
+
+                ZoneCreationState.ToggleSelectionMode();
+                handled = true;
+            }
             // Shift+Arrow keys - auto-select to wall (adds cells directly)
             if (shiftHeld && (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
                              key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
@@ -75,7 +87,7 @@ namespace RimWorldAccess
                 // For now, we'll update preview after MapNavigationState moves the cursor
                 // The actual movement happens elsewhere, we just need to trigger preview update
             }
-            // Space key - set start corner or confirm rectangle
+            // Space key - behavior depends on selection mode
             else if (key == KeyCode.Space)
             {
                 // Cooldown to prevent rapid toggling
@@ -84,22 +96,31 @@ namespace RimWorldAccess
 
                 lastSpaceTime = Time.time;
 
-                if (!ZoneCreationState.HasRectangleStart)
+                if (ZoneCreationState.SelectionMode == ZoneSelectionMode.SingleTile)
                 {
-                    // No start corner yet - set it
-                    ZoneCreationState.SetRectangleStart(currentPosition);
-                }
-                else if (ZoneCreationState.IsInPreviewMode)
-                {
-                    // We have a preview - confirm this rectangle
-                    ZoneCreationState.ConfirmRectangle();
+                    // Single tile mode - toggle the current cell
+                    ZoneCreationState.ToggleCell(currentPosition);
                 }
                 else
                 {
-                    // Start is set but no end yet - update to create preview at current position
-                    ZoneCreationState.UpdatePreview(currentPosition);
-                    // Then confirm it
-                    ZoneCreationState.ConfirmRectangle();
+                    // Box selection mode - set corners and confirm rectangles
+                    if (!ZoneCreationState.HasRectangleStart)
+                    {
+                        // No start corner yet - set it
+                        ZoneCreationState.SetRectangleStart(currentPosition);
+                    }
+                    else if (ZoneCreationState.IsInPreviewMode)
+                    {
+                        // We have a preview - confirm this rectangle
+                        ZoneCreationState.ConfirmRectangle();
+                    }
+                    else
+                    {
+                        // Start is set but no end yet - update to create preview at current position
+                        ZoneCreationState.UpdatePreview(currentPosition);
+                        // Then confirm it
+                        ZoneCreationState.ConfirmRectangle();
+                    }
                 }
 
                 handled = true;

@@ -22,6 +22,15 @@ namespace RimWorldAccess
     }
 
     /// <summary>
+    /// Defines the selection mode for architect placement.
+    /// </summary>
+    public enum ArchitectSelectionMode
+    {
+        BoxSelection,    // Space sets corners for rectangle selection
+        SingleTile       // Space toggles individual tiles
+    }
+
+    /// <summary>
     /// Maintains state for the accessible architect system.
     /// Tracks current mode, selected category, designator, and placement state.
     /// </summary>
@@ -34,6 +43,7 @@ namespace RimWorldAccess
         private static ThingDef selectedMaterial = null;
         private static List<IntVec3> selectedCells = new List<IntVec3>();
         private static Rot4 currentRotation = Rot4.North;
+        private static ArchitectSelectionMode selectionMode = ArchitectSelectionMode.BoxSelection; // Default to box selection
 
         // Rectangle selection helper (shared logic for rectangle-based selection)
         private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
@@ -116,6 +126,35 @@ namespace RimWorldAccess
         public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
 
         /// <summary>
+        /// Gets the current selection mode (BoxSelection or SingleTile).
+        /// </summary>
+        public static ArchitectSelectionMode SelectionMode => selectionMode;
+
+        /// <summary>
+        /// Toggles between box selection and single tile selection modes.
+        /// Only applies to zone designators.
+        /// </summary>
+        public static void ToggleSelectionMode()
+        {
+            // Only allow toggling for zone designators
+            if (!IsZoneDesignator())
+            {
+                TolkHelper.Speak("Selection mode toggle only works for zone designators");
+                return;
+            }
+
+            selectionMode = (selectionMode == ArchitectSelectionMode.BoxSelection)
+                ? ArchitectSelectionMode.SingleTile
+                : ArchitectSelectionMode.BoxSelection;
+
+            string modeName = (selectionMode == ArchitectSelectionMode.BoxSelection)
+                ? "Box selection mode"
+                : "Single tile selection mode";
+            TolkHelper.Speak(modeName);
+            Log.Message($"Architect placement: Switched to {modeName}");
+        }
+
+        /// <summary>
         /// Enters category selection mode.
         /// </summary>
         public static void EnterCategorySelection()
@@ -173,6 +212,9 @@ namespace RimWorldAccess
 
             // Reset rotation to North when entering placement mode
             currentRotation = Rot4.North;
+
+            // Reset selection mode to box selection
+            selectionMode = ArchitectSelectionMode.BoxSelection;
 
             // Set the designator as selected in the game's DesignatorManager
             if (Find.DesignatorManager != null)
@@ -550,6 +592,7 @@ namespace RimWorldAccess
             selectedMaterial = null;
             selectedCells.Clear();
             currentRotation = Rot4.North;
+            selectionMode = ArchitectSelectionMode.BoxSelection; // Reset to default mode
 
             // Clear rectangle selection state
             rectangleHelper.Reset();

@@ -20,6 +20,15 @@ namespace RimWorldAccess
     }
 
     /// <summary>
+    /// Defines the selection mode for zone creation.
+    /// </summary>
+    public enum ZoneSelectionMode
+    {
+        BoxSelection,    // Space sets corners for rectangle selection
+        SingleTile       // Space toggles individual tiles
+    }
+
+    /// <summary>
     /// Maintains state for zone creation mode.
     /// Tracks which cells have been selected and what type of zone to create.
     /// Uses RimWorld's native APIs for rectangle selection feedback.
@@ -32,6 +41,7 @@ namespace RimWorldAccess
         private static Zone expandingZone = null; // Track zone being expanded
         private static bool isShrinking = false; // true = shrink mode (selected cells will be removed)
         private static string pendingAllowedAreaName = null; // Store name for allowed area creation
+        private static ZoneSelectionMode selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
         // Rectangle selection helper (shared logic for rectangle-based selection)
         private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
@@ -90,6 +100,45 @@ namespace RimWorldAccess
         public static bool IsShrinking => isShrinking;
 
         /// <summary>
+        /// Gets the current selection mode (BoxSelection or SingleTile).
+        /// </summary>
+        public static ZoneSelectionMode SelectionMode => selectionMode;
+
+        /// <summary>
+        /// Toggles between box selection and single tile selection modes.
+        /// </summary>
+        public static void ToggleSelectionMode()
+        {
+            selectionMode = (selectionMode == ZoneSelectionMode.BoxSelection)
+                ? ZoneSelectionMode.SingleTile
+                : ZoneSelectionMode.BoxSelection;
+
+            string modeName = (selectionMode == ZoneSelectionMode.BoxSelection)
+                ? "Box selection mode"
+                : "Single tile selection mode";
+            TolkHelper.Speak(modeName);
+            Log.Message($"Zone creation: Switched to {modeName}");
+        }
+
+        /// <summary>
+        /// Toggles selection of a single cell (adds if not selected, removes if selected).
+        /// Used in single tile selection mode.
+        /// </summary>
+        public static void ToggleCell(IntVec3 cell)
+        {
+            if (selectedCells.Contains(cell))
+            {
+                selectedCells.Remove(cell);
+                TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
+            }
+            else
+            {
+                selectedCells.Add(cell);
+                TolkHelper.Speak($"Selected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
+            }
+        }
+
+        /// <summary>
         /// Sets the pending name for an allowed area that will be created.
         /// </summary>
         public static void SetPendingAllowedAreaName(string name)
@@ -100,7 +149,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Enters zone creation mode with the specified zone type.
-        /// Uses rectangle selection: Space sets corners, arrows preview, Space confirms rectangle.
+        /// Uses rectangle selection by default: Space sets corners, arrows preview, Space confirms rectangle.
+        /// Press Tab to switch to single tile selection mode.
         /// </summary>
         public static void EnterCreationMode(ZoneType zoneType)
         {
@@ -108,9 +158,10 @@ namespace RimWorldAccess
             selectedZoneType = zoneType;
             selectedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
             string zoneName = GetZoneTypeName(zoneType);
-            string instructions = "Press Space to set start corner, navigate to opposite corner, Space again to confirm rectangle. Enter to create zone, Escape to cancel.";
+            string instructions = "Box selection mode: Space to set corners. Tab to switch modes. Enter to create, Escape to cancel.";
 
             TolkHelper.Speak($"Creating {zoneName}. {instructions}");
             Log.Message($"Entered zone creation mode: {zoneName}");
@@ -619,6 +670,7 @@ namespace RimWorldAccess
             expandingZone = null;
             isShrinking = false;
             rectangleHelper.Reset();
+            selectionMode = ZoneSelectionMode.BoxSelection; // Reset to default mode
         }
 
         /// <summary>
