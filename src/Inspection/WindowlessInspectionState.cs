@@ -656,6 +656,16 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Re-announces the current selection. Used when returning from a sub-state (e.g., HealthTabState).
+        /// </summary>
+        public static void ReannounceCurrentSelection()
+        {
+            if (!IsActive)
+                return;
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Announces the current selection to the screen reader.
         /// Format: "level N. {name} {state}. {X} of {Y}." or "{name} {state}. {X} of {Y}."
         /// Level is only announced when it changes.

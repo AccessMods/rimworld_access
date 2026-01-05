@@ -956,7 +956,6 @@ namespace RimWorldAccess
             };
             operationsItem.OnActivate = () =>
             {
-                WindowlessInspectionState.Close();
                 HealthTabState.OpenOperations(pawn);
             };
             AddChild(parentItem, operationsItem);
@@ -972,7 +971,6 @@ namespace RimWorldAccess
             };
             healthSettingsItem.OnActivate = () =>
             {
-                WindowlessInspectionState.Close();
                 HealthTabState.OpenMedicalSettings(pawn);
             };
             AddChild(parentItem, healthSettingsItem);
@@ -1212,17 +1210,23 @@ namespace RimWorldAccess
                     hediffLabel += $". {impacts}";
                 }
 
+                // Only expandable if TipStringExtra has meaningful content
+                bool hasExpandableContent = !string.IsNullOrWhiteSpace(hediff.TipStringExtra);
+
                 var hediffItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.Item,
                     Label = hediffLabel,
                     Data = hediff,
                     IndentLevel = bodyPartItem.IndentLevel + 1,
-                    IsExpandable = true,
+                    IsExpandable = hasExpandableContent,
                     IsExpanded = false
                 };
 
-                hediffItem.OnActivate = () => BuildHediffDetailChildren(hediffItem, hediff, pawn);
+                if (hasExpandableContent)
+                {
+                    hediffItem.OnActivate = () => BuildHediffDetailChildren(hediffItem, hediff, pawn);
+                }
                 AddChild(bodyPartItem, hediffItem);
             }
         }

@@ -155,14 +155,29 @@ namespace RimWorldAccess
 
                         foreach (var part in injuredParts)
                         {
-                            float healthPercent = part.Health / part.MaxHealth * 100f;
-                            sb.AppendLine($"  {part.Part.LabelCap}: {healthPercent:F0}%.");
+                            sb.AppendLine($"  {part.Part.LabelCap}: {part.Health:F0} / {part.MaxHealth:F0} HP.");
                         }
                     }
 
                     if (wholeBodyConditions.Count > 0)
                     {
-                        sb.AppendLine($"\nConditions: {wholeBodyConditions.Count}.");
+                        // Count how many whole-body hediffs were filtered out
+                        int totalWholeBody = hediffs
+                            .Where(h => h.Visible && h.Part == null)
+                            .Count();
+                        int filteredCount = totalWholeBody - wholeBodyConditions.Count;
+
+                        string headerText = "\nConditions";
+                        if (filteredCount > 0)
+                        {
+                            headerText += $" ({filteredCount} filtered)";
+                        }
+                        sb.AppendLine($"{headerText}.");
+
+                        foreach (var condition in wholeBodyConditions)
+                        {
+                            sb.AppendLine($"  {condition.LabelCap}.");
+                        }
                     }
                 }
             }
