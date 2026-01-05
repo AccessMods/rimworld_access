@@ -136,12 +136,31 @@ Tiles announce: pawns, buildings, orders (blueprints, jobs), items, plants, terr
 
 | Key | Action |
 |-----|--------|
-| Tab | Open architect menu (select category → tool → material → place with Space) |
+| A | Open architect menu (select category → tool → material → place with Space) |
 | Type letters | Typeahead search in architect menu (prioritizes name matches) |
-| Space | Place building or toggle cell selection (zones) |
+| Tab | Toggle selection mode (box-selection ↔ single tile) for zones/orders |
+| Space | Place building or set corners (box mode) / toggle tile (single mode) |
 | Shift+Space | Cancel blueprint at cursor position |
 | R | Rotate building |
 | Left | Collapse to parent category (tree menus) |
+
+### Selection Modes for Zones and Orders
+
+When creating zones (stockpiles, growing zones, home areas) or placing multi-cell orders (mining, cutting, etc.), you can switch between two selection modes:
+
+**Box-Selection Mode (Default):**
+- Press Space to set the first corner
+- Navigate with arrow keys to the opposite corner (preview updates automatically)
+- Press Space again to confirm the rectangle
+- Can place multiple rectangles before confirming with Enter
+
+**Single Tile Mode:**
+- Press Tab to switch to this mode
+- Press Space to toggle individual tiles on/off at the cursor position
+- Each toggle announces "Selected" or "Deselected" with coordinates and total count
+- Press Enter when done to create the zone/order
+
+Press Tab at any time to switch between modes. 
 
 ## Colonist Actions
 

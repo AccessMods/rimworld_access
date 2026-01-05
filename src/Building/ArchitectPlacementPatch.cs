@@ -69,6 +69,18 @@ namespace RimWorldAccess
             // Check if this is a zone designator
             bool isZoneDesignator = IsZoneDesignator(activeDesignator);
 
+            // Tab key - toggle between box selection and single tile selection modes (for zone designators only)
+            if (key == KeyCode.Tab && isZoneDesignator && inArchitectMode)
+            {
+                // Cancel any active rectangle selection when switching modes
+                if (ArchitectState.HasRectangleStart)
+                {
+                    ArchitectState.CancelRectangle();
+                }
+
+                ArchitectState.ToggleSelectionMode();
+                handled = true;
+            }
             // Shift+Space - Cancel blueprint at cursor position (check before regular Space)
             if (shiftHeld && key == KeyCode.Space)
             {
@@ -130,27 +142,36 @@ namespace RimWorldAccess
 
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
-                // For zone designators, use rectangle selection
+                // For zone designators, check selection mode
                 if (isZoneDesignator)
                 {
                     if (inArchitectMode)
                     {
-                        if (!ArchitectState.HasRectangleStart)
+                        if (ArchitectState.SelectionMode == ArchitectSelectionMode.SingleTile)
                         {
-                            // No start corner yet - set it
-                            ArchitectState.SetRectangleStart(currentPosition);
-                        }
-                        else if (ArchitectState.IsInPreviewMode)
-                        {
-                            // We have a preview - confirm this rectangle
-                            ArchitectState.ConfirmRectangle();
+                            // Single tile mode - toggle the current cell
+                            ArchitectState.ToggleCell(currentPosition);
                         }
                         else
                         {
-                            // Start is set but no end yet - update to create preview at current position
-                            ArchitectState.UpdatePreview(currentPosition);
-                            // Then confirm it
-                            ArchitectState.ConfirmRectangle();
+                            // Box selection mode - set corners and confirm rectangles
+                            if (!ArchitectState.HasRectangleStart)
+                            {
+                                // No start corner yet - set it
+                                ArchitectState.SetRectangleStart(currentPosition);
+                            }
+                            else if (ArchitectState.IsInPreviewMode)
+                            {
+                                // We have a preview - confirm this rectangle
+                                ArchitectState.ConfirmRectangle();
+                            }
+                            else
+                            {
+                                // Start is set but no end yet - update to create preview at current position
+                                ArchitectState.UpdatePreview(currentPosition);
+                                // Then confirm it
+                                ArchitectState.ConfirmRectangle();
+                            }
                         }
                     }
                 }

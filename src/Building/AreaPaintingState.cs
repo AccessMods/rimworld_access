@@ -8,6 +8,15 @@ using UnityEngine;
 namespace RimWorldAccess
 {
     /// <summary>
+    /// Defines the selection mode for area painting.
+    /// </summary>
+    public enum AreaSelectionMode
+    {
+        BoxSelection,    // Space sets corners for rectangle selection
+        SingleTile       // Space toggles individual tiles
+    }
+
+    /// <summary>
     /// Maintains state for area painting mode (expanding/shrinking areas with keyboard).
     /// Allows keyboard navigation and rectangle-based painting of areas.
     /// Uses RimWorld's native APIs for feedback.
@@ -18,6 +27,7 @@ namespace RimWorldAccess
         private static Area targetArea = null;
         private static bool isExpanding = true; // true = expand, false = shrink
         private static List<IntVec3> stagedCells = new List<IntVec3>(); // Cells staged for addition/removal
+        private static AreaSelectionMode selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
 
         // Rectangle selection helper (shared logic for rectangle-based selection)
         private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
@@ -68,6 +78,27 @@ namespace RimWorldAccess
         public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
 
         /// <summary>
+        /// Gets the current selection mode (BoxSelection or SingleTile).
+        /// </summary>
+        public static AreaSelectionMode SelectionMode => selectionMode;
+
+        /// <summary>
+        /// Toggles between box selection and single tile selection modes.
+        /// </summary>
+        public static void ToggleSelectionMode()
+        {
+            selectionMode = (selectionMode == AreaSelectionMode.BoxSelection)
+                ? AreaSelectionMode.SingleTile
+                : AreaSelectionMode.BoxSelection;
+
+            string modeName = (selectionMode == AreaSelectionMode.BoxSelection)
+                ? "Box selection mode"
+                : "Single tile selection mode";
+            TolkHelper.Speak(modeName);
+            Log.Message($"Area painting: Switched to {modeName}");
+        }
+
+        /// <summary>
         /// Enters area painting mode for expanding an area.
         /// </summary>
         public static void EnterExpandMode(Area area)
@@ -79,6 +110,7 @@ namespace RimWorldAccess
             isExpanding = true;
             stagedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
 
             Log.Message($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
 
@@ -89,7 +121,7 @@ namespace RimWorldAccess
                 Log.Message("RimWorld Access: Initialized map navigation");
             }
 
-            TolkHelper.Speak($"Expanding area: {area.Label}. Press Space to set corners, Enter to confirm, Escape to cancel.");
+            TolkHelper.Speak($"Expanding area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
             Log.Message("RimWorld Access: Area painting mode entered");
         }
 
@@ -103,6 +135,7 @@ namespace RimWorldAccess
             isExpanding = false;
             stagedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
 
             // Ensure map navigation is initialized
             if (!MapNavigationState.IsInitialized && area.Map != null)
@@ -110,7 +143,7 @@ namespace RimWorldAccess
                 MapNavigationState.Initialize(area.Map);
             }
 
-            TolkHelper.Speak($"Shrinking area: {area.Label}. Press Space to set corners, Enter to confirm, Escape to cancel.");
+            TolkHelper.Speak($"Shrinking area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
         }
 
         /// <summary>
@@ -233,6 +266,7 @@ namespace RimWorldAccess
             targetArea = null;
             stagedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
         }
 
         /// <summary>
@@ -251,6 +285,7 @@ namespace RimWorldAccess
             targetArea = null;
             stagedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
 
             Log.Message("RimWorld Access: Area painting cancelled");
         }
@@ -266,6 +301,7 @@ namespace RimWorldAccess
             targetArea = null;
             stagedCells.Clear();
             rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
 
             Log.Message("RimWorld Access: Area painting mode exited");
         }
