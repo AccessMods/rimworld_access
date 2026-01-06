@@ -45,6 +45,14 @@ namespace RimWorldAccess
                     return;
                 }
 
+                // Select the first object so that tab visibility checks work correctly
+                // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
+                if (objects.Count > 0 && objects[0] is Thing thingToSelect)
+                {
+                    Find.Selector.ClearSelection();
+                    Find.Selector.Select(thingToSelect, playSound: false, forceDesignatorDeselect: false);
+                }
+
                 // Build the tree
                 rootItem = InspectionTreeBuilder.BuildTree(objects);
                 RebuildVisibleList();
@@ -120,6 +128,14 @@ namespace RimWorldAccess
 
                 // Store parent for navigation back
                 parentObject = parent;
+
+                // Select the object so that tab visibility checks work correctly
+                // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
+                if (obj is Thing thingToSelect)
+                {
+                    Find.Selector.ClearSelection();
+                    Find.Selector.Select(thingToSelect, playSound: false, forceDesignatorDeselect: false);
+                }
 
                 // Build tree with just this object
                 var objects = new List<object> { obj };

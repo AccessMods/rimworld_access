@@ -62,7 +62,256 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets dynamic categories for an object by discovering tabs from RimWorld's inspect system.
+        /// This is the new dynamic approach that reads tabs from the game.
+        /// </summary>
+        public static List<TabCategoryInfo> GetDynamicCategories(object obj)
+        {
+            var categories = new List<TabCategoryInfo>();
+
+            // Always add Overview first (synthetic category, not a real tab)
+            categories.Add(new TabCategoryInfo
+            {
+                Name = "Overview",
+                Tab = null,
+                Handler = TabHandlerType.RichNavigation,
+                IsKnown = true,
+                OriginalCategoryName = "Overview"
+            });
+
+            // For Things (pawns, buildings, items), get tabs dynamically
+            if (obj is Thing thing)
+            {
+                var tabCategories = TabRegistry.GetTabCategories(thing);
+                categories.AddRange(tabCategories);
+
+                // Add synthetic categories that aren't tabs but provide useful info
+                if (obj is Pawn pawn)
+                {
+                    // Add Mood category (not a separate tab in RimWorld, but we show it)
+                    if (pawn.needs?.mood != null && !categories.Any(c => c.Name == "Mood"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Mood",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Mood"
+                        });
+                    }
+
+                    // Add Skills category for humanlike pawns (part of Character tab in game)
+                    if (pawn.RaceProps.Humanlike && pawn.skills?.skills != null && !categories.Any(c => c.Name == "Skills"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Skills",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Skills"
+                        });
+                    }
+
+                    // Add Work Priorities for humanlike pawns
+                    if (pawn.RaceProps.Humanlike && !categories.Any(c => c.Name == "Work Priorities"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Work Priorities",
+                            Tab = null,
+                            Handler = TabHandlerType.BasicInspectString,
+                            IsKnown = true,
+                            OriginalCategoryName = "Work Priorities"
+                        });
+                    }
+
+                    // Add Job Queue if there are queued jobs
+                    if (pawn.jobs?.jobQueue?.Count > 0 && !categories.Any(c => c.Name == "Job Queue"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Job Queue",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Job Queue"
+                        });
+                    }
+                }
+
+                // Add building-specific synthetic categories
+                if (obj is Building building)
+                {
+                    // Temperature control (not a tab, but a component)
+                    var tempControl = building.TryGetComp<CompTempControl>();
+                    if (tempControl != null && !categories.Any(c => c.Name == "Temperature"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Temperature",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Temperature"
+                        });
+                    }
+
+                    // Bed Assignment (not a tab)
+                    if (building is Building_Bed && !categories.Any(c => c.Name == "Bed Assignment"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Bed Assignment",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Bed Assignment"
+                        });
+                    }
+
+                    // Plant Selection for plant growers
+                    if (building is IPlantToGrowSettable && !categories.Any(c => c.Name == "Plant Selection"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Plant Selection",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Plant Selection"
+                        });
+                    }
+
+                    // Power info
+                    var powerComp = building.TryGetComp<CompPowerTrader>();
+                    if (powerComp != null && !categories.Any(c => c.Name == "Power"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Power",
+                            Tab = null,
+                            Handler = TabHandlerType.BasicInspectString,
+                            IsKnown = true,
+                            OriginalCategoryName = "Power"
+                        });
+                    }
+
+                    // Dynamically discovered components
+                    var discoveredComponents = BuildingComponentsHelper.GetDiscoverableComponents(building);
+                    foreach (var component in discoveredComponents.Where(cmp => !categories.Any(c => c.Name == cmp.CategoryName)))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = component.CategoryName,
+                            Tab = null,
+                            Handler = component.IsReadOnly ? TabHandlerType.BasicInspectString : TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = component.CategoryName
+                        });
+                    }
+
+                    // Stats category for all buildings
+                    if (!categories.Any(c => c.Name == "Stats"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Stats",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Stats"
+                        });
+                    }
+                }
+
+                // Add growth info and stats for plants
+                if (obj is Plant)
+                {
+                    if (!categories.Any(c => c.Name == "Growth Info"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Growth Info",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Growth Info"
+                        });
+                    }
+                    if (!categories.Any(c => c.Name == "Stats"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Stats",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Stats"
+                        });
+                    }
+                }
+
+                // Items (non-building Things)
+                if (!(obj is Pawn) && !(obj is Building) && !(obj is Plant))
+                {
+                    if (!categories.Any(c => c.Name == "Quality & Stats"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Quality & Stats",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Quality & Stats"
+                        });
+                    }
+                }
+            }
+
+            // Zone-specific categories
+            if (obj is Zone zone)
+            {
+                // Add tabs dynamically discovered from zone's GetInspectTabs()
+                // This includes ITab_Storage for Zone_Stockpile
+                var zoneTabCategories = TabRegistry.GetZoneTabCategories(zone);
+                categories.AddRange(zoneTabCategories);
+
+                // Rename is a gizmo action, not a tab - add as synthetic category
+                if (!categories.Any(c => c.OriginalCategoryName == "Rename"))
+                {
+                    categories.Add(new TabCategoryInfo
+                    {
+                        Name = "Rename".Translate().ToString(),
+                        Tab = null,
+                        Handler = TabHandlerType.Action,
+                        IsKnown = true,
+                        OriginalCategoryName = "Rename"
+                    });
+                }
+
+                // Plant Info is a synthetic category for growing zones (not a real tab)
+                if (zone is Zone_Growing && !categories.Any(c => c.OriginalCategoryName == "Plant Info"))
+                {
+                    categories.Add(new TabCategoryInfo
+                    {
+                        Name = "Plant Info",
+                        Tab = null,
+                        Handler = TabHandlerType.RichNavigation,
+                        IsKnown = true,
+                        OriginalCategoryName = "Plant Info"
+                    });
+                }
+            }
+
+            return categories;
+        }
+
+        /// <summary>
         /// Gets the list of available information categories for an object.
+        /// This is the legacy method that returns simple string categories.
+        /// Preserved for backward compatibility with existing code.
         /// </summary>
         public static List<string> GetAvailableCategories(object obj)
         {
@@ -135,13 +384,9 @@ namespace RimWorldAccess
 
                 // Dynamically discover and add component categories
                 var discoveredComponents = BuildingComponentsHelper.GetDiscoverableComponents(building);
-                foreach (var component in discoveredComponents)
+                foreach (var component in discoveredComponents.Where(cmp => !categories.Contains(cmp.CategoryName)))
                 {
-                    // Only add if not already covered by specialized menus above
-                    if (!categories.Contains(component.CategoryName))
-                    {
-                        categories.Add(component.CategoryName);
-                    }
+                    categories.Add(component.CategoryName);
                 }
 
                 // Add stats category for all buildings
@@ -287,8 +532,42 @@ namespace RimWorldAccess
                     return "Not a prisoner or slave.";
 
                 default:
-                    return "Category not found.";
+                    // Try to get info from dynamic tab using GetInspectString as fallback
+                    return GetDynamicTabInfo(pawn, category);
             }
+        }
+
+        /// <summary>
+        /// Gets fallback information for a dynamic tab using GetInspectString().
+        /// </summary>
+        private static string GetDynamicTabInfo(Thing thing, string category)
+        {
+            if (thing == null)
+                return "No information available.";
+
+            // Try to find the matching tab
+            var tabs = thing.GetInspectTabs();
+            if (tabs != null)
+            {
+                foreach (var tab in tabs)
+                {
+                    if (tab == null || !tab.IsVisible)
+                        continue;
+
+                    string tabLabel = TabRegistry.GetCategoryNameForTab(tab);
+                    if (tabLabel == category)
+                    {
+                        return TabRegistry.GetFallbackInfo(thing, tab);
+                    }
+                }
+            }
+
+            // If no matching tab found, use general inspect string
+            string inspectString = thing.GetInspectString();
+            if (!string.IsNullOrEmpty(inspectString))
+                return inspectString;
+
+            return $"No information available for '{category}'.";
         }
 
         /// <summary>
@@ -456,7 +735,8 @@ namespace RimWorldAccess
                     return GetBuildingStatsInfo(building);
 
                 default:
-                    return "Category not found.";
+                    // Try to get info from dynamic tab using GetInspectString as fallback
+                    return GetDynamicTabInfo(building, category);
             }
         }
 
