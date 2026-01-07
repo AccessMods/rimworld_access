@@ -1,3 +1,4 @@
+using System;
 using Verse;
 using RimWorld;
 
@@ -8,11 +9,12 @@ namespace RimWorldAccess
     /// </summary>
     public enum JumpMode
     {
-        Terrain,    // Jump by terrain type (original behavior)
-        Buildings,  // Jump to buildings (walls, doors, etc.)
+        Terrain,           // Jump by terrain type (original behavior)
+        Buildings,         // Jump to buildings (walls, doors, etc.)
         Geysers,           // Jump to steam geysers
         HarvestableTrees,  // Jump to harvestable trees
-        MinableTiles       // Jump to mineable resources (ore, stone chunks)
+        MinableTiles,      // Jump to mineable resources (ore, stone chunks)
+        PresetDistance     // Jump a fixed number of tiles
     }
 
     /// <summary>
@@ -26,6 +28,7 @@ namespace RimWorldAccess
         private static bool isInitialized = false;
         private static bool suppressMapNavigation = false;
         private static JumpMode currentJumpMode = JumpMode.Terrain;
+        private static int presetJumpDistance = 5;
 
         /// <summary>
         /// Gets or sets the current cursor position on the map.
@@ -85,16 +88,22 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the current jump mode (terrain, buildings, geysers, harvestable trees, or mineable tiles).
+        /// Gets the current jump mode (terrain, buildings, geysers, harvestable trees, mineable tiles, or preset distance).
         /// </summary>
         public static JumpMode CurrentJumpMode => currentJumpMode;
+
+        /// <summary>
+        /// Gets the current preset jump distance in tiles.
+        /// </summary>
+        public static int PresetJumpDistance => presetJumpDistance;
 
         /// <summary>
         /// Cycles to the next jump mode and announces it.
         /// </summary>
         public static void CycleJumpModeForward()
         {
-            currentJumpMode = (JumpMode)(((int)currentJumpMode + 1) % 5);
+            int modeCount = Enum.GetValues(typeof(JumpMode)).Length;
+            currentJumpMode = (JumpMode)(((int)currentJumpMode + 1) % modeCount);
             AnnounceJumpMode();
         }
 
@@ -103,8 +112,34 @@ namespace RimWorldAccess
         /// </summary>
         public static void CycleJumpModeBackward()
         {
-            currentJumpMode = (JumpMode)(((int)currentJumpMode + 4) % 5);
+            int modeCount = Enum.GetValues(typeof(JumpMode)).Length;
+            currentJumpMode = (JumpMode)(((int)currentJumpMode + modeCount - 1) % modeCount);
             AnnounceJumpMode();
+        }
+
+        /// <summary>
+        /// Increases the preset jump distance by 1 and announces the new value.
+        /// </summary>
+        public static void IncreasePresetDistance()
+        {
+            presetJumpDistance++;
+            TolkHelper.Speak($"Jump distance: {presetJumpDistance}");
+        }
+
+        /// <summary>
+        /// Decreases the preset jump distance by 1 (minimum 1) and announces the new value.
+        /// </summary>
+        public static void DecreasePresetDistance()
+        {
+            if (presetJumpDistance > 1)
+            {
+                presetJumpDistance--;
+                TolkHelper.Speak($"Jump distance: {presetJumpDistance}");
+            }
+            else
+            {
+                TolkHelper.Speak("Minimum distance");
+            }
         }
 
         /// <summary>
@@ -132,6 +167,10 @@ namespace RimWorldAccess
             else if (currentJumpMode == JumpMode.MinableTiles)
             {
                 modeText = "Jump mode: Mineable Tiles";
+            }
+            else if (currentJumpMode == JumpMode.PresetDistance)
+            {
+                modeText = $"Jump mode: Preset distance, {presetJumpDistance} tiles";
             }
             else
             {
@@ -481,6 +520,31 @@ namespace RimWorldAccess
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Jumps a preset number of tiles in the specified direction.
+        /// Returns true if the position changed.
+        /// </summary>
+        public static bool JumpPresetDistance(IntVec3 direction, Map map)
+        {
+            if (map == null || !isInitialized)
+                return false;
+
+            IntVec3 newPosition = currentCursorPosition + (direction * presetJumpDistance);
+
+            // Clamp to map bounds
+            newPosition.x = UnityEngine.Mathf.Clamp(newPosition.x, 0, map.Size.x - 1);
+            newPosition.z = UnityEngine.Mathf.Clamp(newPosition.z, 0, map.Size.z - 1);
+
+            if (newPosition == currentCursorPosition)
+            {
+                TolkHelper.Speak("Map boundary");
+                return false;
+            }
+
+            currentCursorPosition = newPosition;
+            return true;
         }
 
         /// <summary>

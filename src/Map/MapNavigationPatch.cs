@@ -162,6 +162,22 @@ namespace RimWorldAccess
                     hasAnnouncedThisFrame = true;
                     return true;
                 }
+                // Shift+Left/Right adjusts preset distance (only in PresetDistance mode)
+                else if (MapNavigationState.CurrentJumpMode == JumpMode.PresetDistance)
+                {
+                    if (Input.GetKeyDown(KeyCode.LeftArrow))
+                    {
+                        MapNavigationState.DecreasePresetDistance();
+                        hasAnnouncedThisFrame = true;
+                        return true;
+                    }
+                    else if (Input.GetKeyDown(KeyCode.RightArrow))
+                    {
+                        MapNavigationState.IncreasePresetDistance();
+                        hasAnnouncedThisFrame = true;
+                        return true;
+                    }
+                }
             }
 
             // Check each arrow key direction
@@ -214,6 +230,9 @@ namespace RimWorldAccess
                             break;
                         case JumpMode.MinableTiles:
                             positionChanged = MapNavigationState.JumpToNextMinableTiles(moveOffset, Find.CurrentMap);
+                            break;
+                        case JumpMode.PresetDistance:
+                            positionChanged = MapNavigationState.JumpPresetDistance(moveOffset, Find.CurrentMap);
                             break;
                         default:
                             positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
