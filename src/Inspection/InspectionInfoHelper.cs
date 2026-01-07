@@ -82,6 +82,7 @@ namespace RimWorldAccess
                     categories.Add("Social");
                     categories.Add("Character");
                     categories.Add("Work Priorities");
+                    categories.Add("Creature"); // Diet, temperature comfort, etc.
                     categories.Add("Log");
 
                     // Add Job Queue category if there are queued jobs
@@ -99,6 +100,7 @@ namespace RimWorldAccess
                 else // Animal
                 {
                     categories.Add("Needs");
+                    categories.Add("Creature"); // Diet, temperature comfort, production stats, etc.
                     if (pawn.training != null)
                         categories.Add("Training");
                 }
@@ -285,6 +287,9 @@ namespace RimWorldAccess
                         return PrisonerTabHelper.GetSlaveInfo(pawn);
                     }
                     return "Not a prisoner or slave.";
+
+                case "Creature":
+                    return CreatureTabHelper.GetCreatureSummary(pawn);
 
                 default:
                     return "Category not found.";

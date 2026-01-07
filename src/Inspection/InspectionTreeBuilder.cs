@@ -274,6 +274,7 @@ namespace RimWorldAccess
                    category == "Social" ||
                    category == "Training" ||
                    category == "Character" ||
+                   category == "Creature" ||
                    category == "Log" ||
                    category == "Job Queue";
         }
@@ -433,6 +434,10 @@ namespace RimWorldAccess
             {
                 BuildDetailedInfoChildren(categoryItem, obj, category);
             }
+            else if (category == "Creature")
+            {
+                BuildCreatureChildren(categoryItem, pawn);
+            }
             else if (category == "Log")
             {
                 BuildLogChildren(categoryItem, pawn);
@@ -537,6 +542,41 @@ namespace RimWorldAccess
                     parentItem.Children.Add(queuedItem);
                     queueIndex++;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Creature category.
+        /// Shows diet, temperature comfort, production stats, and other creature-specific information.
+        /// </summary>
+        private static void BuildCreatureChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            int indent = parentItem.IndentLevel + 1;
+            var creatureInfo = CreatureTabHelper.GetCreatureInfoItems(pawn);
+
+            foreach (var info in creatureInfo)
+            {
+                var infoItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = $"{info.Label}: {info.Value}",
+                    Data = info.Description,
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                AddChild(parentItem, infoItem);
+            }
+
+            if (creatureInfo.Count == 0)
+            {
+                var noInfoItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No creature information available",
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                AddChild(parentItem, noInfoItem);
             }
         }
 
