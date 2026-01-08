@@ -64,7 +64,7 @@ The codebase is organized into 18 modules by game feature:
 | **Map/** | 9 | Map navigation, cursor, scanner |
 | **World/** | 8 | World map, settlements, caravans |
 | **Building/** | 22 | Construction, zones, areas |
-| **Inspection/** | 18 | Building/object inspection UI |
+| **Inspection/** | 22 | Building/object inspection UI, Info Card |
 | **Pawns/** | 25 | Pawn info and character tabs |
 | **Work/** | 2 | Work priorities and schedules |
 | **Animals/** | 6 | Animal and wildlife management |

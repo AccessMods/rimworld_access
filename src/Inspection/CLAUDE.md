@@ -1,12 +1,13 @@
 # Inspection Module
 
 ## Purpose
-Building and object inspection UI, bills management, storage settings, and gizmo navigation.
+Building and object inspection UI, bills management, storage settings, gizmo navigation, and Info Card accessibility.
 
 ## Files
-**Patches:** BuildingInspectPatch.cs, StorageSettingsMenuPatch.cs, GizmoNavigationPatch.cs
-**States:** WindowlessInspectionState.cs, BillsMenuState.cs, BillConfigState.cs, StorageSettingsMenuState.cs, ThingFilterMenuState.cs, ThingFilterNavigationState.cs, RangeEditMenuState.cs, GizmoNavigationState.cs, WindowlessInventoryState.cs
-**Helpers:** InspectionInfoHelper.cs, InspectionTreeBuilder.cs, InspectionTreeItem.cs, InventoryHelper.cs, PowerInfoHelper.cs
+
+**Patches:** BuildingInspectPatch.cs, StorageSettingsMenuPatch.cs, GizmoNavigationPatch.cs, InfoCardPatch.cs
+**States:** WindowlessInspectionState.cs, BillsMenuState.cs, BillConfigState.cs, StorageSettingsMenuState.cs, ThingFilterMenuState.cs, ThingFilterNavigationState.cs, RangeEditMenuState.cs, GizmoNavigationState.cs, WindowlessInventoryState.cs, InfoCardState.cs
+**Helpers:** InspectionInfoHelper.cs, InspectionTreeBuilder.cs, InspectionTreeItem.cs, InventoryHelper.cs, PowerInfoHelper.cs, TabRegistry.cs, InfoCardDataExtractor.cs, InfoCardTreeBuilder.cs
 
 ## Key Shortcuts
 - **Enter** - Open inspection at cursor
@@ -81,6 +82,9 @@ Provides keyboard navigation for RimWorld's Dialog_InfoCard (opened via 'i' on i
 
 ## Testing
 - [ ] Building inspection opens correctly
+- [ ] Prisoner tab appears for prisoners (cursor-only, no click)
+- [ ] Training tab appears for tamed animals
 - [ ] Bills management navigable
 - [ ] Storage filters work
 - [ ] Gizmo navigation functional
+- [ ] Info Card opens and navigates correctly
