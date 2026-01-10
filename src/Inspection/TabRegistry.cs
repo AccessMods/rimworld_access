@@ -144,7 +144,7 @@ namespace RimWorldAccess
             { "ITab_Book", TabHandlerType.BasicInspectString },
             { "ITab_PenBase", TabHandlerType.BasicInspectString },
             { "ITab_PenAnimals", TabHandlerType.Action },
-            { "ITab_PenFood", TabHandlerType.BasicInspectString },
+            { "ITab_PenFood", TabHandlerType.RichNavigation },
             { "ITab_PenAutoCut", TabHandlerType.Action },
         };
 
@@ -312,6 +312,7 @@ namespace RimWorldAccess
                 case "ITab_Storage": return "Storage";
                 case "ITab_PenAnimals": return "Pen Animals";
                 case "ITab_PenAutoCut": return "Pen Auto-Cut";
+                case "ITab_PenFood": return "Pen Food";
                 default: return GetCategoryNameForTab(tab);
             }
         }

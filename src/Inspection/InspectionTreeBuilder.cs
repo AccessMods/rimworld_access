@@ -482,16 +482,23 @@ namespace RimWorldAccess
         /// </summary>
         private static bool IsExpandableCategory(object obj, string category)
         {
-            return category == "Gear" ||
-                   category == "Skills" ||
-                   category == "Health" ||
-                   category == "Needs" ||
-                   category == "Mood" ||
-                   category == "Social" ||
-                   category == "Training" ||
-                   category == "Character" ||
-                   category == "Log" ||
-                   category == "Job Queue";
+            if (category == "Gear" ||
+                category == "Skills" ||
+                category == "Health" ||
+                category == "Needs" ||
+                category == "Mood" ||
+                category == "Social" ||
+                category == "Training" ||
+                category == "Character" ||
+                category == "Log" ||
+                category == "Job Queue")
+                return true;
+
+            // Pen Food is expandable if building has pen marker
+            if (category == "Pen Food" && obj is Building building)
+                return building.TryGetComp<CompAnimalPenMarker>() != null;
+
+            return false;
         }
 
         /// <summary>
@@ -642,6 +649,16 @@ namespace RimWorldAccess
         {
             if (categoryItem.Children.Count > 0)
                 return; // Already built
+
+            // Handle Building-specific categories
+            if (obj is Building building)
+            {
+                if (category == "Pen Food")
+                {
+                    BuildPenFoodChildren(categoryItem, building);
+                    return;
+                }
+            }
 
             // Handle Pawn-specific categories (supports both live pawns and corpses)
             Pawn pawn = GetPawnFromThing(obj);
@@ -2070,6 +2087,121 @@ namespace RimWorldAccess
                 }
 
                 AddChild(parentItem, logItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Pen Food category showing nutrition info.
+        /// </summary>
+        private static void BuildPenFoodChildren(InspectionTreeItem parentItem, Building building)
+        {
+            var penMarker = building.TryGetComp<CompAnimalPenMarker>();
+            if (penMarker == null)
+                return;
+
+            int indent = parentItem.IndentLevel + 1;
+            var calculator = penMarker.PenFoodCalculator;
+
+            // Summary item
+            float growth = calculator.NutritionPerDayToday;
+            float consumption = calculator.SumNutritionConsumptionPerDay;
+            float balance = growth - consumption;
+            string balanceStr = balance >= 0 ? $"+{balance:F1}" : $"{balance:F1}";
+            string summaryText = $"Balance: {balanceStr} nutrition/day (growth: {growth:F1}, consumption: {consumption:F1})";
+
+            var summaryItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.Item,
+                Label = summaryText,
+                IndentLevel = indent,
+                IsExpandable = false
+            };
+            AddChild(parentItem, summaryItem);
+
+            // Stockpiled food
+            if (calculator.sumStockpiledNutritionAvailableNow > 0)
+            {
+                var stockpileItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"Stockpiled: {calculator.sumStockpiledNutritionAvailableNow:F1} nutrition",
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                AddChild(parentItem, stockpileItem);
+            }
+
+            // Animals category
+            var animalInfos = calculator.ActualAnimalInfos;
+            if (animalInfos != null && animalInfos.Count > 0)
+            {
+                var animalsCategory = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = $"Animals ({animalInfos.Count} types)",
+                    IndentLevel = indent,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                animalsCategory.OnActivate = () =>
+                {
+                    if (animalsCategory.Children.Count == 0)
+                    {
+                        foreach (var info in animalInfos)
+                        {
+                            string animalLabel = info.animalDef?.label?.CapitalizeFirst() ?? "Unknown";
+                            float animalConsumption = info.nutritionConsumptionPerDay;
+                            int count = info.count;
+                            string animalText = $"{animalLabel} ({count}): -{animalConsumption:F2}/day";
+
+                            var animalItem = new InspectionTreeItem
+                            {
+                                Type = InspectionTreeItem.ItemType.Item,
+                                Label = animalText,
+                                IndentLevel = indent + 1,
+                                IsExpandable = false
+                            };
+                            AddChild(animalsCategory, animalItem);
+                        }
+                    }
+                };
+                AddChild(parentItem, animalsCategory);
+            }
+
+            // Stockpiled items breakdown
+            var stockpileInfos = calculator.AllStockpiledInfos;
+            if (stockpileInfos != null && stockpileInfos.Count > 0)
+            {
+                var foodCategory = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = $"Stockpiled Items ({stockpileInfos.Count} types)",
+                    IndentLevel = indent,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                foodCategory.OnActivate = () =>
+                {
+                    if (foodCategory.Children.Count == 0)
+                    {
+                        foreach (var info in stockpileInfos)
+                        {
+                            string foodLabel = info.itemDef?.label?.CapitalizeFirst() ?? "Unknown";
+                            float nutrition = info.totalNutritionAvailable;
+                            string foodText = $"{foodLabel}: {nutrition:F1} nutrition";
+
+                            var foodItem = new InspectionTreeItem
+                            {
+                                Type = InspectionTreeItem.ItemType.Item,
+                                Label = foodText,
+                                IndentLevel = indent + 1,
+                                IsExpandable = false
+                            };
+                            AddChild(foodCategory, foodItem);
+                        }
+                    }
+                };
+                AddChild(parentItem, foodCategory);
             }
         }
     }
