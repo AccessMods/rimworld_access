@@ -150,21 +150,24 @@ namespace RimWorldAccess
                 }
             }
 
-            // Wrap to beginning
-            for (int i = 0; i <= selectedIndex; i++)
+            // Wrap to beginning (if enabled)
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
             {
-                var item = visibleItems[i];
-                if (item.Type == InspectionTreeItem.ItemType.Category ||
-                    item.Type == InspectionTreeItem.ItemType.SubCategory)
+                for (int i = 0; i <= selectedIndex; i++)
                 {
-                    selectedIndex = i;
-                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    return;
+                    var item = visibleItems[i];
+                    if (item.Type == InspectionTreeItem.ItemType.Category ||
+                        item.Type == InspectionTreeItem.ItemType.SubCategory)
+                    {
+                        selectedIndex = i;
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection();
+                        return;
+                    }
                 }
             }
 
-            // No categories found
+            // No categories found or wrap disabled
             SoundDefOf.ClickReject.PlayOneShotOnCamera();
         }
 
@@ -192,22 +195,99 @@ namespace RimWorldAccess
                 }
             }
 
-            // Wrap to end
-            for (int i = visibleItems.Count - 1; i >= selectedIndex; i--)
+            // Wrap to end (if enabled)
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
             {
-                var item = visibleItems[i];
-                if (item.Type == InspectionTreeItem.ItemType.Category ||
-                    item.Type == InspectionTreeItem.ItemType.SubCategory)
+                for (int i = visibleItems.Count - 1; i >= selectedIndex; i--)
                 {
-                    selectedIndex = i;
-                    SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    return;
+                    var item = visibleItems[i];
+                    if (item.Type == InspectionTreeItem.ItemType.Category ||
+                        item.Type == InspectionTreeItem.ItemType.SubCategory)
+                    {
+                        selectedIndex = i;
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection();
+                        return;
+                    }
                 }
             }
 
-            // No categories found
+            // No categories found or wrap disabled
             SoundDefOf.ClickReject.PlayOneShotOnCamera();
+        }
+
+        /// <summary>
+        /// Jumps to the first sibling at the same indent level (Home key).
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
+                return;
+
+            selectedIndex = MenuHelper.JumpToFirstSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope (End key).
+        /// If on an expanded node, jumps to its last visible descendant.
+        /// Otherwise, jumps to last sibling at same level.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
+                return;
+
+            var currentItem = visibleItems[selectedIndex];
+
+            // If current item is expanded and has children, jump to last descendant
+            if (currentItem.IsExpanded && currentItem.Children.Count > 0)
+            {
+                // Find last visible descendant
+                int lastDescendantIndex = selectedIndex;
+                for (int i = selectedIndex + 1; i < visibleItems.Count; i++)
+                {
+                    if (visibleItems[i].IndentLevel <= currentItem.IndentLevel)
+                        break;
+                    lastDescendantIndex = i;
+                }
+                selectedIndex = lastDescendantIndex;
+            }
+            else
+            {
+                // Jump to last sibling
+                selectedIndex = MenuHelper.JumpToLastSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            }
+
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        public static void JumpToAbsoluteFirst()
+        {
+            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
+                return;
+
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// </summary>
+        public static void JumpToAbsoluteLast()
+        {
+            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
+                return;
+
+            selectedIndex = visibleItems.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -504,6 +584,26 @@ namespace RimWorldAccess
             if (key == KeyCode.PageUp)
             {
                 JumpToPreviousCategory();
+                return true;
+            }
+
+            // Home - jump to first (Ctrl+Home for absolute first)
+            if (key == KeyCode.Home)
+            {
+                if (ev.control)
+                    JumpToAbsoluteFirst();
+                else
+                    JumpToFirst();
+                return true;
+            }
+
+            // End - jump to last (Ctrl+End for absolute last)
+            if (key == KeyCode.End)
+            {
+                if (ev.control)
+                    JumpToAbsoluteLast();
+                else
+                    JumpToLast();
                 return true;
             }
 
