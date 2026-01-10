@@ -117,6 +117,17 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY -0.24: Handle Auto-Slaughter dialog if active =====
+            // Auto-Slaughter is a modal dialog that should take precedence over most other handlers
+            if (AutoSlaughterState.IsActive)
+            {
+                if (AutoSlaughterState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0: Handle caravan stats viewer if active (must be before key blocking) =====
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (CaravanStatsState.IsActive && !WindowlessDialogState.IsActive)
@@ -1634,6 +1645,15 @@ namespace RimWorldAccess
                 else if (key == KeyCode.S && Event.current.alt)
                 {
                     AnimalsMenuState.ToggleSortByCurrentColumn();
+                    handled = true;
+                }
+                // Handle Tab - open auto-slaughter settings
+                else if (key == KeyCode.Tab)
+                {
+                    if (Find.CurrentMap != null)
+                    {
+                        Find.WindowStack.Add(new RimWorld.Dialog_AutoSlaughter(Find.CurrentMap));
+                    }
                     handled = true;
                 }
 
