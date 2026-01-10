@@ -1424,8 +1424,9 @@ namespace RimWorldAccess
                     hediffLabel += $". {impacts}";
                 }
 
-                // Only expandable if TipStringExtra has meaningful content
-                bool hasExpandableContent = !string.IsNullOrWhiteSpace(hediff.TipStringExtra);
+                // Expandable if TipStringExtra has effects OR Description exists
+                bool hasExpandableContent = !string.IsNullOrWhiteSpace(hediff.TipStringExtra)
+                                         || !string.IsNullOrWhiteSpace(hediff.Description);
 
                 var hediffItem = new InspectionTreeItem
                 {
