@@ -41,6 +41,9 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
+        // Track collapsed categories by defName (default is expanded)
+        private static HashSet<string> collapsedCategories = new HashSet<string>();
+
         // Slider states
         private enum SliderMode { None, Quality, HitPoints }
         private enum SliderPart { Min, Max }
@@ -85,6 +88,7 @@ namespace RimWorldAccess
             flattenedNodes.Clear();
             selectedIndex = 0;
             typeahead.ClearSearch();
+            collapsedCategories.Clear();
             MenuHelper.ResetLevel("ThingFilter");
         }
 
@@ -163,7 +167,9 @@ namespace RimWorldAccess
             {
                 // Check if category has any allowed items to determine if it's "allowed"
                 bool hasAllowedChildren = childCategory.catDef.DescendantThingDefs.Any(t => currentFilter.Allows(t));
-                bool isExpanded = true; // Default to expanded
+                // Check if this category was explicitly collapsed (default is expanded)
+                string categoryKey = childCategory.catDef.defName;
+                bool isExpanded = !collapsedCategories.Contains(categoryKey);
 
                 flattenedNodes.Add(new NavigationNode
                 {
@@ -413,6 +419,11 @@ namespace RimWorldAccess
             // Case 1: Collapsed category - expand it, focus stays
             if (node.Type == NodeType.Category && !node.IsExpanded)
             {
+                // Remove from collapsed set
+                if (node.Data is TreeNode_ThingCategory catNode)
+                {
+                    collapsedCategories.Remove(catNode.catDef.defName);
+                }
                 node.IsExpanded = true;
                 int oldIndex = selectedIndex;
                 RebuildNavigationList();
@@ -469,6 +480,11 @@ namespace RimWorldAccess
             // Case 1: Expanded category - collapse it, focus stays
             if (node.Type == NodeType.Category && node.IsExpanded)
             {
+                // Add to collapsed set so it stays collapsed after rebuild
+                if (node.Data is TreeNode_ThingCategory catNode)
+                {
+                    collapsedCategories.Add(catNode.catDef.defName);
+                }
                 node.IsExpanded = false;
                 int oldIndex = selectedIndex;
                 RebuildNavigationList();

@@ -162,7 +162,7 @@ namespace RimWorldAccess
                     else if (Event.current.character != '\0' && !Event.current.control && !Event.current.alt)
                     {
                         char c = Event.current.character;
-                        if (char.IsLetterOrDigit(c) || c == ' ')
+                        if (char.IsLetterOrDigit(c))
                         {
                             ThingFilterNavigationState.ProcessTypeaheadCharacter(c);
                             handled = true;

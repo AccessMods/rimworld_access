@@ -335,6 +335,10 @@ namespace RimWorldAccess
                 if (building is IStoreSettingsParent || building is Building_Storage)
                     categories.Add("Storage");
 
+                // Check for turrets with changeable projectiles (mortars)
+                if (building is Building_TurretGun turretGun && turretGun.gun?.TryGetComp<CompChangeableProjectile>() != null)
+                    categories.Add("Shells");
+
                 // Check for plant grower (hydroponics basin, growing zones, etc.)
                 if (building is IPlantToGrowSettable)
                     categories.Add("Plant Selection");

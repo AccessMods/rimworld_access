@@ -70,18 +70,24 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
-            // Handle Home - jump to first
+            // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.Home)
             {
-                StorageSettingsMenuState.JumpToFirst();
+                if (Event.current.control)
+                    StorageSettingsMenuState.JumpToAbsoluteFirst();
+                else
+                    StorageSettingsMenuState.JumpToFirst();
                 Event.current.Use();
                 return;
             }
 
-            // Handle End - jump to last
+            // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.End)
             {
-                StorageSettingsMenuState.JumpToLast();
+                if (Event.current.control)
+                    StorageSettingsMenuState.JumpToAbsoluteLast();
+                else
+                    StorageSettingsMenuState.JumpToLast();
                 Event.current.Use();
                 return;
             }

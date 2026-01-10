@@ -122,18 +122,24 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Home - jump to first
+            // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.Home)
             {
-                ArchitectTreeState.JumpToFirst();
+                if (Event.current.control)
+                    ArchitectTreeState.JumpToAbsoluteFirst();
+                else
+                    ArchitectTreeState.JumpToFirst();
                 Event.current.Use();
                 return;
             }
 
-            // Handle End - jump to last
+            // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.End)
             {
-                ArchitectTreeState.JumpToLast();
+                if (Event.current.control)
+                    ArchitectTreeState.JumpToAbsoluteLast();
+                else
+                    ArchitectTreeState.JumpToLast();
                 Event.current.Use();
                 return;
             }

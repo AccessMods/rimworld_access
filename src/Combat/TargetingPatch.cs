@@ -63,24 +63,51 @@ namespace RimWorldAccess
                     var targets = GenUI.TargetsAt(clickPos, targetingSource.targetParams, thingsOnly: false, targetingSource);
                     LocalTargetInfo target = targets.FirstOrFallback(LocalTargetInfo.Invalid);
 
-                    // Validate the target is valid
+                    // If no specific thing found, use the cell itself (for mortars and other cell-targeting weapons)
                     if (!target.IsValid)
                     {
-                        TolkHelper.Speak("No valid target at cursor position");
-                        Event.current.Use();
-                        return false;
+                        target = new LocalTargetInfo(cursorPosition);
                     }
 
                     // Validate the target can be attacked/used
                     if (!targetingSource.ValidateTarget(target, showMessages: true))
                     {
-                        // Invalid target, ValidateTarget already showed a message
+                        // Invalid target - stay in targeting mode, let user try another position
+                        // User must press Escape to exit targeting
                         Event.current.Use();
                         return false;
                     }
 
-                    // Valid target! Use the standard OrderForceTarget method
-                    targetingSource.OrderForceTarget(target);
+                    // For turrets, call OrderAttack on the building instead of the verb's OrderForceTarget
+                    // (Verb.OrderForceTarget assumes a pawn caster and will throw NullReferenceException)
+                    var verb = targetingSource as Verb;
+                    if (verb?.caster is Building_TurretGun turret)
+                    {
+                        // Pre-check range to stay in targeting mode on failure
+                        float distance = (target.Cell - turret.Position).LengthHorizontal;
+                        float minRange = turret.AttackVerb.verbProps.EffectiveMinRange(target, turret);
+                        float maxRange = turret.AttackVerb.EffectiveRange;
+
+                        if (distance < minRange)
+                        {
+                            Messages.Message("MessageTargetBelowMinimumRange".Translate(), turret, MessageTypeDefOf.RejectInput, historical: false);
+                            Event.current.Use();
+                            return false;
+                        }
+                        if (distance > maxRange)
+                        {
+                            Messages.Message("MessageTargetBeyondMaximumRange".Translate(), turret, MessageTypeDefOf.RejectInput, historical: false);
+                            Event.current.Use();
+                            return false;
+                        }
+
+                        turret.OrderAttack(target);
+                    }
+                    else
+                    {
+                        // Standard pawn targeting
+                        targetingSource.OrderForceTarget(target);
+                    }
 
                     // Stop targeting mode
                     __instance.StopTargeting();

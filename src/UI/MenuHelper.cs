@@ -188,5 +188,66 @@ namespace RimWorldAccess
 
             return (position, total);
         }
+
+        /// <summary>
+        /// Finds the first sibling at the same indent level within the current node.
+        /// </summary>
+        /// <returns>Index of first sibling, or currentIndex if already at first</returns>
+        public static int JumpToFirstSibling<T>(IList<T> nodes, int currentIndex, Func<T, int> getIndentLevel)
+        {
+            if (nodes.Count == 0 || currentIndex < 0 || currentIndex >= nodes.Count)
+                return 0;
+
+            int indentLevel = getIndentLevel(nodes[currentIndex]);
+
+            // Scan backwards until we hit a lower indent level or start
+            for (int i = currentIndex - 1; i >= 0; i--)
+            {
+                if (getIndentLevel(nodes[i]) < indentLevel)
+                {
+                    // Found parent - first sibling is at i + 1
+                    return i + 1;
+                }
+            }
+
+            // No parent found - at root level, find first item at this indent
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (getIndentLevel(nodes[i]) == indentLevel)
+                    return i;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Finds the last sibling at the same indent level within the current node.
+        /// </summary>
+        /// <returns>Index of last sibling, or currentIndex if already at last</returns>
+        public static int JumpToLastSibling<T>(IList<T> nodes, int currentIndex, Func<T, int> getIndentLevel)
+        {
+            if (nodes.Count == 0 || currentIndex < 0 || currentIndex >= nodes.Count)
+                return nodes.Count - 1;
+
+            int indentLevel = getIndentLevel(nodes[currentIndex]);
+
+            // Scan forwards until we hit a lower indent level or end
+            int lastSibling = currentIndex;
+            for (int i = currentIndex + 1; i < nodes.Count; i++)
+            {
+                int level = getIndentLevel(nodes[i]);
+                if (level < indentLevel)
+                {
+                    // Found end of siblings
+                    break;
+                }
+                if (level == indentLevel)
+                {
+                    lastSibling = i;
+                }
+            }
+
+            return lastSibling;
+        }
     }
 }

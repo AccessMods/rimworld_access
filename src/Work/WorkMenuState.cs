@@ -554,8 +554,9 @@ namespace RimWorldAccess
         {
             if (allPawns.Count == 0) return;
 
-            int newIndex = (currentPawnIndex + 1) % allPawns.Count;
-            SaveAndSwitchPawn(newIndex);
+            int newIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
+            if (newIndex != currentPawnIndex)
+                SaveAndSwitchPawn(newIndex);
         }
 
         /// <summary>
@@ -565,8 +566,9 @@ namespace RimWorldAccess
         {
             if (allPawns.Count == 0) return;
 
-            int newIndex = (currentPawnIndex - 1 + allPawns.Count) % allPawns.Count;
-            SaveAndSwitchPawn(newIndex);
+            int newIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
+            if (newIndex != currentPawnIndex)
+                SaveAndSwitchPawn(newIndex);
         }
 
         #endregion

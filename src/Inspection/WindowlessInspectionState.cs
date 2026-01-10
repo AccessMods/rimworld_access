@@ -624,6 +624,76 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Jumps to the first sibling at the same level within the current node.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = MenuHelper.JumpToFirstSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope.
+        /// If on an expanded node, jumps to its last visible descendant.
+        /// Otherwise, jumps to last sibling at same level.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+
+            var currentItem = visibleItems[selectedIndex];
+
+            // If current item is expanded and has children, jump to last descendant
+            if (currentItem.IsExpanded && currentItem.Children.Count > 0)
+            {
+                // Find last visible descendant (items with higher indent until we hit same or lower indent)
+                int lastDescendantIndex = selectedIndex;
+                for (int i = selectedIndex + 1; i < visibleItems.Count; i++)
+                {
+                    if (visibleItems[i].IndentLevel <= currentItem.IndentLevel)
+                        break;
+                    lastDescendantIndex = i;
+                }
+                if (lastDescendantIndex > selectedIndex)
+                {
+                    selectedIndex = lastDescendantIndex;
+                    typeahead.ClearSearch();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // Otherwise jump to last sibling
+            selectedIndex = MenuHelper.JumpToLastSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        public static void JumpToAbsoluteFirst()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// </summary>
+        public static void JumpToAbsoluteLast()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = visibleItems.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Gets the list of labels for all visible items.
         /// </summary>
         private static List<string> GetItemLabels()
@@ -843,6 +913,28 @@ namespace RimWorldAccess
                 if (key == KeyCode.LeftArrow)
                 {
                     Collapse();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
+                if (key == KeyCode.Home)
+                {
+                    if (ev.control)
+                        JumpToAbsoluteFirst();
+                    else
+                        JumpToFirst();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
+                if (key == KeyCode.End)
+                {
+                    if (ev.control)
+                        JumpToAbsoluteLast();
+                    else
+                        JumpToLast();
                     ev.Use();
                     return true;
                 }

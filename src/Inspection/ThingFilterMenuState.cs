@@ -16,8 +16,10 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static bool isActive = false;
         private static ThingFilter currentFilter = null;
+        private static ThingFilter parentFilter = null;  // Defines what's possible (tree structure)
         private static HashSet<string> expandedCategories = new HashSet<string>();
         private static string menuTitle = "";
+        private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         private enum MenuItemType
         {
@@ -57,7 +59,10 @@ namespace RimWorldAccess
         /// <summary>
         /// Opens the thing filter menu.
         /// </summary>
-        public static void Open(ThingFilter filter, string title = "Thing Filter")
+        /// <param name="filter">The filter being edited (what's currently selected)</param>
+        /// <param name="fixedFilter">Optional parent filter that defines what's possible (tree structure)</param>
+        /// <param name="title">Menu title for announcements</param>
+        public static void Open(ThingFilter filter, ThingFilter fixedFilter = null, string title = "Thing Filter")
         {
             if (filter == null)
             {
@@ -66,6 +71,7 @@ namespace RimWorldAccess
             }
 
             currentFilter = filter;
+            parentFilter = fixedFilter;
             menuTitle = title;
             menuItems = new List<MenuItem>();
             selectedIndex = 0;
@@ -87,8 +93,10 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             currentFilter = null;
+            parentFilter = null;
             expandedCategories.Clear();
             MenuHelper.ResetLevel("ThingFilterMenu");
+            typeahead.ClearSearch();
         }
 
         private static void BuildMenuItems()
@@ -99,24 +107,26 @@ namespace RimWorldAccess
             menuItems.Add(new MenuItem(MenuItemType.ClearAll, "Clear All", null));
             menuItems.Add(new MenuItem(MenuItemType.AllowAll, "Allow All", null));
 
-            // Hit points range (if configurable)
-            if (currentFilter.allowedHitPointsConfigurable)
+            // Hit points range (use parent filter's configurability if available)
+            bool hpConfigurable = parentFilter?.allowedHitPointsConfigurable ?? currentFilter.allowedHitPointsConfigurable;
+            if (hpConfigurable)
             {
                 FloatRange hpRange = currentFilter.AllowedHitPointsPercents;
                 string hpLabel = $"Hit Points: {hpRange.min:P0} - {hpRange.max:P0}";
                 menuItems.Add(new MenuItem(MenuItemType.HitPointsRange, hpLabel, hpRange));
             }
 
-            // Quality range (if configurable)
-            if (currentFilter.allowedQualitiesConfigurable)
+            // Quality range (use parent filter's configurability if available)
+            bool qualityConfigurable = parentFilter?.allowedQualitiesConfigurable ?? currentFilter.allowedQualitiesConfigurable;
+            if (qualityConfigurable)
             {
                 QualityRange qualityRange = currentFilter.AllowedQualityLevels;
                 string qualityLabel = $"Quality: {qualityRange.min} - {qualityRange.max}";
                 menuItems.Add(new MenuItem(MenuItemType.QualityRange, qualityLabel, qualityRange));
             }
 
-            // Thing filter tree
-            TreeNode_ThingCategory rootNode = currentFilter.DisplayRootCategory;
+            // Thing filter tree - use parent filter's tree structure if available
+            TreeNode_ThingCategory rootNode = parentFilter?.DisplayRootCategory ?? currentFilter.DisplayRootCategory;
             BuildCategoryItems(rootNode, 0, null, isRoot: true);
         }
 
@@ -457,7 +467,7 @@ namespace RimWorldAccess
             {
                 MenuItem item = menuItems[selectedIndex];
 
-                // WCAG format: "{name} {state}. {X of Y}. level N"
+                // WCAG format: "{name} {state}. {X of Y}. {allowed}. level N"
                 string announcement = item.label;
 
                 // Add expanded/collapsed state for categories
@@ -470,6 +480,13 @@ namespace RimWorldAccess
                 // Add sibling position (X of Y)
                 var (position, total) = GetSiblingPosition(item);
                 announcement += $". {MenuHelper.FormatPosition(position - 1, total)}";
+
+                // Add allowed/disallowed state for toggleable items
+                if (item.type == MenuItemType.Category || item.type == MenuItemType.ThingDef || item.type == MenuItemType.SpecialFilter)
+                {
+                    string allowState = item.isAllowed ? "allowed" : "disallowed";
+                    announcement += $". {allowState}";
+                }
 
                 // Add level suffix at the end (only announced when level changes)
                 announcement += MenuHelper.GetLevelSuffix("ThingFilterMenu", item.indentLevel);
@@ -557,6 +574,136 @@ namespace RimWorldAccess
 
             // No parent found (top-level item), play reject sound
             SoundDefOf.ClickReject.PlayOneShotOnCamera();
+        }
+
+        /// <summary>
+        /// Jumps to the first sibling at the same level (Home key).
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+            selectedIndex = MenuHelper.JumpToFirstSibling(menuItems, selectedIndex, m => m.indentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last sibling at the same level (End key).
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+            selectedIndex = MenuHelper.JumpToLastSibling(menuItems, selectedIndex, m => m.indentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Checks if typeahead search has an active search buffer.
+        /// </summary>
+        public static bool HasActiveSearch => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Clears the current typeahead search.
+        /// </summary>
+        public static void ClearTypeaheadSearch()
+        {
+            typeahead.ClearSearchAndAnnounce();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Processes a backspace key for typeahead search.
+        /// </summary>
+        public static bool ProcessBackspace()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0) selectedIndex = newIndex;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Processes a character input for typeahead search.
+        /// </summary>
+        public static bool ProcessTypeaheadCharacter(char c)
+        {
+            var labels = GetVisibleItemLabels();
+            if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0) { selectedIndex = newIndex; AnnounceWithSearch(); }
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{typeahead.LastFailedSearch}'");
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the next matching item when search is active.
+        /// </summary>
+        public static bool SelectNextMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int next = typeahead.GetNextMatch(selectedIndex);
+            if (next >= 0)
+            {
+                selectedIndex = next;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Navigates to the previous matching item when search is active.
+        /// </summary>
+        public static bool SelectPreviousMatch()
+        {
+            if (!typeahead.HasActiveSearch) return false;
+
+            int prev = typeahead.GetPreviousMatch(selectedIndex);
+            if (prev >= 0)
+            {
+                selectedIndex = prev;
+                AnnounceWithSearch();
+            }
+            return true;
+        }
+
+        private static List<string> GetVisibleItemLabels()
+        {
+            var labels = new List<string>();
+            if (menuItems != null)
+            {
+                foreach (var item in menuItems)
+                {
+                    labels.Add(item.label);
+                }
+            }
+            return labels;
+        }
+
+        private static void AnnounceWithSearch()
+        {
+            if (menuItems == null || selectedIndex < 0 || selectedIndex >= menuItems.Count) return;
+
+            string label = menuItems[selectedIndex].label;
+
+            if (typeahead.HasActiveSearch)
+            {
+                TolkHelper.Speak($"{label}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+            }
+            else
+            {
+                AnnounceCurrentSelection();
+            }
         }
     }
 }

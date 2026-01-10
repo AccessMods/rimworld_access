@@ -403,12 +403,18 @@ namespace RimWorldAccess
             switch (key)
             {
                 case KeyCode.UpArrow:
-                    ThingFilterMenuState.SelectPrevious();
+                    if (ThingFilterMenuState.HasActiveSearch)
+                        ThingFilterMenuState.SelectPreviousMatch();
+                    else
+                        ThingFilterMenuState.SelectPrevious();
                     Event.current.Use();
                     break;
 
                 case KeyCode.DownArrow:
-                    ThingFilterMenuState.SelectNext();
+                    if (ThingFilterMenuState.HasActiveSearch)
+                        ThingFilterMenuState.SelectNextMatch();
+                    else
+                        ThingFilterMenuState.SelectNext();
                     Event.current.Use();
                     break;
 
@@ -422,6 +428,24 @@ namespace RimWorldAccess
                     Event.current.Use();
                     break;
 
+                case KeyCode.Home:
+                    ThingFilterMenuState.JumpToFirst();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.End:
+                    ThingFilterMenuState.JumpToLast();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Backspace:
+                    if (ThingFilterMenuState.HasActiveSearch)
+                    {
+                        ThingFilterMenuState.ProcessBackspace();
+                        Event.current.Use();
+                    }
+                    break;
+
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
                     ThingFilterMenuState.ToggleCurrent();
@@ -429,9 +453,26 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.Escape:
-                    ThingFilterMenuState.Close();
-                    TolkHelper.Speak("Closed thing filter menu");
+                    if (ThingFilterMenuState.HasActiveSearch)
+                    {
+                        ThingFilterMenuState.ClearTypeaheadSearch();
+                    }
+                    else
+                    {
+                        ThingFilterMenuState.Close();
+                        TolkHelper.Speak("Closed thing filter menu");
+                    }
                     Event.current.Use();
+                    break;
+
+                default:
+                    // Handle typeahead character input
+                    char c = Event.current.character;
+                    if (c != '\0' && !char.IsControl(c))
+                    {
+                        ThingFilterMenuState.ProcessTypeaheadCharacter(c);
+                        Event.current.Use();
+                    }
                     break;
             }
         }
