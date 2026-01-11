@@ -576,9 +576,10 @@ namespace RimWorldAccess
                 if (shellComp != null)
                 {
                     var settings = shellComp.GetStoreSettings();
+                    var parentSettings = shellComp.GetParentStoreSettings();
                     if (settings != null)
                     {
-                        StorageSettingsMenuState.Open(settings);
+                        ThingFilterMenuState.Open(settings.filter, parentSettings?.filter, "Ammunition");
                     }
                 }
             }
