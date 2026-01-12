@@ -47,8 +47,8 @@ namespace RimWorldAccess
             Func<TransferableOneWay> getTransferable,
             Action onChanged)
         {
-            // Plus key - increase by 1
-            if ((key == KeyCode.Plus || key == KeyCode.KeypadPlus || (key == KeyCode.Equals && shift)) && !ctrl && !alt)
+            // Plus/Equals key - increase by 1
+            if ((key == KeyCode.Plus || key == KeyCode.KeypadPlus || key == KeyCode.Equals) && !ctrl && !alt)
             {
                 AdjustQuantity(getTransferable, 1, onChanged);
                 return true;
