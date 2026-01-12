@@ -854,13 +854,15 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        TradeNavigationState.AdjustQuantity(-1);
+                        // Use AdjustQuantitySingle to respect selling/buying context
+                        TradeNavigationState.AdjustQuantitySingle(-1);
                     }
                     handled = true;
                 }
                 else if (key == KeyCode.Plus || key == KeyCode.KeypadPlus || key == KeyCode.Equals)
                 {
-                    TradeNavigationState.AdjustQuantity(1);
+                    // Use AdjustQuantitySingle to respect selling/buying context
+                    TradeNavigationState.AdjustQuantitySingle(1);
                     handled = true;
                 }
                 else if (key == KeyCode.Backspace && TradeNavigationState.IsInQuantityMode && TradeNavigationState.HasActiveNumericInput)

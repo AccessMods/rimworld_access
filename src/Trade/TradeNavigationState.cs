@@ -907,6 +907,18 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Adjusts quantity by 1, respecting selling/buying context.
+        /// Uses GetQuantityDelta for direction based on item type.
+        /// </summary>
+        public static void AdjustQuantitySingle(int direction)
+        {
+            // direction: 1 = Up/Plus, -1 = Down/Minus
+            bool upDirection = direction > 0;
+            int delta = GetQuantityDelta(upDirection);
+            AdjustQuantity(delta);
+        }
+
+        /// <summary>
         /// Adjusts quantity by larger amounts (10).
         /// Uses GetQuantityDelta for direction based on item type.
         /// </summary>
