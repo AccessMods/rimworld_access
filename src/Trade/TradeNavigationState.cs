@@ -273,11 +273,11 @@ namespace RimWorldAccess
                 Find.WindowStack.TryRemove(dialogToClose, doCloseSound: false);
             }
 
-            // Close the trade session
-            if (TradeSession.Active)
-            {
-                TradeSession.Close();
-            }
+            // Note: We intentionally do NOT call TradeSession.Close() here.
+            // RimWorld's own Dialog_Trade never closes the trade session either.
+            // Closing it while tooltips are still pending causes NullReferenceException
+            // because tooltip lambdas try to access TradeSession.TradeCurrency.
+            // The next trade will call SetupWith() which overwrites all fields anyway.
         }
 
         /// <summary>
@@ -1501,9 +1501,8 @@ namespace RimWorldAccess
                 SoundDefOf.ExecuteTrade.PlayOneShotOnCamera();
                 TolkHelper.Speak($"Gifts offered, goodwill +{goodwillChange}");
 
-                // Close the trade and session
+                // Close the trade dialog (don't call TradeSession.Close - see Close() comment)
                 Close();
-                TradeSession.Close();
             }
             catch (System.Exception ex)
             {
