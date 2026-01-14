@@ -41,10 +41,26 @@ namespace RimWorldAccess
         /// </summary>
         public static void Open()
         {
+            Open(0);
+        }
+
+        /// <summary>
+        /// Opens the options menu at a specific category index.
+        /// </summary>
+        /// <param name="categoryIndex">The category index to open to (0=General, 3=Gameplay, etc.)</param>
+        public static void Open(int categoryIndex)
+        {
+            Open(categoryIndex, -1);
+        }
+
+        /// <summary>
+        /// Opens the options menu at a specific category and setting index.
+        /// </summary>
+        /// <param name="categoryIndex">The category index (0=General, 3=Gameplay, etc.)</param>
+        /// <param name="settingIndex">The setting index within the category, or -1 to stay at category level</param>
+        public static void Open(int categoryIndex, int settingIndex)
+        {
             isActive = true;
-            currentLevel = OptionsMenuLevel.CategoryList;
-            selectedCategoryIndex = 0;
-            selectedSettingIndex = 0;
             typeahead.ClearSearch();
 
             // Close pause menu
@@ -53,7 +69,23 @@ namespace RimWorldAccess
             // Build category list
             BuildCategories();
 
-            // Announce first category
+            // Set selected category (clamped to valid range)
+            selectedCategoryIndex = Mathf.Clamp(categoryIndex, 0, Mathf.Max(0, categories.Count - 1));
+
+            // Set level and setting index
+            if (settingIndex >= 0 && categories.Count > selectedCategoryIndex)
+            {
+                var settings = categories[selectedCategoryIndex].Settings;
+                selectedSettingIndex = Mathf.Clamp(settingIndex, 0, Mathf.Max(0, settings.Count - 1));
+                currentLevel = OptionsMenuLevel.SettingsList;
+            }
+            else
+            {
+                selectedSettingIndex = 0;
+                currentLevel = OptionsMenuLevel.CategoryList;
+            }
+
+            // Announce current state
             AnnounceCurrentState();
         }
 
