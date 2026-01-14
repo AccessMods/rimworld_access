@@ -69,19 +69,28 @@ def download_file(url: str, destination: Path) -> bool:
         return False
 
 
-def get_latest_github_release(repo: str, include_prerelease: bool = False) -> Optional[str]:
+def get_latest_github_release(repo: str, release_type: str = 'stable') -> Optional[str]:
     """
     Get the download URL for the latest release from a GitHub repository.
 
     Args:
         repo: Repository in format "owner/repo"
-        include_prerelease: If True, include pre-release versions
+        release_type: Type of release - 'stable', 'beta', or 'dev'
+            - 'stable': Latest stable release (e.g., v1.0.0)
+            - 'beta': Latest beta release (e.g., v1.0.1-beta)
+            - 'dev': Development build (tag: 'dev')
 
     Returns:
         Download URL for the zip file, or None if not found
     """
     try:
-        if include_prerelease:
+        if release_type == 'stable':
+            # Get only the latest stable release (no pre-release tags)
+            api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+            response = requests.get(api_url)
+            response.raise_for_status()
+            latest_release = response.json()
+        else:
             # Get all releases including pre-releases
             api_url = f"https://api.github.com/repos/{repo}/releases"
             response = requests.get(api_url)
@@ -92,18 +101,34 @@ def get_latest_github_release(repo: str, include_prerelease: bool = False) -> Op
                 print(f"No releases found for {repo}")
                 return None
 
-            # Get the most recent release (first in the list)
-            latest_release = releases[0]
-        else:
-            # Get only the latest stable release
-            api_url = f"https://api.github.com/repos/{repo}/releases/latest"
-            response = requests.get(api_url)
-            response.raise_for_status()
-            latest_release = response.json()
+            if release_type == 'beta':
+                # Filter for beta releases (tag contains '-beta')
+                beta_releases = [
+                    r for r in releases
+                    if '-beta' in r.get('tag_name', '').lower()
+                ]
+                if not beta_releases:
+                    print(f"No beta releases found for {repo}")
+                    return None
+                latest_release = beta_releases[0]
+            elif release_type == 'dev':
+                # Find the 'dev' tag specifically
+                dev_releases = [
+                    r for r in releases
+                    if r.get('tag_name', '').lower() == 'dev'
+                ]
+                if not dev_releases:
+                    print(f"No 'dev' tag found for {repo}")
+                    return None
+                latest_release = dev_releases[0]
+            else:
+                print(f"Invalid release_type: {release_type}")
+                return None
 
         # Find the zip file in assets
         for asset in latest_release.get('assets', []):
             if asset['name'].endswith('.zip'):
+                print(f"Found release: {latest_release.get('tag_name', 'unknown')} - {latest_release.get('name', '')}")
                 return asset['browser_download_url']
 
         print(f"No zip file found in latest release for {repo}")
@@ -179,16 +204,20 @@ def install_harmony_mod(rimworld_path: Path) -> bool:
     return True
 
 
-def install_rimworld_access_mod(rimworld_path: Path, include_beta: bool) -> bool:
+def install_rimworld_access_mod(rimworld_path: Path, release_type: str) -> bool:
     """
     Download and install the RimWorld Access mod.
+
+    Args:
+        rimworld_path: Path to RimWorld installation
+        release_type: Type of release to download ('stable', 'beta', or 'dev')
     """
     print("\n Installing RimWorld Access ")
     mods_dir = rimworld_path / "Mods"
     mods_dir.mkdir(exist_ok=True)
 
     # Download RimWorld Access
-    access_url = get_latest_github_release("shane12300/rimworld_access", include_prerelease=include_beta)
+    access_url = get_latest_github_release("shane12300/rimworld_access", release_type=release_type)
     if not access_url:
         print("Failed to get RimWorld Access download URL")
         return False
@@ -314,22 +343,31 @@ def main():
             print("\nFailed to install Harmony mod. Installation aborted.")
             return 1
 
-        # Step 3: Ask about beta releases
+        # Step 3: Ask which version to install
+        print("\nWhich version of RimWorld Access do you want to install?")
+        print("1. Stable - Latest stable release (recommended)")
+        print("2. Beta - Latest beta/pre-release version")
+        print("3. Dev - Development build (bleeding edge, may be unstable)")
+
         while True:
-            beta_choice = input("\nDo you want to install beta/pre-release versions? (y/n): ").strip().lower()
-            if beta_choice in ['y', 'yes']:
-                include_beta = True
-                print("Will download the latest pre-release version.")
-                break
-            elif beta_choice in ['n', 'no']:
-                include_beta = False
+            version_choice = input("\nEnter your choice (1/2/3): ").strip()
+            if version_choice == '1':
+                release_type = 'stable'
                 print("Will download the latest stable release.")
                 break
+            elif version_choice == '2':
+                release_type = 'beta'
+                print("Will download the latest beta release.")
+                break
+            elif version_choice == '3':
+                release_type = 'dev'
+                print("Will download the development build.")
+                break
             else:
-                print("Please enter 'y' or 'n'.")
+                print("Please enter 1, 2, or 3.")
 
         # Step 4: Install RimWorld Access mod
-        if not install_rimworld_access_mod(rimworld_path, include_beta):
+        if not install_rimworld_access_mod(rimworld_path, release_type):
             print("\nFailed to install RimWorld Access mod. Installation aborted.")
             return 1
 
