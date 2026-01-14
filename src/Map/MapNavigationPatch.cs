@@ -69,7 +69,11 @@ namespace RimWorldAccess
                 ForbidControlState.IsActive ||
                 AnimalsMenuState.IsActive ||
                 WildlifeMenuState.IsActive ||
-                TransportPodLoadingState.IsActive;
+                TransportPodLoadingState.IsActive ||
+                // History tab states
+                HistoryState.IsActive ||
+                HistoryStatisticsState.IsActive ||
+                HistoryMessagesState.IsActive;
                 // Note: TransportPodSelectionState is NOT included - it uses map navigation for cursor movement
         }
 

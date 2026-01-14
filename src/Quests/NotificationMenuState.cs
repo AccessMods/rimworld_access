@@ -18,12 +18,9 @@ namespace RimWorldAccess
     public static class NotificationMenuState
     {
         private static bool isActive = false;
-        private static bool isInDetailView = false;
         private static List<NotificationItem> notifications = null;
         private static int currentIndex = 0;
-        private static int detailPosition = 0; // 0=header, 1-N=content lines, N+1+=buttons
-        private static int currentButtonIndex = 0;
-        private static readonly List<ButtonInfo> currentButtons = new List<ButtonInfo>();
+        private static TwoLevelMenuHelper detailHelper = null;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
         /// <summary>
@@ -34,12 +31,12 @@ namespace RimWorldAccess
         /// <summary>
         /// Gets whether we are in detail view (viewing a specific letter's content).
         /// </summary>
-        public static bool IsInDetailView => isInDetailView;
+        public static bool IsInDetailView => detailHelper?.IsInDetailView ?? false;
 
         /// <summary>
         /// Gets whether we are currently in the buttons section of detail view.
         /// </summary>
-        public static bool IsInButtonsSection => isInDetailView && IsPositionInButtonsSection();
+        public static bool IsInButtonsSection => detailHelper?.IsInButtonsSection ?? false;
 
         public static TypeaheadSearchHelper Typeahead => typeahead;
         public static int CurrentIndex => currentIndex;
@@ -65,14 +62,28 @@ namespace RimWorldAccess
             }
 
             isActive = true;
-            isInDetailView = false;
             currentIndex = 0;
-            detailPosition = 0;
-            currentButtonIndex = 0;
             typeahead.ClearSearch();
 
-            // Collect buttons for the first notification (needed for button count info)
-            RefreshButtonsForCurrentNotification();
+            // Initialize the detail helper
+            detailHelper = new TwoLevelMenuHelper(
+                getContentLineCount: () => notifications != null && currentIndex >= 0 && currentIndex < notifications.Count
+                    ? notifications[currentIndex].ExplanationLines.Length
+                    : 0,
+                populateButtons: PopulateButtonsForCurrentItem,
+                getHeaderAnnouncement: () => notifications != null && currentIndex >= 0 && currentIndex < notifications.Count
+                    ? $"{GetTypeLabel(notifications[currentIndex].Type)}: {notifications[currentIndex].Label}"
+                    : "",
+                getContentLineAnnouncement: (idx) => {
+                    if (notifications == null || currentIndex < 0 || currentIndex >= notifications.Count)
+                        return "";
+                    var lines = notifications[currentIndex].ExplanationLines;
+                    return idx >= 0 && idx < lines.Length ? lines[idx] : "";
+                },
+                endOfItemMessage: "End of letter",
+                startOfItemMessage: "Start of letter"
+            );
+            detailHelper.RefreshButtons();
 
             // Announce the first notification (list view - title only)
             AnnounceCurrentSelection();
@@ -84,13 +95,10 @@ namespace RimWorldAccess
         public static void Close()
         {
             isActive = false;
-            isInDetailView = false;
             notifications = null;
             currentIndex = 0;
-            detailPosition = 0;
-            currentButtonIndex = 0;
-            currentButtons.Clear();
             typeahead.ClearSearch();
+            detailHelper?.Reset();
         }
 
         /// <summary>
@@ -102,18 +110,17 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            if (isInDetailView)
+            if (detailHelper.IsInDetailView)
             {
                 // In detail view, navigate down through header, lines, buttons
-                SelectNextDetailPosition();
+                detailHelper.SelectNextDetailPosition();
             }
             else
             {
                 // In list view, navigate to next notification
                 currentIndex = MenuHelper.SelectNext(currentIndex, notifications.Count);
-                currentButtonIndex = 0;
-                detailPosition = 0;
-                RefreshButtonsForCurrentNotification();
+                detailHelper.ResetDetailPosition();
+                detailHelper.RefreshButtons();
                 AnnounceCurrentSelection();
             }
         }
@@ -127,18 +134,17 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            if (isInDetailView)
+            if (detailHelper.IsInDetailView)
             {
                 // In detail view, navigate up through buttons, lines, header
-                SelectPreviousDetailPosition();
+                detailHelper.SelectPreviousDetailPosition();
             }
             else
             {
                 // In list view, navigate to previous notification
                 currentIndex = MenuHelper.SelectPrevious(currentIndex, notifications.Count);
-                currentButtonIndex = 0;
-                detailPosition = 0;
-                RefreshButtonsForCurrentNotification();
+                detailHelper.ResetDetailPosition();
+                detailHelper.RefreshButtons();
                 AnnounceCurrentSelection();
             }
         }
@@ -148,13 +154,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextButton()
         {
-            if (!ValidateButtonNavigationState())
-                return;
-
-            currentButtonIndex = (currentButtonIndex + 1) % currentButtons.Count;
-            // Update detail position to match button index
-            detailPosition = GetFirstButtonPosition() + currentButtonIndex;
-            AnnounceCurrentButton();
+            detailHelper.SelectNextButton();
         }
 
         /// <summary>
@@ -162,13 +162,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousButton()
         {
-            if (!ValidateButtonNavigationState())
-                return;
-
-            currentButtonIndex = (currentButtonIndex - 1 + currentButtons.Count) % currentButtons.Count;
-            // Update detail position to match button index
-            detailPosition = GetFirstButtonPosition() + currentButtonIndex;
-            AnnounceCurrentButton();
+            detailHelper.SelectPreviousButton();
         }
 
         /// <summary>
@@ -176,19 +170,11 @@ namespace RimWorldAccess
         /// </summary>
         public static void ActivateCurrentButton()
         {
-            if (!ValidateButtonNavigationState())
+            if (!detailHelper.ActivateCurrentButton())
                 return;
 
-            ButtonInfo button = currentButtons[currentButtonIndex];
-
-            if (button.IsDisabled)
-            {
-                string disabledMsg = string.IsNullOrEmpty(button.DisabledReason)
-                    ? $"{button.Label} is disabled"
-                    : $"{button.Label} is disabled: {button.DisabledReason}";
-                TolkHelper.Speak(disabledMsg);
-                return;
-            }
+            ButtonInfo button = detailHelper.GetCurrentButton();
+            if (button == null) return;
 
             string buttonLabel = button.Label;
 
@@ -223,10 +209,8 @@ namespace RimWorldAccess
                 else
                 {
                     // For other actions, go back to list view and announce
-                    isInDetailView = false;
-                    detailPosition = 0;
-                    currentButtonIndex = 0;
-                    RefreshButtonsForCurrentNotification();
+                    detailHelper.GoBackToList();
+                    detailHelper.RefreshButtons();
                     TolkHelper.Speak($"Activated {buttonLabel}. Back to list");
                     AnnounceCurrentSelection();
                 }
@@ -259,16 +243,10 @@ namespace RimWorldAccess
             if (currentIndex < 0 || currentIndex >= notifications.Count)
                 return;
 
-            isInDetailView = true;
-            detailPosition = 0;
-            currentButtonIndex = 0;
             typeahead.ClearSearch();
-
-            // Refresh buttons for this notification
-            RefreshButtonsForCurrentNotification();
-
-            // Announce header (position 0)
-            AnnounceDetailPosition();
+            detailHelper.RefreshButtons();
+            detailHelper.EnterDetailView();
+            detailHelper.AnnounceDetailPosition();
         }
 
         /// <summary>
@@ -276,15 +254,14 @@ namespace RimWorldAccess
         /// </summary>
         public static void GoBackToList()
         {
-            if (!isInDetailView)
+            if (!detailHelper.IsInDetailView)
             {
                 // Already in list view, close the menu
                 CloseMenu();
                 return;
             }
 
-            isInDetailView = false;
-            detailPosition = 0;
+            detailHelper.GoBackToList();
             typeahead.ClearSearch();
 
             // Announce current notification in list format
@@ -296,7 +273,7 @@ namespace RimWorldAccess
         /// </summary>
         public static void HandleEscape()
         {
-            if (isInDetailView)
+            if (detailHelper.IsInDetailView)
             {
                 GoBackToList();
                 TolkHelper.Speak("Back to list");
@@ -305,43 +282,6 @@ namespace RimWorldAccess
             {
                 CloseMenu();
             }
-        }
-
-        /// <summary>
-        /// Gets the number of content lines for the current notification.
-        /// </summary>
-        private static int GetContentLineCount()
-        {
-            if (notifications == null || currentIndex < 0 || currentIndex >= notifications.Count)
-                return 0;
-
-            return notifications[currentIndex].ExplanationLines.Length;
-        }
-
-        /// <summary>
-        /// Gets the detail position where buttons start (after header and content lines).
-        /// Position 0 = header, 1 to N = content lines, N+1 = first button.
-        /// </summary>
-        private static int GetFirstButtonPosition()
-        {
-            return 1 + GetContentLineCount(); // 1 for header + line count
-        }
-
-        /// <summary>
-        /// Gets the total number of positions in detail view (header + lines + buttons).
-        /// </summary>
-        private static int GetTotalDetailPositions()
-        {
-            int buttonCount = currentButtons?.Count ?? 0;
-            return 1 + GetContentLineCount() + buttonCount; // header + lines + buttons
-        }
-
-        /// <summary>
-        /// Checks if the current detail position is in the buttons section.
-        /// </summary>
-        private static bool IsPositionInButtonsSection()
-        {
-            return detailPosition >= GetFirstButtonPosition() && currentButtons != null && currentButtons.Count > 0;
         }
 
         /// <summary>
@@ -355,136 +295,26 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Validates that button navigation is allowed and announces errors if not.
-        /// Returns true if navigation is valid, false otherwise.
+        /// Populates buttons for the current notification item.
+        /// Called by TwoLevelMenuHelper.RefreshButtons().
         /// </summary>
-        private static bool ValidateButtonNavigationState()
+        private static void PopulateButtonsForCurrentItem(List<ButtonInfo> buttons)
         {
-            if (!isInDetailView)
-            {
-                TolkHelper.Speak("Press Enter to open letter first");
-                return false;
-            }
-
-            if (!IsPositionInButtonsSection())
-            {
-                TolkHelper.Speak("Navigate down to buttons first");
-                return false;
-            }
-
-            if (currentButtons == null || currentButtons.Count == 0)
-            {
-                TolkHelper.Speak("No buttons available");
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// Moves to the next position in detail view.
-        /// </summary>
-        private static void SelectNextDetailPosition()
-        {
-            int totalPositions = GetTotalDetailPositions();
-
-            if (detailPosition < totalPositions - 1)
-            {
-                detailPosition++;
-
-                // Update button index if we're in buttons section
-                if (IsPositionInButtonsSection())
-                {
-                    currentButtonIndex = detailPosition - GetFirstButtonPosition();
-                }
-
-                AnnounceDetailPosition();
-            }
-            else
-            {
-                // At the end
-                TolkHelper.Speak("End of letter");
-            }
-        }
-
-        /// <summary>
-        /// Moves to the previous position in detail view.
-        /// </summary>
-        private static void SelectPreviousDetailPosition()
-        {
-            if (detailPosition > 0)
-            {
-                detailPosition--;
-
-                // Update button index if we're in buttons section
-                if (IsPositionInButtonsSection())
-                {
-                    currentButtonIndex = detailPosition - GetFirstButtonPosition();
-                }
-                else
-                {
-                    currentButtonIndex = 0;
-                }
-
-                AnnounceDetailPosition();
-            }
-            else
-            {
-                // At the beginning
-                TolkHelper.Speak("Start of letter");
-            }
-        }
-
-        /// <summary>
-        /// Announces the current position in detail view (header, content line, or button).
-        /// </summary>
-        private static void AnnounceDetailPosition()
-        {
-            if (notifications == null || currentIndex < 0 || currentIndex >= notifications.Count)
-                return;
+            if (notifications == null || notifications.Count == 0) return;
+            if (currentIndex < 0 || currentIndex >= notifications.Count) return;
 
             NotificationItem item = notifications[currentIndex];
-            int lineCount = GetContentLineCount();
-            int firstButtonPos = GetFirstButtonPosition();
 
-            if (detailPosition == 0)
+            switch (item.Type)
             {
-                // Header position
-                TolkHelper.Speak($"{GetTypeLabel(item.Type)}: {item.Label}");
+                case NotificationType.Letter:
+                    ExtractLetterButtons(item, buttons);
+                    break;
+                case NotificationType.Alert:
+                    ExtractAlertButtons(item, buttons);
+                    break;
+                // Messages don't have buttons
             }
-            else if (detailPosition <= lineCount)
-            {
-                // Content line position (1-indexed into ExplanationLines)
-                int lineIndex = detailPosition - 1;
-                if (lineIndex < item.ExplanationLines.Length)
-                {
-                    TolkHelper.Speak(item.ExplanationLines[lineIndex]);
-                }
-            }
-            else if (IsPositionInButtonsSection())
-            {
-                // Button position
-                AnnounceCurrentButton();
-            }
-        }
-
-        /// <summary>
-        /// Announces the currently selected button.
-        /// </summary>
-        private static void AnnounceCurrentButton()
-        {
-            if (currentButtons == null || currentButtons.Count == 0)
-                return;
-
-            if (currentButtonIndex < 0 || currentButtonIndex >= currentButtons.Count)
-                return;
-
-            ButtonInfo button = currentButtons[currentButtonIndex];
-            string announcement = button.IsDisabled
-                ? $"{button.Label} (disabled). Button. {MenuHelper.FormatPosition(currentButtonIndex, currentButtons.Count)}"
-                : $"{button.Label}. Button. {MenuHelper.FormatPosition(currentButtonIndex, currentButtons.Count)}";
-
-            TolkHelper.Speak(announcement);
         }
 
         /// <summary>
@@ -537,10 +367,9 @@ namespace RimWorldAccess
             }
 
             // Reset to list view and refresh buttons for new current notification
-            isInDetailView = false;
-            detailPosition = 0;
-            currentButtonIndex = 0;
-            RefreshButtonsForCurrentNotification();
+            detailHelper.GoBackToList();
+            detailHelper.ResetDetailPosition();
+            detailHelper.RefreshButtons();
 
             // Announce deletion and new current item in single announcement
             NotificationItem newItem = notifications[currentIndex];
@@ -648,10 +477,10 @@ namespace RimWorldAccess
             if (currentIndex < 0 || currentIndex >= notifications.Count)
                 return;
 
-            if (isInDetailView)
+            if (detailHelper.IsInDetailView)
             {
                 // In detail view, use the detail position announcement
-                AnnounceDetailPosition();
+                detailHelper.AnnounceDetailPosition();
                 return;
             }
 
@@ -665,40 +494,9 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Refreshes the button list for the current notification.
-        /// </summary>
-        private static void RefreshButtonsForCurrentNotification()
-        {
-            currentButtons.Clear();
-            currentButtonIndex = 0;
-
-            if (notifications == null || notifications.Count == 0)
-                return;
-
-            if (currentIndex < 0 || currentIndex >= notifications.Count)
-                return;
-
-            NotificationItem item = notifications[currentIndex];
-
-            // Handle different notification types
-            switch (item.Type)
-            {
-                case NotificationType.Letter:
-                    ExtractLetterButtons(item);
-                    break;
-                case NotificationType.Alert:
-                    ExtractAlertButtons(item);
-                    break;
-                case NotificationType.Message:
-                    // Messages don't have buttons
-                    break;
-            }
-        }
-
-        /// <summary>
         /// Extracts buttons from a letter notification.
         /// </summary>
-        private static void ExtractLetterButtons(NotificationItem item)
+        private static void ExtractLetterButtons(NotificationItem item, List<ButtonInfo> buttons)
         {
             Letter letter = item.GetSourceLetter();
             if (letter == null)
@@ -738,7 +536,7 @@ namespace RimWorldAccess
                                     DisabledReason = option.disabledReason
                                 };
 
-                                currentButtons.Add(buttonInfo);
+                                buttons.Add(buttonInfo);
                             }
                         }
                     }
@@ -754,7 +552,7 @@ namespace RimWorldAccess
         /// Extracts buttons from an alert notification.
         /// Alerts can have targets to jump to or custom click actions (like opening research).
         /// </summary>
-        private static void ExtractAlertButtons(NotificationItem item)
+        private static void ExtractAlertButtons(NotificationItem item, List<ButtonInfo> buttons)
         {
             Alert alert = item.GetSourceAlert();
             if (alert == null)
@@ -768,7 +566,7 @@ namespace RimWorldAccess
                 // Research alerts - open research menu
                 if (alertTypeName.Contains("Research") || alertTypeName.Contains("NeedResearch"))
                 {
-                    currentButtons.Add(new ButtonInfo
+                    buttons.Add(new ButtonInfo
                     {
                         Label = "Open Research",
                         Action = () => {
@@ -818,7 +616,7 @@ namespace RimWorldAccess
                         if (targets.Count == 1)
                         {
                             var target = targets[0];
-                            currentButtons.Add(new ButtonInfo
+                            buttons.Add(new ButtonInfo
                             {
                                 Label = $"Jump to {GetTargetDescription(target)}",
                                 Action = CreateJumpToTargetAction(target),
@@ -833,7 +631,7 @@ namespace RimWorldAccess
                             {
                                 var target = targets[i];
                                 int index = i + 1;
-                                currentButtons.Add(new ButtonInfo
+                                buttons.Add(new ButtonInfo
                                 {
                                     Label = $"Jump to {GetTargetDescription(target)} ({index} of {targets.Count})",
                                     Action = CreateJumpToTargetAction(target),
@@ -845,14 +643,14 @@ namespace RimWorldAccess
                 }
 
                 // If no buttons were created, try to use the alert's default OnClick
-                if (currentButtons.Count == 0)
+                if (buttons.Count == 0)
                 {
                     var onClickMethod = alert.GetType().GetMethod("OnClick",
                         BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
 
                     if (onClickMethod != null)
                     {
-                        currentButtons.Add(new ButtonInfo
+                        buttons.Add(new ButtonInfo
                         {
                             Label = "Activate",
                             Action = () => {
@@ -885,11 +683,41 @@ namespace RimWorldAccess
             return () => {
                 if (target.IsValid)
                 {
+                    // For world targets, set pending tile BEFORE CameraJumper opens world view.
+                    // This is critical because WorldNavigationState.Open() is called in the next frame
+                    // when WorldNavigationPatch detects the mode change, and it would otherwise
+                    // default to the colony tile. PendingStartTile is checked first in Open().
+                    if (target.HasWorldObject)
+                    {
+                        int tileId = target.WorldObject.Tile;
+                        if (tileId >= 0)
+                        {
+                            WorldNavigationState.PendingStartTile = new PlanetTile(tileId);
+                        }
+                    }
+                    else if (target.Tile >= 0 && !target.HasThing && !target.Cell.IsValid)
+                    {
+                        WorldNavigationState.PendingStartTile = new PlanetTile(target.Tile);
+                    }
+
                     CameraJumper.TryJumpAndSelect(target);
 
-                    // Update mod's cursor position
-                    if (MapNavigationState.IsInitialized)
+                    // Also set current tile in case world view was already open (Open() won't be called)
+                    if (target.HasWorldObject)
                     {
+                        int tileId = target.WorldObject.Tile;
+                        if (tileId >= 0)
+                        {
+                            WorldNavigationState.CurrentSelectedTile = new PlanetTile(tileId);
+                        }
+                    }
+                    else if (target.Tile >= 0 && !target.HasThing && !target.Cell.IsValid)
+                    {
+                        WorldNavigationState.CurrentSelectedTile = new PlanetTile(target.Tile);
+                    }
+                    else if (MapNavigationState.IsInitialized)
+                    {
+                        // Map target - update map cursor
                         if (target.HasThing)
                             MapNavigationState.CurrentCursorPosition = target.Thing.Position;
                         else if (target.Cell.IsValid)
@@ -915,11 +743,41 @@ namespace RimWorldAccess
                     GlobalTargetInfo target = letter.lookTargets?.TryGetPrimaryTarget() ?? GlobalTargetInfo.Invalid;
                     if (target.IsValid)
                     {
+                        // For world targets, set pending tile BEFORE CameraJumper opens world view.
+                        // This is critical because WorldNavigationState.Open() is called in the next frame
+                        // when WorldNavigationPatch detects the mode change, and it would otherwise
+                        // default to the colony tile. PendingStartTile is checked first in Open().
+                        if (target.HasWorldObject)
+                        {
+                            int tileId = target.WorldObject.Tile;
+                            if (tileId >= 0)
+                            {
+                                WorldNavigationState.PendingStartTile = new PlanetTile(tileId);
+                            }
+                        }
+                        else if (target.Tile >= 0 && !target.HasThing && !target.Cell.IsValid)
+                        {
+                            WorldNavigationState.PendingStartTile = new PlanetTile(target.Tile);
+                        }
+
                         CameraJumper.TryJumpAndSelect(target);
 
-                        // Update mod's cursor position
-                        if (MapNavigationState.IsInitialized)
+                        // Also set current tile in case world view was already open (Open() won't be called)
+                        if (target.HasWorldObject)
                         {
+                            int tileId = target.WorldObject.Tile;
+                            if (tileId >= 0)
+                            {
+                                WorldNavigationState.CurrentSelectedTile = new PlanetTile(tileId);
+                            }
+                        }
+                        else if (target.Tile >= 0 && !target.HasThing && !target.Cell.IsValid)
+                        {
+                            WorldNavigationState.CurrentSelectedTile = new PlanetTile(target.Tile);
+                        }
+                        else if (MapNavigationState.IsInitialized)
+                        {
+                            // Map target - update map cursor
                             if (target.HasThing)
                                 MapNavigationState.CurrentCursorPosition = target.Thing.Position;
                             else if (target.Cell.IsValid)
@@ -1029,17 +887,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Represents a button/option for a letter.
-        /// </summary>
-        private class ButtonInfo
-        {
-            public string Label { get; set; }
-            public Action Action { get; set; }
-            public bool IsDisabled { get; set; }
-            public string DisabledReason { get; set; }
-        }
-
-        /// <summary>
         /// Jumps to the target location of the notification and closes the menu.
         /// </summary>
         private static void JumpToTarget(NotificationItem item)
@@ -1098,13 +945,12 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            bool wasInDetailView = isInDetailView;
-            isInDetailView = false;
-            detailPosition = 0;
+            bool wasInDetailView = detailHelper.IsInDetailView;
+            detailHelper.GoBackToList();
             currentIndex = MenuHelper.JumpToFirst();
-            currentButtonIndex = 0;
+            detailHelper.ResetDetailPosition();
             typeahead.ClearSearch();
-            RefreshButtonsForCurrentNotification();
+            detailHelper.RefreshButtons();
 
             if (wasInDetailView)
                 TolkHelper.Speak("Back to list");
@@ -1119,17 +965,32 @@ namespace RimWorldAccess
             if (notifications == null || notifications.Count == 0)
                 return;
 
-            bool wasInDetailView = isInDetailView;
-            isInDetailView = false;
-            detailPosition = 0;
+            bool wasInDetailView = detailHelper.IsInDetailView;
+            detailHelper.GoBackToList();
             currentIndex = MenuHelper.JumpToLast(notifications.Count);
-            currentButtonIndex = 0;
+            detailHelper.ResetDetailPosition();
             typeahead.ClearSearch();
-            RefreshButtonsForCurrentNotification();
+            detailHelper.RefreshButtons();
 
             if (wasInDetailView)
                 TolkHelper.Speak("Back to list");
             AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the start of detail view (header position).
+        /// </summary>
+        public static void JumpToDetailStart()
+        {
+            detailHelper?.JumpToDetailStart();
+        }
+
+        /// <summary>
+        /// Jumps to the end of detail view (buttons section).
+        /// </summary>
+        public static void JumpToDetailEnd()
+        {
+            detailHelper?.JumpToDetailEnd();
         }
 
         /// <summary>

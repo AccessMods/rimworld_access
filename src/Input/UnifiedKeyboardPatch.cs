@@ -503,7 +503,8 @@ namespace RimWorldAccess
                 !RoutePlannerState.IsActive &&
                 !GizmoNavigationState.IsActive &&
                 !TradeNavigationState.IsActive &&
-                !SellableItemsState.IsActive)
+                !SellableItemsState.IsActive &&
+                !HistoryState.IsActive)
             {
                 if (key == KeyCode.R && !Event.current.shift && !Event.current.control && !Event.current.alt)
                 {
@@ -1089,6 +1090,56 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Menu closed");
                     Event.current.Use();
                     return;
+                }
+            }
+
+            // ===== PRIORITY 4.2: Handle History tab if active =====
+            // History tab has two sub-tabs: Statistics and Messages
+            // Tab/Shift+Tab switches between them, sub-states handle navigation
+            if (HistoryState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                // Safety check: If the History window is no longer open (e.g., closed by game
+                // when switching to world view via dialog jump), clean up our state.
+                // This prevents Escape from being swallowed with no effect.
+                bool historyWindowOpen = Find.WindowStack?.Windows?.Any(w => w is MainTabWindow_History) ?? false;
+                if (!historyWindowOpen)
+                {
+                    HistoryState.Close();
+                    // Don't consume the event - let it propagate to pause menu or world navigation
+                }
+                else
+                {
+                    bool shift = Event.current.shift;
+                    bool ctrl = Event.current.control;
+                    bool alt = Event.current.alt;
+
+                    // Check sub-states first - they handle navigation within their tabs
+                    if (HistoryState.CurrentTab == HistoryState.Tab.Statistics && HistoryStatisticsState.IsActive)
+                    {
+                        if (HistoryStatisticsState.HandleInput(key, shift, ctrl, alt))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+                    else if (HistoryState.CurrentTab == HistoryState.Tab.Messages && HistoryMessagesState.IsActive)
+                    {
+                        if (HistoryMessagesState.HandleInput(key, shift, ctrl, alt))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    // Tab-level input (Tab key to switch tabs)
+                    if (HistoryState.HandleInput(key, shift, ctrl, alt))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Escape with no search active - let RimWorld close the window
+                    // (HistoryPatch.Window_OnCancelKeyPressed_Prefix controls when to block)
                 }
             }
 
@@ -2279,16 +2330,22 @@ namespace RimWorldAccess
                 bool handled = false;
                 var typeahead = NotificationMenuState.Typeahead;
 
-                // Handle Home - jump to first
+                // Handle Home - jump to start of detail view or first item in list
                 if (key == KeyCode.Home)
                 {
-                    NotificationMenuState.JumpToFirst();
+                    if (NotificationMenuState.IsInDetailView)
+                        NotificationMenuState.JumpToDetailStart();
+                    else
+                        NotificationMenuState.JumpToFirst();
                     handled = true;
                 }
-                // Handle End - jump to last
+                // Handle End - jump to end of detail view (buttons) or last item in list
                 else if (key == KeyCode.End)
                 {
-                    NotificationMenuState.JumpToLast();
+                    if (NotificationMenuState.IsInDetailView)
+                        NotificationMenuState.JumpToDetailEnd();
+                    else
+                        NotificationMenuState.JumpToLast();
                     handled = true;
                 }
                 // Handle Escape - clear search FIRST, then go back (detail->list) or close menu

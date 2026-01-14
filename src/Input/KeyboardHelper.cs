@@ -85,7 +85,11 @@ namespace RimWorldAccess
                 // Split caravan and related menus
                 || SplitCaravanState.IsActive
                 || GearEquipMenuState.IsActive
-                || QuantityMenuState.IsActive;
+                || QuantityMenuState.IsActive
+                // History tab
+                || HistoryState.IsActive
+                || HistoryStatisticsState.IsActive
+                || HistoryMessagesState.IsActive;
         }
     }
 }
