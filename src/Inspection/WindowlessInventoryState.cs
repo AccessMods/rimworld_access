@@ -186,6 +186,21 @@ namespace RimWorldAccess
         {
             List<TreeNode> actions = new List<TreeNode>();
 
+            // Action: Install at (FIRST for minified furniture)
+            if (item.IsMinifiedThing && item.Things.Count > 0)
+            {
+                TreeNode installAction = new TreeNode
+                {
+                    Type = TreeNode.NodeType.Action,
+                    Label = "Install at",
+                    Depth = depth,
+                    Parent = parent,
+                    CanExpand = false,
+                    OnActivate = () => InstallItem(item)
+                };
+                actions.Add(installAction);
+            }
+
             // Action: Jump to location
             if (item.StorageLocations.Count > 0)
             {
@@ -768,11 +783,11 @@ namespace RimWorldAccess
             // Get sibling position
             var (position, total) = GetSiblingPosition(current);
 
-            // Get level prefix (only announced when level changes)
-            string levelPrefix = MenuHelper.GetLevelPrefix("Inventory", current.Depth);
-
-            // Build announcement: "level N. {name} {state}. {X of Y}." or "{name} {state}. {X of Y}."
-            string announcement = $"{levelPrefix}{current.Label}{stateInfo}. {MenuHelper.FormatPosition(position - 1, total)}.";
+            // Build announcement: "{name} {state}. {X of Y}. level N"
+            string levelSuffix = MenuHelper.GetLevelSuffix("Inventory", current.Depth);
+            string positionPart = MenuHelper.FormatPosition(position - 1, total);
+            string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
+            string announcement = $"{current.Label}{stateInfo}{positionSection}{levelSuffix}";
 
             TolkHelper.Speak(announcement.Trim());
         }
@@ -842,6 +857,41 @@ namespace RimWorldAccess
             string announcement = string.Join(". ", details);
             TolkHelper.Speak(announcement);
             SoundDefOf.Click.PlayOneShotOnCamera();
+        }
+
+        /// <summary>
+        /// Initiates installation of a minified furniture item.
+        /// Selects the thing and activates the Install designator.
+        /// </summary>
+        private static void InstallItem(InventoryHelper.InventoryItem item)
+        {
+            if (!item.IsMinifiedThing || item.Things.Count == 0)
+            {
+                TolkHelper.Speak("No installable item found.");
+                return;
+            }
+
+            // Get the first minified thing
+            Thing thingToInstall = item.Things[0];
+            if (thingToInstall == null || thingToInstall.Destroyed)
+            {
+                TolkHelper.Speak("Item no longer available.");
+                return;
+            }
+
+            // Close the inventory menu first
+            Close();
+
+            // Select the minified thing (required for Designator_Install to work)
+            Find.Selector.ClearSelection();
+            Find.Selector.Select(thingToInstall, playSound: false, forceDesignatorDeselect: false);
+
+            // Get or create the install designator
+            Designator_Install installDesignator = new Designator_Install();
+
+            // Enter our placement mode to handle keyboard navigation
+            // (this also selects the designator and announces placement info)
+            ArchitectState.EnterPlacementMode(installDesignator);
         }
 
         /// <summary>

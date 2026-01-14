@@ -1,4 +1,7 @@
 using HarmonyLib;
+using RimWorld;
+using RimWorld.Planet;
+using System.Linq;
 using UnityEngine;
 using Verse;
 
@@ -327,6 +330,55 @@ namespace RimWorldAccess
 
             Text.Anchor = TextAnchor.UpperLeft;
             Text.Font = GameFont.Small;
+        }
+    }
+
+    /// <summary>
+    /// Harmony patch to intercept the Work tab opening and replace it with our accessible version.
+    /// This ensures the accessible Work menu opens even when triggered from the world map.
+    /// </summary>
+    [HarmonyPatch(typeof(MainTabWindow_Work), nameof(MainTabWindow_Work.DoWindowContents))]
+    public static class WorkWindowInterceptPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            // If on the world map, switch to colony map first
+            if (Find.World?.renderer?.wantedMode == WorldRenderMode.Planet)
+            {
+                CameraJumper.TryHideWorld();
+                MapNavigationState.RestoreCursorForCurrentMap();
+            }
+
+            // Get a pawn to open the work menu with
+            Pawn targetPawn = null;
+
+            // Try to get selected pawn first
+            if (Find.Selector?.SelectedPawns?.Count > 0)
+            {
+                targetPawn = Find.Selector.SelectedPawns.FirstOrDefault(p => p.IsColonist);
+            }
+
+            // Fall back to first colonist
+            if (targetPawn == null && Find.CurrentMap != null)
+            {
+                targetPawn = Find.CurrentMap.mapPawns.FreeColonists.FirstOrDefault();
+            }
+
+            if (targetPawn != null)
+            {
+                // Open our windowless version instead
+                WorkMenuState.Open(targetPawn);
+
+                // Close the window that was just opened
+                Find.WindowStack.TryRemove(typeof(MainTabWindow_Work), doCloseSound: false);
+
+                // Return false to prevent the original DoWindowContents from executing
+                return false;
+            }
+
+            // If no pawn available, let the original run (shouldn't normally happen)
+            return true;
         }
     }
 }

@@ -920,12 +920,8 @@ namespace RimWorldAccess
             var (position, total) = GetSiblingPosition(current);
             int currentLevel = GetNodeLevel(current);
 
-            // Get level prefix (only announced when level changes)
-            string levelPrefix = MenuHelper.GetLevelPrefix("ResearchDetail", currentLevel);
-
-            // Build announcement: "level N. {name} {state}. {X of Y}."
+            // Build announcement: "{name} {state}. {X of Y}. level N"
             var sb = new StringBuilder();
-            sb.Append(levelPrefix);
             sb.Append(current.Label);
 
             // Add expand/collapse state for expandable categories
@@ -935,7 +931,14 @@ namespace RimWorldAccess
             }
 
             // Add position
-            sb.Append($". {MenuHelper.FormatPosition(position - 1, total)}.");
+            string positionPart = MenuHelper.FormatPosition(position - 1, total);
+            sb.Append(string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.");
+
+            // Add level suffix at the end (only announced when level changes)
+            sb.Append(MenuHelper.GetLevelSuffix("ResearchDetail", currentLevel));
+
+            // Add level suffix at the end (only announced when level changes)
+            sb.Append(MenuHelper.GetLevelSuffix("ResearchDetail", currentLevel));
 
             // For info nodes, append content after main announcement
             if (current.Type == DetailNodeType.Info && !string.IsNullOrEmpty(current.Content))

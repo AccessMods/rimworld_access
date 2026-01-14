@@ -6,8 +6,8 @@ using RimWorld;
 namespace RimWorldAccess
 {
     /// <summary>
-    /// Harmony patch to handle keyboard input for building inspection menus.
-    /// Intercepts keyboard events when BuildingInspectState, BillsMenuState, BillConfigState, ThingFilterMenuState, TempControlMenuState, or BedAssignmentState is active.
+    /// Harmony patch to handle keyboard input for building-related menus.
+    /// Intercepts keyboard events when BillsMenuState, BillConfigState, ThingFilterMenuState, TempControlMenuState, or BedAssignmentState is active.
     /// </summary>
     [HarmonyPatch(typeof(UIRoot))]
     [HarmonyPatch("UIRootOnGUI")]
@@ -97,51 +97,6 @@ namespace RimWorldAccess
             {
                 HandleBillsMenuInput();
                 return;
-            }
-
-            // Handle BuildingInspectState (lowest priority)
-            if (BuildingInspectState.IsActive)
-            {
-                HandleBuildingInspectInput();
-                return;
-            }
-        }
-
-        private static void HandleBuildingInspectInput()
-        {
-            KeyCode key = Event.current.keyCode;
-
-            switch (key)
-            {
-                case KeyCode.LeftArrow:
-                    BuildingInspectState.SelectPreviousTab();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.RightArrow:
-                    BuildingInspectState.SelectNextTab();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.Return:
-                case KeyCode.KeypadEnter:
-                    // Try to open building settings directly (for coolers, etc.)
-                    // If the building doesn't have direct settings, this will open the current tab
-                    BuildingInspectState.OpenBuildingSettings();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.T:
-                    // T key for opening tab-specific menus
-                    BuildingInspectState.OpenCurrentTab();
-                    Event.current.Use();
-                    break;
-
-                case KeyCode.Escape:
-                    BuildingInspectState.Close();
-                    TolkHelper.Speak("Closed building inspection");
-                    Event.current.Use();
-                    break;
             }
         }
 
@@ -246,6 +201,23 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Handle Ctrl+Arrow for reordering bills
+            if (Event.current.control)
+            {
+                if (key == KeyCode.UpArrow)
+                {
+                    BillsMenuState.MoveUp();
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.DownArrow)
+                {
+                    BillsMenuState.MoveDown();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // Handle Arrow Up - navigate with search awareness
             if (key == KeyCode.UpArrow)
             {
@@ -329,13 +301,7 @@ namespace RimWorldAccess
                 }
                 BillConfigState.Close();
                 TolkHelper.Speak("Closed bill configuration");
-
-                // Go back to bills menu
-                if (BuildingInspectState.SelectedBuilding is IBillGiver billGiver)
-                {
-                    BillsMenuState.Open(billGiver, BuildingInspectState.SelectedBuilding.Position);
-                }
-
+                // Note: BillsMenuState stays active in background, no need to reopen
                 Event.current.Use();
                 return;
             }
@@ -437,12 +403,18 @@ namespace RimWorldAccess
             switch (key)
             {
                 case KeyCode.UpArrow:
-                    ThingFilterMenuState.SelectPrevious();
+                    if (ThingFilterMenuState.HasActiveSearch)
+                        ThingFilterMenuState.SelectPreviousMatch();
+                    else
+                        ThingFilterMenuState.SelectPrevious();
                     Event.current.Use();
                     break;
 
                 case KeyCode.DownArrow:
-                    ThingFilterMenuState.SelectNext();
+                    if (ThingFilterMenuState.HasActiveSearch)
+                        ThingFilterMenuState.SelectNextMatch();
+                    else
+                        ThingFilterMenuState.SelectNext();
                     Event.current.Use();
                     break;
 
@@ -456,6 +428,24 @@ namespace RimWorldAccess
                     Event.current.Use();
                     break;
 
+                case KeyCode.Home:
+                    ThingFilterMenuState.JumpToFirst();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.End:
+                    ThingFilterMenuState.JumpToLast();
+                    Event.current.Use();
+                    break;
+
+                case KeyCode.Backspace:
+                    if (ThingFilterMenuState.HasActiveSearch)
+                    {
+                        ThingFilterMenuState.ProcessBackspace();
+                        Event.current.Use();
+                    }
+                    break;
+
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
                     ThingFilterMenuState.ToggleCurrent();
@@ -463,9 +453,26 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.Escape:
-                    ThingFilterMenuState.Close();
-                    TolkHelper.Speak("Closed thing filter menu");
+                    if (ThingFilterMenuState.HasActiveSearch)
+                    {
+                        ThingFilterMenuState.ClearTypeaheadSearch();
+                    }
+                    else
+                    {
+                        ThingFilterMenuState.Close();
+                        TolkHelper.Speak("Closed thing filter menu");
+                    }
                     Event.current.Use();
+                    break;
+
+                default:
+                    // Handle typeahead character input
+                    char c = Event.current.character;
+                    if (c != '\0' && !char.IsControl(c))
+                    {
+                        ThingFilterMenuState.ProcessTypeaheadCharacter(c);
+                        Event.current.Use();
+                    }
                     break;
             }
         }

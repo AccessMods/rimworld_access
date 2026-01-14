@@ -22,12 +22,12 @@ namespace RimWorldAccess
                 return "Out of bounds";
 
 
-            // Check fog of war - if fogged, return "unseen" immediately
+            // Check fog of war - if fogged, return "unseen" with coordinates
             if (position.Fogged(map))
-                return "unseen";
+                return $"unseen, {position.x}, {position.z}";
             var sb = new StringBuilder();
 
-            // Check visibility from drafted pawn FIRST (if one is selected)
+            // Check visibility from drafted pawn (if one is selected)
             bool notVisible = false;
             Pawn selectedPawn = Find.Selector?.FirstSelectedObject as Pawn;
             if (selectedPawn != null && selectedPawn.Drafted && selectedPawn.Spawned && selectedPawn.Map == map)
@@ -35,7 +35,6 @@ namespace RimWorldAccess
                 // Check if pawn can see this position using line of sight
                 if (!GenSight.LineOfSight(selectedPawn.Position, position, map))
                 {
-                    sb.Append("not visible");
                     notVisible = true;
                 }
             }
@@ -43,25 +42,35 @@ namespace RimWorldAccess
             // Get all things at this position
             List<Thing> things = position.GetThingList(map);
 
-            // Categorize things
+            // Categorize things (filtering out motes and visual effects)
             var pawns = new List<Pawn>();
             var buildings = new List<Building>();
+            var blueprintsAndFrames = new List<Thing>(); // Blueprints and frames for building info
             var items = new List<Thing>();
             var plants = new List<Plant>();
 
             foreach (var thing in things)
             {
+                // Skip motes and visual-only things
+                if (thing is Mote || thing.def.category == ThingCategory.Mote)
+                    continue;
+
                 if (thing is Pawn pawn)
                     pawns.Add(pawn);
                 else if (thing is Building building)
                     buildings.Add(building);
+                else if (thing is Blueprint || thing is Frame)
+                    blueprintsAndFrames.Add(thing);
                 else if (thing is Plant plant)
                     plants.Add(plant);
                 else
                     items.Add(thing);
             }
 
-            bool addedSomething = notVisible;
+            // Sort buildings by priority (doors first, then walls, then by category)
+            buildings = buildings.OrderBy(b => GetBuildingPriority(b)).ToList();
+
+            bool addedSomething = false;
 
             // Add individual pawns (most important)
             foreach (var pawn in pawns.Take(3))
@@ -86,7 +95,7 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
-            // Add buildings with temperature info
+            // Add buildings with cell-specific info, temperature info and transport pod info
             foreach (var building in buildings.Take(2))
             {
                 if (addedSomething) sb.Append(", ");
@@ -99,12 +108,27 @@ namespace RimWorldAccess
                 }
                 sb.Append(buildingLabel);
 
+                // Add cell-specific suffix (e.g., "(head)" for bed, "(fuel port east)" for launcher)
+                string cellInfo = BuildingCellHelper.GetCellPrefix(building, position);
+                if (!string.IsNullOrEmpty(cellInfo))
+                {
+                    sb.Append($" ({cellInfo})");
+                }
+
                 // Add temperature control information if building is a cooler/heater
                 string tempControlInfo = GetTemperatureControlInfo(building);
                 if (!string.IsNullOrEmpty(tempControlInfo))
                 {
                     sb.Append(", ");
                     sb.Append(tempControlInfo);
+                }
+
+                // Add transport pod connection info
+                string transportPodInfo = GetTransportPodInfo(building, map);
+                if (!string.IsNullOrEmpty(transportPodInfo))
+                {
+                    sb.Append(", ");
+                    sb.Append(transportPodInfo);
                 }
 
                 addedSomething = true;
@@ -116,24 +140,37 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
-            // Add items
+            // Add blueprints and frames with cell-specific info (e.g., "(head)" for bed blueprints)
+            foreach (var thing in blueprintsAndFrames.Take(2))
+            {
+                if (addedSomething) sb.Append(", ");
+
+                sb.Append(thing.LabelShort);
+
+                // Add cell-specific suffix (e.g., "(head)" for bed blueprint, "(fuel port east)" for launcher)
+                string cellInfo = BuildingCellHelper.GetCellPrefix(thing, position);
+                if (!string.IsNullOrEmpty(cellInfo))
+                {
+                    sb.Append($" ({cellInfo})");
+                }
+
+                addedSomething = true;
+            }
+            if (blueprintsAndFrames.Count > 2)
+            {
+                if (addedSomething) sb.Append(", ");
+                sb.Append($"and {blueprintsAndFrames.Count - 2} more blueprints");
+                addedSomething = true;
+            }
+
+            // Add items (grouped by label)
             if (items.Count > 0)
             {
                 if (addedSomething) sb.Append(", ");
-                if (items.Count == 1)
-                {
-                    string itemLabel = items[0].LabelShort;
-                    CompForbiddable forbiddable = items[0].TryGetComp<CompForbiddable>();
-                    if (forbiddable != null && forbiddable.Forbidden)
-                    {
-                        itemLabel = "Forbidden " + itemLabel;
-                    }
-                    sb.Append(itemLabel);
-                }
-                else
-                {
-                    sb.Append($"{items.Count} items");
-                }
+
+                var groupedItems = GroupItemsByLabel(items);
+                sb.Append(string.Join(", ", groupedItems));
+
                 addedSomething = true;
             }
 
@@ -169,6 +206,19 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
+            // Check if this is an empty fueling port cell (where pod should be placed)
+            // Only check if no buildings are on this tile
+            if (buildings.Count == 0)
+            {
+                string fuelingPortInfo = GetEmptyFuelingPortInfo(position, map);
+                if (!string.IsNullOrEmpty(fuelingPortInfo))
+                {
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(fuelingPortInfo);
+                    addedSomething = true;
+                }
+            }
+
             // Add zone information if present
             Zone zone = position.GetZone(map);
             if (zone != null)
@@ -179,13 +229,15 @@ namespace RimWorldAccess
             }
 
             // Add roofed status (only if roofed, not unroofed)
+            // Natural rock roof (overhead mountain) = "underground", constructed roof = "roofed"
             RoofDef roof = position.GetRoof(map);
             if (roof != null)
             {
+                string roofText = roof.isNatural ? "underground" : "roofed";
                 if (addedSomething)
-                    sb.Append(", roofed");
+                    sb.Append(", " + roofText);
                 else
-                    sb.Append("roofed");
+                    sb.Append(roofText);
                 addedSomething = true;
             }
 
@@ -194,6 +246,21 @@ namespace RimWorldAccess
                 sb.Append($", {position.x}, {position.z}");
             else
                 sb.Append($"{position.x}, {position.z}");
+
+            // Add landing validity when in drop pod landing targeting mode
+            if (IsDropPodLandingTargeting())
+            {
+                if (!DropCellFinder.IsGoodDropSpot(position, map, allowFogged: false, canRoofPunch: true))
+                {
+                    sb.Append(", can't land");
+                }
+            }
+
+            // Add visibility status after coordinates when drafted pawn cannot see this position
+            if (notVisible)
+            {
+                sb.Append(", not visible");
+            }
 
             return sb.ToString();
         }
@@ -587,7 +654,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets information about room stats at a tile (key 5).
-        /// Shows room impressiveness, cleanliness, wealth, and room type.
+        /// Shows room name and all stats with quality tier descriptions.
         /// </summary>
         public static string GetRoomStatsInfo(IntVec3 position, Map map)
         {
@@ -599,15 +666,36 @@ namespace RimWorldAccess
             if (room == null)
                 return "no room";
 
-            // Check if outdoor (no roof)
+            // Check if outdoor (no roof) or not a proper room
             RoofDef roof = position.GetRoof(map);
             if (roof == null)
                 return "outdoors";
 
+            if (!room.ProperRoom)
+                return "not a proper room";
+
+            return GetRoomStatsInfo(room);
+        }
+
+        /// <summary>
+        /// Gets information about room stats for a given room.
+        /// Shows room name and all non-hidden stats with quality tier descriptions.
+        /// Used by both the 5 key and the gizmo navigation.
+        /// </summary>
+        public static string GetRoomStatsInfo(Room room)
+        {
+            if (room == null)
+                return "no room";
+
             var sb = new StringBuilder();
 
-            // Get room role/type
-            if (room.Role != null)
+            // 1. Room label (identifier) - what room is this
+            string roomLabel = room.GetRoomRoleLabel();
+            if (!string.IsNullOrEmpty(roomLabel))
+            {
+                sb.Append(roomLabel.CapitalizeFirst());
+            }
+            else if (room.Role != null)
             {
                 sb.Append(room.Role.LabelCap);
             }
@@ -616,14 +704,52 @@ namespace RimWorldAccess
                 sb.Append("Room");
             }
 
-            // Get room stats
-            float impressiveness = room.GetStat(RoomStatDefOf.Impressiveness);
-            float cleanliness = room.GetStat(RoomStatDefOf.Cleanliness);
-            float wealth = room.GetStat(RoomStatDefOf.Wealth);
+            // Stats ordered by volatility: dynamic first, static last
+            // Dynamic: Cleanliness (changes constantly), Wealth (changes often)
+            // Static: Impressiveness (derived), Beauty, Space (rarely changes)
+            var statOrder = new[] { "Cleanliness", "Wealth", "Impressiveness", "Beauty", "Space" };
+            var visibleStats = DefDatabase<RoomStatDef>.AllDefsListForReading.Where(def => !def.isHidden);
 
-            sb.Append($", impressiveness {impressiveness:F0}");
-            sb.Append($", cleanliness {cleanliness:F1}");
-            sb.Append($", wealth {wealth:F0}");
+            // 2. Output stats in defined order
+            foreach (var statName in statOrder)
+            {
+                var statDef = visibleStats.FirstOrDefault(s => s.defName == statName);
+                if (statDef == null) continue;
+
+                float value = room.GetStat(statDef);
+                RoomStatScoreStage stage = statDef.GetScoreStage(value);
+                string stageLabel = stage?.label?.CapitalizeFirst() ?? "";
+                string prefix = (room.Role != null && room.Role.IsStatRelated(statDef)) ? "*" : "";
+
+                if (!string.IsNullOrEmpty(stageLabel))
+                {
+                    sb.Append($", {prefix}{statDef.LabelCap}: {stageLabel} ({statDef.ScoreToString(value)})");
+                }
+                else
+                {
+                    sb.Append($", {prefix}{statDef.LabelCap}: {statDef.ScoreToString(value)}");
+                }
+            }
+
+            // 3. Any remaining stats not in our predefined order
+            foreach (RoomStatDef statDef in visibleStats)
+            {
+                if (statOrder.Contains(statDef.defName)) continue;
+
+                float value = room.GetStat(statDef);
+                RoomStatScoreStage stage = statDef.GetScoreStage(value);
+                string stageLabel = stage?.label?.CapitalizeFirst() ?? "";
+                string prefix = (room.Role != null && room.Role.IsStatRelated(statDef)) ? "*" : "";
+
+                if (!string.IsNullOrEmpty(stageLabel))
+                {
+                    sb.Append($", {prefix}{statDef.LabelCap}: {stageLabel} ({statDef.ScoreToString(value)})");
+                }
+                else
+                {
+                    sb.Append($", {prefix}{statDef.LabelCap}: {statDef.ScoreToString(value)}");
+                }
+            }
 
             return sb.ToString();
         }
@@ -681,14 +807,11 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Converts an IntVec3 direction to a cardinal direction string.
+        /// Delegates to BuildingCellHelper for shared implementation.
         /// </summary>
         private static string GetCardinalDirection(IntVec3 direction)
         {
-            if (direction == IntVec3.North) return "north";
-            if (direction == IntVec3.South) return "south";
-            if (direction == IntVec3.East) return "east";
-            if (direction == IntVec3.West) return "west";
-            return "unknown";
+            return BuildingCellHelper.GetCardinalDirection(direction) ?? "unknown";
         }
 
         /// <summary>
@@ -831,6 +954,219 @@ namespace RimWorldAccess
                 label = GenText.SplitCamelCase(def.defName);
             }
             return label;
+        }
+
+        /// <summary>
+        /// Groups items by their label and returns formatted strings with counts.
+        /// Forbidden items are grouped separately from non-forbidden items.
+        /// Format: "name" for single items, "name Nx" for multiple identical items.
+        /// </summary>
+        private static List<string> GroupItemsByLabel(List<Thing> items)
+        {
+            var result = new List<string>();
+
+            // Group by label + forbidden status
+            var groups = new Dictionary<string, int>();
+
+            foreach (var item in items)
+            {
+                string label = item.LabelShort;
+                CompForbiddable forbiddable = item.TryGetComp<CompForbiddable>();
+                bool isForbidden = forbiddable != null && forbiddable.Forbidden;
+
+                string key = isForbidden ? "Forbidden " + label : label;
+
+                if (groups.TryGetValue(key, out var count))
+                    groups[key] = count + 1;
+                else
+                    groups[key] = 1;
+            }
+
+            // Format each group
+            foreach (var kvp in groups)
+            {
+                if (kvp.Value > 1)
+                    result.Add($"{kvp.Key} {kvp.Value}x");
+                else
+                    result.Add(kvp.Key);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Gets sort priority for buildings. Lower = announced first.
+        /// </summary>
+        private static int GetBuildingPriority(Building b)
+        {
+            if (b is Building_Door) return 0;
+            if (b.def.building != null && b.def.building.isNaturalRock) return 1;
+
+            var category = b.def.designationCategory?.defName;
+            switch (category)
+            {
+                case "Structure": return 2;
+                case "Furniture": return 3;
+                case "Production": return 4;
+                case "Security": return 5;
+                case "Temperature": return 6;
+                case "Power": return 7;
+                default: return 8;
+            }
+        }
+
+        /// <summary>
+        /// Gets transport pod related information for a building.
+        /// For pod launchers: announces fuel port location
+        /// For transport pods: announces if connected to fuel
+        /// </summary>
+        private static string GetTransportPodInfo(Building building, Map map)
+        {
+            if (building == null || map == null)
+                return null;
+
+            // Check if this is a transport pod (has CompTransporter)
+            CompTransporter transporter = building.TryGetComp<CompTransporter>();
+            if (transporter != null)
+            {
+                // Check if it's connected to a fueling port
+                CompLaunchable launchable = building.TryGetComp<CompLaunchable>();
+                if (launchable != null)
+                {
+                    // Use reflection to check ConnectedToFuelingPort if available
+                    var connectedProp = HarmonyLib.AccessTools.Property(launchable.GetType(), "ConnectedToFuelingPort");
+                    if (connectedProp != null)
+                    {
+                        try
+                        {
+                            bool connected = (bool)connectedProp.GetValue(launchable);
+                            if (connected)
+                            {
+                                // Get fuel level if connected
+                                float fuel = TransportPodHelper.GetFuelLevel(launchable);
+                                return $"fueled ({fuel:F0} chemfuel)";
+                            }
+                            else
+                            {
+                                return "not connected to fuel";
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                // Fallback: check if there's an adjacent fueling port
+                bool hasAdjacentFuel = false;
+                foreach (IntVec3 adjacent in GenAdj.CellsAdjacent8Way(building))
+                {
+                    if (adjacent.InBounds(map))
+                    {
+                        Building adjacentBuilding = adjacent.GetFirstBuilding(map);
+                        if (adjacentBuilding != null)
+                        {
+                            // Check if it's a pod launcher/fueling port
+                            CompRefuelable refuelable = adjacentBuilding.TryGetComp<CompRefuelable>();
+                            if (refuelable != null && adjacentBuilding.def.defName.Contains("Launcher"))
+                            {
+                                hasAdjacentFuel = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                return hasAdjacentFuel ? "adjacent to launcher" : "not connected to fuel";
+            }
+
+            // Check if this is a pod launcher (has CompRefuelable and is a launcher type)
+            CompRefuelable refuelableComp = building.TryGetComp<CompRefuelable>();
+            if (refuelableComp != null && building.def.defName.Contains("Launcher"))
+            {
+                // Find the fueling port cell and announce its exact coordinates
+                IntVec3 fuelingPortCell = FuelingPortUtility.GetFuelingPortCell(building);
+                if (fuelingPortCell.IsValid && fuelingPortCell.InBounds(map))
+                {
+                    float fuel = refuelableComp.Fuel;
+                    return $"{fuel:F0} chemfuel, fuel port at {fuelingPortCell.x}, {fuelingPortCell.z}";
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Gets a relative direction description from one position to another.
+        /// </summary>
+        private static string GetRelativeDirection(IntVec3 from, IntVec3 to)
+        {
+            int dx = to.x - from.x;
+            int dz = to.z - from.z;
+
+            // Determine primary direction
+            if (System.Math.Abs(dx) > System.Math.Abs(dz))
+            {
+                return dx > 0 ? "east" : "west";
+            }
+            else if (System.Math.Abs(dz) > System.Math.Abs(dx))
+            {
+                return dz > 0 ? "north" : "south";
+            }
+            else if (dx != 0 && dz != 0)
+            {
+                // Diagonal
+                string ns = dz > 0 ? "north" : "south";
+                string ew = dx > 0 ? "east" : "west";
+                return $"{ns}{ew}";
+            }
+
+            return "adjacent";
+        }
+
+        /// <summary>
+        /// Checks if a position is a fueling port cell for a nearby launcher (empty cell where pods should be placed).
+        /// Returns announcement text if this is a fueling port cell, null otherwise.
+        /// </summary>
+        private static string GetEmptyFuelingPortInfo(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Use FuelingPortUtility to check if this cell is a fueling port for some launcher
+            Building fuelingPortGiver = FuelingPortUtility.FuelingPortGiverAtFuelingPortCell(position, map);
+            if (fuelingPortGiver != null)
+            {
+                // This is a fueling port cell - announce it
+                string launcherName = fuelingPortGiver.LabelShort ?? "pod launcher";
+
+                // Check current fuel level
+                CompRefuelable refuelable = fuelingPortGiver.TryGetComp<CompRefuelable>();
+                if (refuelable != null)
+                {
+                    return $"fueling port for {launcherName} ({refuelable.Fuel:F0} chemfuel)";
+                }
+
+                return $"fueling port for {launcherName}";
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Checks if the game is currently in drop pod landing targeting mode.
+        /// Detects this by checking for the specific mouse attachment texture used for drop pods.
+        /// </summary>
+        private static bool IsDropPodLandingTargeting()
+        {
+            if (Find.Targeter == null || !Find.Targeter.IsTargeting)
+                return false;
+
+            // Use reflection to check the mouseAttachment field
+            var mouseAttachmentField = HarmonyLib.AccessTools.Field(typeof(Targeter), "mouseAttachment");
+            if (mouseAttachmentField == null)
+                return false;
+
+            var mouseAttachment = mouseAttachmentField.GetValue(Find.Targeter) as UnityEngine.Texture2D;
+            return mouseAttachment == CompLaunchable.TargeterMouseAttachment;
         }
     }
 }

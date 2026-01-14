@@ -45,6 +45,14 @@ namespace RimWorldAccess
                     return;
                 }
 
+                // Select the first object so that tab visibility checks work correctly
+                // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
+                if (objects.Count > 0 && objects[0] is Thing thingToSelect)
+                {
+                    Find.Selector.ClearSelection();
+                    Find.Selector.Select(thingToSelect, playSound: false, forceDesignatorDeselect: false);
+                }
+
                 // Build the tree
                 rootItem = InspectionTreeBuilder.BuildTree(objects);
                 RebuildVisibleList();
@@ -121,6 +129,14 @@ namespace RimWorldAccess
                 // Store parent for navigation back
                 parentObject = parent;
 
+                // Select the object so that tab visibility checks work correctly
+                // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
+                if (obj is Thing thingToSelect)
+                {
+                    Find.Selector.ClearSelection();
+                    Find.Selector.Select(thingToSelect, playSound: false, forceDesignatorDeselect: false);
+                }
+
                 // Build tree with just this object
                 var objects = new List<object> { obj };
                 rootItem = InspectionTreeBuilder.BuildTree(objects);
@@ -132,6 +148,84 @@ namespace RimWorldAccess
                 IsActive = true;
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
                 typeahead.ClearSearch();
+                AnnounceCurrentSelection();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[RimWorldAccess] Error opening inspection menu for object: {ex}");
+                Close();
+            }
+        }
+
+        /// <summary>
+        /// Opens the inspection menu for a specific object with specified mode.
+        /// </summary>
+        /// <param name="obj">The object to inspect</param>
+        /// <param name="parent">Optional parent object to return to when pressing Escape</param>
+        /// <param name="mode">Inspection mode - Full allows actions, ReadOnly is view-only</param>
+        public static void OpenForObject(object obj, object parent, InspectionMode mode)
+        {
+            try
+            {
+                if (obj == null)
+                {
+                    TolkHelper.Speak("No object to inspect.");
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                    return;
+                }
+
+                // Set position if it's a Thing
+                if (obj is Thing thing)
+                {
+                    inspectionPosition = thing.Position;
+                }
+                else
+                {
+                    inspectionPosition = IntVec3.Invalid;
+                }
+
+                // Store parent for navigation back
+                parentObject = parent;
+
+                // Build tree with just this object, using specified mode
+                var objects = new List<object> { obj };
+                rootItem = InspectionTreeBuilder.BuildTree(objects, mode);
+                RebuildVisibleList();
+                selectedIndex = 0;
+                lastChildPerParent.Clear();
+                MenuHelper.ResetLevel("Inspection");
+
+                IsActive = true;
+                SoundDefOf.TabOpen.PlayOneShotOnCamera();
+                typeahead.ClearSearch();
+
+                // Special handling for single object: auto-expand and position on first child
+                if (visibleItems.Count > 0)
+                {
+                    var singleItem = visibleItems[0];
+                    if (singleItem.IsExpandable)
+                    {
+                        // Announce just the item name (no expand/collapse status)
+                        TolkHelper.Speak(singleItem.Label.StripTags());
+
+                        // Trigger lazy loading if needed
+                        if (singleItem.OnActivate != null && singleItem.Children.Count == 0)
+                        {
+                            singleItem.OnActivate();
+                        }
+
+                        if (singleItem.Children.Count > 0)
+                        {
+                            singleItem.IsExpanded = true;
+                            RebuildVisibleList();
+                            selectedIndex = 1; // First child
+                            AnnounceCurrentSelection();
+                        }
+                        return; // Early return - skip normal announcement
+                    }
+                }
+
+                // Normal case: non-expandable single object
                 AnnounceCurrentSelection();
             }
             catch (Exception ex)
@@ -203,6 +297,14 @@ namespace RimWorldAccess
             if (Find.CurrentMap == null)
                 return objects;
 
+            // Check for zone at cursor position first (zones are not returned by SelectableObjectsAt)
+            Zone zone = inspectionPosition.GetZone(Find.CurrentMap);
+            if (zone != null)
+            {
+                objects.Add(zone);
+            }
+
+            // Get other selectable objects at this position
             var objectsAtPosition = Selector.SelectableObjectsAt(inspectionPosition, Find.CurrentMap);
 
             foreach (var obj in objectsAtPosition)
@@ -600,6 +702,76 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Jumps to the first sibling at the same level within the current node.
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = MenuHelper.JumpToFirstSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope.
+        /// If on an expanded node, jumps to its last visible descendant.
+        /// Otherwise, jumps to last sibling at same level.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+
+            var currentItem = visibleItems[selectedIndex];
+
+            // If current item is expanded and has children, jump to last descendant
+            if (currentItem.IsExpanded && currentItem.Children.Count > 0)
+            {
+                // Find last visible descendant (items with higher indent until we hit same or lower indent)
+                int lastDescendantIndex = selectedIndex;
+                for (int i = selectedIndex + 1; i < visibleItems.Count; i++)
+                {
+                    if (visibleItems[i].IndentLevel <= currentItem.IndentLevel)
+                        break;
+                    lastDescendantIndex = i;
+                }
+                if (lastDescendantIndex > selectedIndex)
+                {
+                    selectedIndex = lastDescendantIndex;
+                    typeahead.ClearSearch();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // Otherwise jump to last sibling
+            selectedIndex = MenuHelper.JumpToLastSibling(visibleItems, selectedIndex, item => item.IndentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        public static void JumpToAbsoluteFirst()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = 0;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// </summary>
+        public static void JumpToAbsoluteLast()
+        {
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            selectedIndex = visibleItems.Count - 1;
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Gets the list of labels for all visible items.
         /// </summary>
         private static List<string> GetItemLabels()
@@ -648,6 +820,16 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Re-announces the current selection. Used when returning from a sub-state (e.g., HealthTabState).
+        /// </summary>
+        public static void ReannounceCurrentSelection()
+        {
+            if (!IsActive)
+                return;
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
         /// Announces the current selection to the screen reader.
         /// Format: "level N. {name} {state}. {X} of {Y}." or "{name} {state}. {X} of {Y}."
         /// Level is only announced when it changes.
@@ -687,10 +869,11 @@ namespace RimWorldAccess
                 {
                     adjustedLevel = Math.Max(0, adjustedLevel - 1);
                 }
-                string levelPrefix = MenuHelper.GetLevelPrefix("Inspection", adjustedLevel);
-
-                // Build full announcement: "level N. {name} {state}. {X} of {Y}."
-                string announcement = $"{levelPrefix}{label}{stateIndicator}. {MenuHelper.FormatPosition(position - 1, total)}.";
+                // Build full announcement: "{name} {state}. {X} of {Y}. level N"
+                string levelSuffix = MenuHelper.GetLevelSuffix("Inspection", adjustedLevel);
+                string positionPart = MenuHelper.FormatPosition(position - 1, total);
+                string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
+                string announcement = $"{label}{stateIndicator}{positionSection}{levelSuffix}";
 
                 TolkHelper.Speak(announcement);
             }
@@ -718,22 +901,6 @@ namespace RimWorldAccess
                 if (HealthTabState.IsActive)
                 {
                     return HealthTabState.HandleInput(ev);
-                }
-                if (NeedsTabState.IsActive)
-                {
-                    return NeedsTabState.HandleInput(ev);
-                }
-                if (SocialTabState.IsActive)
-                {
-                    return SocialTabState.HandleInput(ev);
-                }
-                if (TrainingTabState.IsActive)
-                {
-                    return TrainingTabState.HandleInput(ev);
-                }
-                if (CharacterTabState.IsActive)
-                {
-                    return CharacterTabState.HandleInput(ev);
                 }
 
                 KeyCode key = ev.keyCode;
@@ -812,6 +979,34 @@ namespace RimWorldAccess
                     return true;
                 }
 
+                // Handle Home - jump to first item
+                if (key == KeyCode.Home)
+                {
+                    if (visibleItems.Count > 0)
+                    {
+                        selectedIndex = 0;
+                        typeahead.ClearSearch();
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection();
+                    }
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle End - jump to last item
+                if (key == KeyCode.End)
+                {
+                    if (visibleItems.Count > 0)
+                    {
+                        selectedIndex = visibleItems.Count - 1;
+                        typeahead.ClearSearch();
+                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+                        AnnounceCurrentSelection();
+                    }
+                    ev.Use();
+                    return true;
+                }
+
                 // Handle Right arrow - expand
                 if (key == KeyCode.RightArrow)
                 {
@@ -824,6 +1019,28 @@ namespace RimWorldAccess
                 if (key == KeyCode.LeftArrow)
                 {
                     Collapse();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
+                if (key == KeyCode.Home)
+                {
+                    if (ev.control)
+                        JumpToAbsoluteFirst();
+                    else
+                        JumpToFirst();
+                    ev.Use();
+                    return true;
+                }
+
+                // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
+                if (key == KeyCode.End)
+                {
+                    if (ev.control)
+                        JumpToAbsoluteLast();
+                    else
+                        JumpToLast();
                     ev.Use();
                     return true;
                 }

@@ -46,6 +46,76 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Opens the quest menu and navigates to a specific quest.
+        /// Called when activating "View Quest" button from a letter.
+        /// </summary>
+        public static void OpenAndSelectQuest(Quest quest)
+        {
+            if (quest == null)
+            {
+                TolkHelper.Speak("Quest no longer available");
+                return;
+            }
+
+            // Determine which tab the quest belongs to
+            QuestsTab targetTab = GetTabForQuest(quest);
+
+            // Open menu on that tab
+            isActive = true;
+            currentTab = targetTab;
+            currentIndex = 0;
+            typeahead.ClearSearch();
+            RefreshQuestList();
+
+            // Find and select the quest
+            int index = currentQuests.FindIndex(q => q == quest);
+            if (index >= 0)
+            {
+                currentIndex = index;
+                TolkHelper.Speak("Quest menu");
+                AnnounceCurrentSelection();
+            }
+            else
+            {
+                // Quest not found in expected tab - search all tabs
+                foreach (QuestsTab tab in Enum.GetValues(typeof(QuestsTab)))
+                {
+                    currentTab = tab;
+                    RefreshQuestList();
+                    index = currentQuests.FindIndex(q => q == quest);
+                    if (index >= 0)
+                    {
+                        currentIndex = index;
+                        TolkHelper.Speak("Quest menu");
+                        AnnounceCurrentSelection();
+                        return;
+                    }
+                }
+
+                // Quest not found anywhere
+                TolkHelper.Speak("Quest no longer available");
+                Close();
+            }
+        }
+
+        /// <summary>
+        /// Determines which tab a quest belongs to.
+        /// </summary>
+        private static QuestsTab GetTabForQuest(Quest quest)
+        {
+            if (quest.Historical || quest.dismissed)
+                return QuestsTab.Historical;
+
+            if (quest.State == QuestState.NotYetAccepted)
+                return QuestsTab.Available;
+
+            if (quest.State == QuestState.Ongoing)
+                return QuestsTab.Active;
+
+            return QuestsTab.Historical;
+        }
+
+        /// <summary>
         /// Closes the quest menu.
         /// </summary>
         public static void Close()

@@ -25,17 +25,15 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.High)]
         public static void Prefix()
         {
-            // If any accessibility menu is active, don't intercept - let UnifiedKeyboardPatch handle it
-            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
-                return;
-
-            // Detect if we're in world view
+            // Detect if we're in world view - MUST happen before any early returns
+            // to properly track state transitions
             bool isWorldView = Current.ProgramState == ProgramState.Playing &&
                               Find.World != null &&
                               Find.World.renderer != null &&
                               Find.World.renderer.wantedMode == WorldRenderMode.Planet;
 
-            // Handle state transitions
+            // Handle state transitions - MUST happen before accessibility menu check
+            // Otherwise we might miss the transition if a menu is active during map generation
             if (isWorldView && !lastFrameWasWorldView)
             {
                 // Just entered world view
@@ -49,6 +47,10 @@ namespace RimWorldAccess
             }
 
             lastFrameWasWorldView = isWorldView;
+
+            // If any accessibility menu is active, don't intercept input - let UnifiedKeyboardPatch handle it
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
+                return;
 
             // Only process input if in world view and state is active
             if (!isWorldView || !WorldNavigationState.IsActive)
@@ -75,15 +77,7 @@ namespace RimWorldAccess
             bool ctrl = Event.current.control;
             bool alt = Event.current.alt;
 
-            // Handle caravan stats viewer input first if it's active
-            if (CaravanStatsState.IsActive)
-            {
-                if (CaravanStatsState.HandleInput(key))
-                {
-                    Event.current.Use();
-                    return;
-                }
-            }
+            // Note: CaravanInspectState input is handled by UnifiedKeyboardPatch at priority 0
 
             // Handle arrow key navigation
             if (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
@@ -150,13 +144,13 @@ namespace RimWorldAccess
             // Note: Comma and Period keys for caravan cycling are handled in UnifiedKeyboardPatch
             // at a higher priority to prevent colonist selection from intercepting them
 
-            // Handle I key - show caravan stats (if caravan selected) or read detailed tile information
+            // Handle I key - show caravan inspect (if caravan selected) or read detailed tile information
             if (key == KeyCode.I && !shift && !ctrl && !alt)
             {
                 Caravan selectedCaravan = WorldNavigationState.GetSelectedCaravan();
                 if (selectedCaravan != null)
                 {
-                    WorldNavigationState.ShowCaravanStats();
+                    WorldNavigationState.ShowCaravanInspect();
                 }
                 else
                 {
@@ -164,6 +158,24 @@ namespace RimWorldAccess
                 }
                 Event.current.Use();
                 return;
+            }
+
+            // Handle number keys 1-5 for categorized tile information
+            if (!shift && !ctrl && !alt)
+            {
+                int category = 0;
+                if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1) category = 1;
+                else if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2) category = 2;
+                else if (key == KeyCode.Alpha3 || key == KeyCode.Keypad3) category = 3;
+                else if (key == KeyCode.Alpha4 || key == KeyCode.Keypad4) category = 4;
+                else if (key == KeyCode.Alpha5 || key == KeyCode.Keypad5) category = 5;
+
+                if (category > 0)
+                {
+                    WorldNavigationState.AnnounceTileInfoCategory(category);
+                    Event.current.Use();
+                    return;
+                }
             }
 
             // Handle C key - form caravan at selected settlement
@@ -192,39 +204,17 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // Check if there's a player caravan at the current tile - show stats
+                // Open world object selection/inspection at current tile
                 PlanetTile currentTile = WorldNavigationState.CurrentSelectedTile;
-                if (currentTile.Valid && Find.WorldObjects != null)
+                if (currentTile.Valid)
                 {
-                    var caravanAtTile = Find.WorldObjects.ObjectsAt(currentTile)
-                        .OfType<RimWorld.Planet.Caravan>()
-                        .FirstOrDefault(c => c.Faction == RimWorld.Faction.OfPlayer);
-
-                    if (caravanAtTile != null)
-                    {
-                        // Show caravan stats (same as I key)
-                        CaravanStatsState.Open(caravanAtTile);
-                        Event.current.Use();
-                        return;
-                    }
-
-                    // Check for player settlement - could enter it
-                    var settlementAtTile = Find.WorldObjects.ObjectsAt(currentTile)
-                        .OfType<RimWorld.Planet.Settlement>()
-                        .FirstOrDefault(s => s.Faction == RimWorld.Faction.OfPlayer && s.HasMap);
-
-                    if (settlementAtTile != null)
-                    {
-                        // Enter the player's settlement
-                        CameraJumper.TryJumpAndSelect(new GlobalTargetInfo(settlementAtTile.Map.Center, settlementAtTile.Map));
-                        TolkHelper.Speak($"Entering {settlementAtTile.Label}");
-                        Event.current.Use();
-                        return;
-                    }
+                    WorldObjectSelectionState.Open(currentTile);
+                    Event.current.Use();
+                    return;
                 }
             }
 
-            // Handle Escape key - close caravan stats, cancel destination selection, or let RimWorld handle it
+            // Handle Escape key - close caravan inspect, cancel destination selection, or let RimWorld handle it
             if (key == KeyCode.Escape)
             {
                 if (CaravanFormationState.IsChoosingDestination)
@@ -233,9 +223,16 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
-                else if (CaravanStatsState.IsActive)
+                else if (WorldObjectSelectionState.IsActive)
                 {
-                    CaravanStatsState.Close();
+                    WorldObjectSelectionState.Close();
+                    TolkHelper.Speak("Selection closed");
+                    Event.current.Use();
+                    return;
+                }
+                else if (CaravanInspectState.IsActive)
+                {
+                    CaravanInspectState.Close();
                     Event.current.Use();
                     return;
                 }

@@ -21,6 +21,7 @@ namespace RimWorldAccess
         {
             public PawnCapacityDef Def { get; set; }
             public string Label { get; set; }
+            public string Description { get; set; }
             public float Level { get; set; }
             public string LevelLabel { get; set; }
             public string DetailedBreakdown { get; set; }
@@ -201,7 +202,7 @@ namespace RimWorldAccess
         #region Capacities
 
         /// <summary>
-        /// Gets all capacity information for a pawn.
+        /// Gets all capacity information for a pawn, sorted by level (lowest/most impaired first).
         /// </summary>
         public static List<CapacityInfo> GetCapacities(Pawn pawn)
         {
@@ -210,7 +211,7 @@ namespace RimWorldAccess
             if (pawn?.health?.capacities == null)
                 return capacities;
 
-            // Get key capacities in order
+            // Get key capacities
             var keyCapacities = new List<PawnCapacityDef>
             {
                 PawnCapacityDefOf.Consciousness,
@@ -237,11 +238,15 @@ namespace RimWorldAccess
                 {
                     Def = capacityDef,
                     Label = label,
+                    Description = capacityDef.description ?? "",
                     Level = level,
                     LevelLabel = levelLabel,
                     DetailedBreakdown = GetCapacityBreakdown(pawn, capacityDef)
                 });
             }
+
+            // Sort by level (lowest first = most impaired/urgent)
+            capacities = capacities.OrderBy(c => c.Level).ToList();
 
             return capacities;
         }
@@ -507,7 +512,8 @@ namespace RimWorldAccess
         #region Body Parts & Hediffs
 
         /// <summary>
-        /// Gets all body parts with their hediffs organized.
+        /// Gets all body parts with their hediffs organized, sorted by severity (most damaged first).
+        /// Uses health percentage (lower = more urgent) and prioritizes core/vital parts.
         /// </summary>
         public static List<BodyPartInfo> GetBodyPartsWithHediffs(Pawn pawn)
         {
@@ -519,6 +525,7 @@ namespace RimWorldAccess
             // First, get whole-body hediffs
             var wholeBodyHediffs = pawn.health.hediffSet.hediffs
                 .Where(h => h.Part == null && h.Visible)
+                .OrderByDescending(h => h.Severity) // Most severe first
                 .ToList();
 
             if (wholeBodyHediffs.Count > 0)
@@ -545,6 +552,7 @@ namespace RimWorldAccess
             {
                 var hediffs = pawn.health.hediffSet.hediffs
                     .Where(h => h.Part == part && h.Visible)
+                    .OrderByDescending(h => h.Severity) // Most severe first within each part
                     .ToList();
 
                 if (hediffs.Count == 0)
@@ -570,6 +578,13 @@ namespace RimWorldAccess
 
                 parts.Add(partInfo);
             }
+
+            // Sort parts: core/vital parts first, then by health percentage (lowest first = most damaged)
+            parts = parts
+                .OrderByDescending(p => p.Part?.IsCorePart ?? true) // Core parts first (whole body counts as core)
+                .ThenBy(p => p.MaxHealth > 0 ? p.Health / p.MaxHealth : 1f) // Lowest health % first
+                .ThenBy(p => p.Efficiency) // Lowest efficiency first
+                .ToList();
 
             return parts;
         }
@@ -667,6 +682,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets comprehensive effect information for a hediff, focusing on functional impacts.
+        /// Uses vanilla's TipStringExtra for consistency with what sighted players see.
         /// </summary>
         public static string GetComprehensiveHediffEffects(Hediff hediff, Pawn pawn)
         {
@@ -674,274 +690,33 @@ namespace RimWorldAccess
                 return string.Empty;
 
             var sb = new StringBuilder();
-            var stage = hediff.CurStage;
-            bool hasAnyEffect = false;
 
             // Life-threatening status (show first as most critical)
             if (hediff.IsCurrentlyLifeThreatening)
             {
-                sb.AppendLine("⚠ LIFE THREATENING");
-                hasAnyEffect = true;
+                sb.AppendLine("LIFE THREATENING");
             }
 
-            // Bleeding
-            if (hediff.Bleeding)
+            // Use vanilla's TipStringExtra - this is what sighted players see in tooltips
+            string tipExtra = hediff.TipStringExtra;
+            if (!string.IsNullOrEmpty(tipExtra))
             {
-                sb.AppendLine($"Bleeding: {hediff.BleedRate:F2} per day");
-                hasAnyEffect = true;
+                // Strip color tags and clean up
+                string cleaned = tipExtra.StripTags().Trim();
+                if (!string.IsNullOrEmpty(cleaned))
+                {
+                    sb.AppendLine(cleaned);
+                }
             }
 
-            // Pain
-            float pain = hediff.PainOffset;
-            if (pain > 0.01f)
+            string result = sb.ToString().Trim();
+            if (string.IsNullOrEmpty(result))
             {
-                sb.AppendLine($"Pain: +{pain:P0}");
-                hasAnyEffect = true;
+                // Fallback only if truly nothing to show
+                return "No effects";
             }
 
-            // Capacity impacts with percentages
-            if (hediff.CapMods != null && hediff.CapMods.Count > 0)
-            {
-                foreach (var capMod in hediff.CapMods)
-                {
-                    if (capMod.capacity == null)
-                        continue;
-
-                    string capacityName = capMod.capacity.LabelCap.ToString().StripTags();
-                    float currentLevel = 0f;
-
-                    // Get current capacity level if pawn is available
-                    if (pawn?.health?.capacities != null && pawn.health.capacities.CapableOf(capMod.capacity))
-                    {
-                        currentLevel = pawn.health.capacities.GetLevel(capMod.capacity);
-                    }
-
-                    // Format the impact
-                    var impactParts = new List<string>();
-
-                    if (capMod.offset != 0f)
-                    {
-                        string sign = capMod.offset > 0 ? "+" : "";
-                        impactParts.Add($"{sign}{capMod.offset:P0}");
-                    }
-
-                    if (capMod.postFactor != 1f)
-                    {
-                        float percentChange = (capMod.postFactor - 1f) * 100f;
-                        string sign = percentChange > 0 ? "+" : "";
-                        impactParts.Add($"{sign}{percentChange:F0}%");
-                    }
-
-                    if (capMod.SetMaxDefined)
-                    {
-                        float maxValue = capMod.setMax;
-                        impactParts.Add($"max {maxValue:P0}");
-                    }
-
-                    string impactStr = string.Join(", ", impactParts);
-
-                    if (pawn != null && currentLevel > 0f)
-                    {
-                        sb.AppendLine($"{capacityName}: {impactStr} (current: {currentLevel:P0})");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"{capacityName}: {impactStr}");
-                    }
-
-                    hasAnyEffect = true;
-                }
-            }
-
-            // Part efficiency (for injuries without direct capacity mods)
-            if (hediff.Part != null && pawn != null && (hediff.CapMods == null || hediff.CapMods.Count == 0))
-            {
-                float efficiency = PawnCapacityUtility.CalculatePartEfficiency(pawn.health.hediffSet, hediff.Part);
-                if (efficiency < 0.999f)
-                {
-                    sb.AppendLine($"Part efficiency ({hediff.Part.Label}): {efficiency:P0}");
-                    hasAnyEffect = true;
-                }
-            }
-
-            // Stage-based effects
-            if (stage != null)
-            {
-                // Work restrictions
-                if (stage.disabledWorkTags != WorkTags.None)
-                {
-                    sb.AppendLine($"Disables work: {stage.disabledWorkTags}");
-                    hasAnyEffect = true;
-                }
-
-                // Need modifications
-                if (stage.hungerRateFactor != 1f || stage.hungerRateFactorOffset != 0f)
-                {
-                    float totalFactor = stage.hungerRateFactor + stage.hungerRateFactorOffset;
-                    sb.AppendLine($"Hunger rate: x{totalFactor:F2}");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.restFallFactor != 1f || stage.restFallFactorOffset != 0f)
-                {
-                    float totalFactor = stage.restFallFactor + stage.restFallFactorOffset;
-                    sb.AppendLine($"Rest fall rate: x{totalFactor:F2}");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.fertilityFactor != 1f && stage.fertilityFactor >= 0f)
-                {
-                    sb.AppendLine($"Fertility: x{stage.fertilityFactor:F2}");
-                    hasAnyEffect = true;
-                }
-
-                // Enabled/disabled needs
-                if (stage.enablesNeeds != null && stage.enablesNeeds.Count > 0)
-                {
-                    foreach (var need in stage.enablesNeeds)
-                    {
-                        sb.AppendLine($"Enables need: {need.LabelCap.ToString().StripTags()}");
-                        hasAnyEffect = true;
-                    }
-                }
-
-                if (stage.disablesNeeds != null && stage.disablesNeeds.Count > 0)
-                {
-                    foreach (var need in stage.disablesNeeds)
-                    {
-                        sb.AppendLine($"Disables need: {need.LabelCap.ToString().StripTags()}");
-                        hasAnyEffect = true;
-                    }
-                }
-
-                // Activity restrictions
-                if (stage.blocksSleeping)
-                {
-                    sb.AppendLine("Prevents sleeping");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.blocksMentalBreaks)
-                {
-                    sb.AppendLine("Prevents mental breaks");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.blocksInspirations)
-                {
-                    sb.AppendLine("Prevents inspirations");
-                    hasAnyEffect = true;
-                }
-
-                // Mental health effects
-                if (stage.mentalBreakMtbDays > 0f)
-                {
-                    sb.AppendLine($"Mental break risk: every {stage.mentalBreakMtbDays:F1} days (avg)");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.forgetMemoryThoughtMtbDays > 0f)
-                {
-                    sb.AppendLine($"Memory loss: every {stage.forgetMemoryThoughtMtbDays:F1} days (avg)");
-                    hasAnyEffect = true;
-                }
-
-                // Progression effects
-                if (stage.vomitMtbDays > 0f)
-                {
-                    sb.AppendLine($"Vomiting: every {stage.vomitMtbDays:F1} days (avg)");
-                    hasAnyEffect = true;
-                }
-
-                if (stage.deathMtbDays > 0f)
-                {
-                    sb.AppendLine($"Death risk: every {stage.deathMtbDays:F1} days (avg)");
-                    hasAnyEffect = true;
-                }
-
-                // Healing effects
-                if (stage.naturalHealingFactor != -1f && stage.naturalHealingFactor != 1f)
-                {
-                    if (stage.naturalHealingFactor == 0f)
-                    {
-                        sb.AppendLine("Prevents natural healing");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"Natural healing: x{stage.naturalHealingFactor:F2}");
-                    }
-                    hasAnyEffect = true;
-                }
-
-                if (stage.regeneration > 0f)
-                {
-                    sb.AppendLine($"Regeneration: +{stage.regeneration:F2} HP/day");
-                    hasAnyEffect = true;
-                }
-            }
-
-            // Permanence status
-            var permanentComp = hediff.TryGetComp<HediffComp_GetsPermanent>();
-            if (permanentComp != null)
-            {
-                if (permanentComp.IsPermanent)
-                {
-                    sb.AppendLine("Status: Permanent");
-                    hasAnyEffect = true;
-                }
-                else
-                {
-                    sb.AppendLine("Status: Becoming permanent");
-                    hasAnyEffect = true;
-                }
-            }
-
-            // Tendable status
-            if (hediff.TendableNow())
-            {
-                sb.AppendLine("Can be tended");
-                hasAnyEffect = true;
-            }
-
-            // Immunity progress
-            var immunizable = hediff.TryGetComp<HediffComp_Immunizable>();
-            if (immunizable != null && pawn?.health?.immunity != null)
-            {
-                float immunity = pawn.health.immunity.GetImmunity(hediff.def);
-                sb.AppendLine($"Immunity: {immunity:P0}");
-                hasAnyEffect = true;
-            }
-
-            // Severity info
-            if (hediff.def.lethalSeverity > 0f || hediff.def.stages != null)
-            {
-                string severityInfo = $"Severity: {hediff.Severity:F2}";
-
-                if (hediff.def.lethalSeverity > 0f)
-                {
-                    severityInfo += $" / {hediff.def.lethalSeverity:F2} (lethal)";
-                }
-                else if (hediff.def.maxSeverity < 999f)
-                {
-                    severityInfo += $" / {hediff.def.maxSeverity:F2} (max)";
-                }
-
-                if (hediff.def.stages != null && hediff.def.stages.Count > 0)
-                {
-                    severityInfo += $" [Stage {hediff.CurStageIndex + 1}/{hediff.def.stages.Count}]";
-                }
-
-                sb.AppendLine(severityInfo);
-                hasAnyEffect = true;
-            }
-
-            // If no specific effects found, show a generic message
-            if (!hasAnyEffect)
-            {
-                sb.AppendLine("No significant mechanical effects");
-            }
-
-            return sb.ToString().TrimEnd();
+            return result;
         }
 
         #endregion

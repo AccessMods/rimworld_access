@@ -3,6 +3,7 @@ using UnityEngine;
 using Verse;
 using Verse.Sound;
 using RimWorld;
+using RimWorld.Planet;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -106,11 +107,49 @@ namespace RimWorldAccess
                 }
             }
 
-            // ===== PRIORITY 0: Handle caravan stats viewer if active (must be before key blocking) =====
-            // BUT: Skip if windowless dialog is active - dialogs take absolute priority
-            if (CaravanStatsState.IsActive && !WindowlessDialogState.IsActive)
+            // ===== PRIORITY -0.25: Handle Info Card dialog if active =====
+            // Info Card is a modal dialog that should take precedence over most other handlers
+            if (InfoCardState.IsActive)
             {
-                if (CaravanStatsState.HandleInput(key))
+                if (InfoCardState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY -0.24: Handle Auto-Slaughter dialog if active =====
+            // Auto-Slaughter is a modal dialog that should take precedence over most other handlers
+            if (AutoSlaughterState.IsActive)
+            {
+                if (AutoSlaughterState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0: Handle world object selection if active =====
+            if (WorldObjectSelectionState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                if (WorldObjectSelectionState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0: Handle caravan inspect screen if active (must be before key blocking) =====
+            // BUT: Skip if windowless dialog, inspection, or gear equip menu is active - they take priority
+            if (CaravanInspectState.IsActive && !WindowlessDialogState.IsActive && !GearEquipMenuState.IsActive && !WindowlessInspectionState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                if (CaravanInspectState.HandleInput(key, shift, ctrl, alt))
                 {
                     Event.current.Use();
                     return;
@@ -198,9 +237,62 @@ namespace RimWorldAccess
                 // Let arrow keys pass through for world navigation
             }
 
+            // ===== PRIORITY 0.22: Handle inspection menu EARLY if opened from caravan/split/inspect/transport pod dialogs =====
+            // This ensures Escape in inspection doesn't get caught by other handlers
+            // Note: Window.OnCancelKeyPressed is patched in CaravanFormationPatch and TransportPodPatch to block RimWorld's Cancel handling
+            if (WindowlessInspectionState.IsActive && (CaravanFormationState.IsActive || SplitCaravanState.IsActive || CaravanInspectState.IsActive || TransportPodLoadingState.IsActive))
+            {
+                if (WindowlessInspectionState.HandleInput(Event.current))
+                {
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.24: Handle stat breakdown if active =====
+            // This overlays caravan summary view when inspecting stat factors
+            if (StatBreakdownState.IsActive)
+            {
+                if (StatBreakdownState.HandleInput(key))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.25: Handle quantity menu if active =====
+            // This overlays caravan formation/split dialogs
+            // Note: Window.OnCancelKeyPressed is patched in CaravanFormationPatch to block RimWorld's Cancel handling
+            if (QuantityMenuState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (QuantityMenuState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.28: Handle transport pod selection mode if active =====
+            // This is the custom pod grouping mode activated from our "Select pods to group" gizmo
+            if (TransportPodSelectionState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (TransportPodSelectionState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0.3: Handle caravan formation dialog if active =====
-            // BUT: Skip if windowless dialog is active - dialogs take absolute priority
-            if (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination && !WindowlessDialogState.IsActive)
+            // BUT: Skip if windowless dialog, inspection, or quantity menu is active - they take priority
+            if (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination && !WindowlessDialogState.IsActive && !WindowlessInspectionState.IsActive && !QuantityMenuState.IsActive)
             {
                 bool shift = Event.current.shift;
                 bool ctrl = Event.current.control;
@@ -213,35 +305,94 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 0.32: Handle transport pod loading dialog if active =====
+            // Skip if overlay menus are active - they take priority
+            if (TransportPodLoadingState.IsActive && !WindowlessDialogState.IsActive && !WindowlessInspectionState.IsActive && !QuantityMenuState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (TransportPodLoadingState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.35: Handle split caravan dialog if active =====
+            if (SplitCaravanState.IsActive && !WindowlessDialogState.IsActive && !WindowlessInspectionState.IsActive && !QuantityMenuState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (SplitCaravanState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.36: Handle transport pod launch targeting if active =====
+            // This handles Enter/Escape/F keys during world map launch targeting
+            if (TransportPodLaunchState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (TransportPodLaunchState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.37: Handle gear equip menu if active =====
+            if (GearEquipMenuState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                if (GearEquipMenuState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0.5: Handle world scanner keys (PageUp/PageDown/Home/End) =====
-            // Allow these keys when choosing destination, but not when in the formation dialog itself
-            // BUT: Skip if caravan stats is active - it handles its own input
+            // Skip if any accessibility menu is active - they handle their own Enter/navigation keys
+            // Note: KeyboardHelper.IsAnyAccessibilityMenuActive() covers all menus that need exclusion
             if (WorldNavigationState.IsActive &&
-                !CaravanStatsState.IsActive &&
-                !QuestMenuState.IsActive &&
-                (!CaravanFormationState.IsActive || CaravanFormationState.IsChoosingDestination) &&
-                !WindowlessDialogState.IsActive)
+                !KeyboardHelper.IsAnyAccessibilityMenuActive())
             {
                 bool handled = false;
                 bool alt = Event.current.alt;
                 bool ctrl = Event.current.control;
                 bool shift = Event.current.shift;
 
-                // Page Down: Next item (Ctrl = next category)
-                if (key == KeyCode.PageDown && !shift && !alt)
+                // Page Down: Navigate scanner (Ctrl=category, Shift=subcategory, Alt=instance, none=item)
+                if (key == KeyCode.PageDown)
                 {
-                    if (ctrl)
+                    if (ctrl && !shift && !alt)
                         WorldScannerState.NextCategory();
-                    else
+                    else if (shift && !ctrl && !alt)
+                        WorldScannerState.NextSubcategory();
+                    else if (alt && !ctrl && !shift)
+                        WorldScannerState.NextInstance();
+                    else if (!ctrl && !shift && !alt)
                         WorldScannerState.NextItem();
                     handled = true;
                 }
-                // Page Up: Previous item (Ctrl = previous category)
-                else if (key == KeyCode.PageUp && !shift && !alt)
+                // Page Up: Navigate scanner (Ctrl=category, Shift=subcategory, Alt=instance, none=item)
+                else if (key == KeyCode.PageUp)
                 {
-                    if (ctrl)
+                    if (ctrl && !shift && !alt)
                         WorldScannerState.PreviousCategory();
-                    else
+                    else if (shift && !ctrl && !alt)
+                        WorldScannerState.PreviousSubcategory();
+                    else if (alt && !ctrl && !shift)
+                        WorldScannerState.PreviousInstance();
+                    else if (!ctrl && !shift && !alt)
                         WorldScannerState.PreviousItem();
                     handled = true;
                 }
@@ -280,6 +431,42 @@ namespace RimWorldAccess
                     WorldNavigationState.CycleToPreviousCaravan();
                     handled = true;
                 }
+                // Ctrl+Space: Toggle caravan multi-selection
+                else if (key == KeyCode.Space && !shift && ctrl && !alt)
+                {
+                    WorldNavigationState.ToggleCaravanSelection();
+                    handled = true;
+                }
+                // Alt+C: Jump cursor to selected caravan(s)
+                else if (key == KeyCode.C && !shift && !ctrl && alt)
+                {
+                    WorldNavigationState.JumpToSelectedCaravans();
+                    handled = true;
+                }
+                // I key: Open caravan inspect screen for selected caravan
+                // Skip if gizmo menu is active - let typeahead handle the key
+                else if (key == KeyCode.I && !shift && !ctrl && !alt && !GizmoNavigationState.IsActive)
+                {
+                    WorldNavigationState.ShowCaravanInspect();
+                    handled = true;
+                }
+                // L key: Open notification/letter menu from world map
+                else if (key == KeyCode.L && !shift && !ctrl && !alt)
+                {
+                    NotificationMenuState.Open();
+                    handled = true;
+                }
+                // Enter key: Open world object selection/inspection at current tile
+                // Skip if route planner is active - it handles Enter for confirming routes
+                else if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt && !RoutePlannerState.IsActive)
+                {
+                    PlanetTile currentTile = WorldNavigationState.CurrentSelectedTile;
+                    if (currentTile.Valid)
+                    {
+                        WorldObjectSelectionState.Open(currentTile);
+                        handled = true;
+                    }
+                }
 
                 if (handled)
                 {
@@ -288,22 +475,82 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 0.6: Handle route planner if active =====
+            // Route planner needs to handle Space (add waypoint), Delete (remove), E (ETA), Escape (close)
+            // Space must be consumed to prevent pause/unpause
+            // Note: Must check ProgramState first - Find.WorldRoutePlanner access crashes on main menu
+            if (Current.ProgramState == ProgramState.Playing && RoutePlannerState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (RoutePlannerState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.7: R key to toggle route planner in world view =====
+            // Note: Must check ProgramState first for safety
+            // Note: Skip if any menu with typeahead is active - let typeahead handle the key
+            if (Current.ProgramState == ProgramState.Playing &&
+                WorldNavigationState.IsActive &&
+                !CaravanFormationState.IsActive &&
+                !CaravanInspectState.IsActive &&
+                !WindowlessDialogState.IsActive &&
+                !RoutePlannerState.IsActive &&
+                !GizmoNavigationState.IsActive &&
+                !TradeNavigationState.IsActive &&
+                !SellableItemsState.IsActive)
+            {
+                if (key == KeyCode.R && !Event.current.shift && !Event.current.control && !Event.current.alt)
+                {
+                    RoutePlannerState.Open();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.75: Handle F8 to dismiss world map and restore cursor =====
+            // F8 is the world map toggle - when pressed while on world map, dismiss it and restore cursor
+            if (key == KeyCode.F8 &&
+                WorldNavigationState.IsActive &&
+                !CaravanFormationState.IsActive &&
+                !SplitCaravanState.IsActive &&
+                !KeyboardHelper.IsAnyAccessibilityMenuActive())
+            {
+                // Close world view and restore cursor to last known position
+                CameraJumper.TryHideWorld();
+                MapNavigationState.RestoreCursorForCurrentMap();
+                TolkHelper.Speak("Returned to map");
+                Event.current.Use();
+                return;
+            }
+
             // ===== EARLY BLOCK: If in world view, block most map-specific keys =====
             // Don't block when choosing destination (allow map interaction)
             // Don't block Enter/Escape when menus are active (need them for menu navigation)
+            // Use IsAnyAccessibilityMenuActive() to cover all windowless menus (pause, save, load, options, etc.)
             if (WorldNavigationState.IsActive &&
                 !CaravanFormationState.IsActive &&
-                !WindowlessFloatMenuState.IsActive &&
+                !SplitCaravanState.IsActive &&
+                !GearEquipMenuState.IsActive &&
+                !QuantityMenuState.IsActive &&
                 !QuestMenuState.IsActive &&
-                !CaravanStatsState.IsActive)
+                !CaravanInspectState.IsActive &&
+                !KeyboardHelper.IsAnyAccessibilityMenuActive())
             {
                 // Block all map-specific keys - world scanner handles PageUp/PageDown/Home/End above
-                if (key == KeyCode.A || key == KeyCode.Z ||
-                    key == KeyCode.G || key == KeyCode.L || key == KeyCode.Q ||
+                // Note: R is NOT blocked - it opens route planner (handled above)
+                // Note: G is NOT blocked - it opens gizmos for world objects (caravans, settlements)
+                // Note: F1-F7 are NOT blocked - intercept patches handle them
+                if (key == KeyCode.A ||
+                    key == KeyCode.L || key == KeyCode.Q ||
                     key == KeyCode.Return || key == KeyCode.KeypadEnter ||
                     key == KeyCode.P || key == KeyCode.S ||
-                    key == KeyCode.F2 || key == KeyCode.F3 || key == KeyCode.F6 || key == KeyCode.F7 ||
-                    key == KeyCode.R || key == KeyCode.T || key == KeyCode.Tab ||
+                    key == KeyCode.Tab ||
                     (key == KeyCode.M && Event.current.alt) ||
                     (key == KeyCode.H && Event.current.alt) ||
                     (key == KeyCode.N && Event.current.alt) ||
@@ -311,6 +558,8 @@ namespace RimWorldAccess
                     (key == KeyCode.F && Event.current.alt))
                 {
                     // These keys should not work in world view - they're map-specific
+                    // Must consume the event to prevent game from opening its inaccessible menus
+                    Event.current.Use();
                     return;
                 }
             }
@@ -355,23 +604,6 @@ namespace RimWorldAccess
                 }
             }
 
-            // ===== PRIORITY 2.3: Handle trade confirmation if active =====
-            if (TradeConfirmationState.IsActive)
-            {
-                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    TradeConfirmationState.Confirm();
-                    Event.current.Use();
-                    return;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    TradeConfirmationState.Cancel();
-                    Event.current.Use();
-                    return;
-                }
-            }
-
             // ===== PRIORITY 2.5: Handle area painting mode if active =====
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (AreaPaintingState.IsActive && !WindowlessDialogState.IsActive)
@@ -379,26 +611,79 @@ namespace RimWorldAccess
                 Log.Message($"RimWorld Access: Area painting active, handling key {key}");
                 bool handled = false;
 
-                if (key == KeyCode.Space)
+                // Tab key - toggle between box selection and single tile selection modes
+                if (key == KeyCode.Tab)
+                {
+                    // Cancel any active rectangle selection when switching modes
+                    if (AreaPaintingState.HasRectangleStart)
+                    {
+                        AreaPaintingState.CancelRectangle();
+                    }
+
+                    AreaPaintingState.ToggleSelectionMode();
+                    handled = true;
+                }
+                else if (key == KeyCode.Space)
                 {
                     Log.Message("RimWorld Access: Space pressed in area painting mode");
-                    AreaPaintingState.ToggleStageCell();
+                    IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
+
+                    if (AreaPaintingState.SelectionMode == AreaSelectionMode.SingleTile)
+                    {
+                        // Single tile mode - toggle the current cell
+                        AreaPaintingState.ToggleStageCell();
+                    }
+                    else
+                    {
+                        // Box selection mode - set corners and confirm rectangles
+                        if (!AreaPaintingState.HasRectangleStart)
+                        {
+                            // No start corner yet - set it
+                            AreaPaintingState.SetRectangleStart(currentPosition);
+                        }
+                        else if (AreaPaintingState.IsInPreviewMode)
+                        {
+                            // We have a preview - confirm this rectangle
+                            AreaPaintingState.ConfirmRectangle();
+                        }
+                        else
+                        {
+                            // Start is set but no end yet - update to create preview at current position
+                            AreaPaintingState.UpdatePreview(currentPosition);
+                            // Then confirm it
+                            AreaPaintingState.ConfirmRectangle();
+                        }
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
                     Log.Message("RimWorld Access: Enter pressed in area painting mode");
+                    // If in preview mode, confirm the rectangle first
+                    if (AreaPaintingState.IsInPreviewMode)
+                    {
+                        AreaPaintingState.ConfirmRectangle();
+                    }
+                    // Then confirm the area painting
                     AreaPaintingState.Confirm();
                     handled = true;
                 }
                 else if (key == KeyCode.Escape)
                 {
                     Log.Message("RimWorld Access: Escape pressed in area painting mode");
-                    AreaPaintingState.Cancel();
+                    if (AreaPaintingState.HasRectangleStart)
+                    {
+                        // Cancel current rectangle selection
+                        AreaPaintingState.CancelRectangle();
+                    }
+                    else
+                    {
+                        // No rectangle in progress - cancel entire area painting
+                        AreaPaintingState.Cancel();
+                    }
                     handled = true;
                 }
                 // Note: Arrow keys are NOT handled here - they pass through to MapNavigationPatch
-                // The ZoneCreationAnnouncementPatch postfix will add "Selected" prefix if needed
 
                 if (handled)
                 {
@@ -408,9 +693,8 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 2.6: Handle trade menu if active =====
-            // (but not if confirmation dialog is showing - that's handled at Priority 2.3)
-            // BUT: Skip if windowless dialog is active - dialogs take absolute priority
-            if (TradeNavigationState.IsActive && !TradeConfirmationState.IsActive && !WindowlessDialogState.IsActive)
+            // Skip if overlay states are active - they handle their own input
+            if (TradeNavigationState.IsActive && !WindowlessDialogState.IsActive && !WindowlessInspectionState.IsActive && !StatBreakdownState.IsActive)
             {
                 bool handled = false;
 
@@ -419,20 +703,8 @@ namespace RimWorldAccess
                 bool ctrl = Event.current.control;
                 bool alt = Event.current.alt;
 
-                // Handle Home - jump to first
-                if (key == KeyCode.Home)
-                {
-                    TradeNavigationState.JumpToFirst();
-                    handled = true;
-                }
-                // Handle End - jump to last
-                else if (key == KeyCode.End)
-                {
-                    TradeNavigationState.JumpToLast();
-                    handled = true;
-                }
                 // Handle Escape - clear search FIRST, then exit quantity mode, then close
-                else if (key == KeyCode.Escape)
+                if (key == KeyCode.Escape)
                 {
                     if (TradeNavigationState.HasActiveSearch)
                     {
@@ -446,14 +718,14 @@ namespace RimWorldAccess
                         // If we didn't exit quantity mode (were already in list view), close the trade
                         if (!exitedQuantityMode)
                         {
-                            TradeNavigationState.Close();
+                            TradeNavigationState.CloseAndAnnounceCancel();
                             TradeSession.Close();
                         }
                         handled = true;
                     }
                 }
-                // Handle Backspace for search
-                else if (key == KeyCode.Backspace && TradeNavigationState.HasActiveSearch)
+                // Handle Backspace for search (but not in quantity mode - numeric backspace takes priority)
+                else if (key == KeyCode.Backspace && TradeNavigationState.HasActiveSearch && !TradeNavigationState.IsInQuantityMode)
                 {
                     TradeNavigationState.ProcessBackspace();
                     handled = true;
@@ -476,8 +748,6 @@ namespace RimWorldAccess
                         TradeNavigationState.AdjustQuantityLarge(1);
                     else if (ctrl)
                         TradeNavigationState.AdjustQuantityVeryLarge(1);
-                    else if (alt)
-                        TradeNavigationState.SetToMaximumSell();
                     else if (TradeNavigationState.HasActiveSearch && !TradeNavigationState.HasNoMatches)
                         TradeNavigationState.SelectPreviousMatch();
                     else
@@ -492,6 +762,40 @@ namespace RimWorldAccess
                 else if (key == KeyCode.RightArrow)
                 {
                     TradeNavigationState.NextCategory();
+                    handled = true;
+                }
+                else if (key == KeyCode.Home)
+                {
+                    if (TradeNavigationState.IsInQuantityMode || shift)
+                    {
+                        // Home or Shift+Home: max action (context-aware)
+                        TradeNavigationState.SetToMaximumAction();
+                    }
+                    else
+                    {
+                        // Home: jump to first item
+                        TradeNavigationState.JumpToFirst();
+                    }
+                    handled = true;
+                }
+                else if (key == KeyCode.End)
+                {
+                    if (TradeNavigationState.IsInQuantityMode || shift)
+                    {
+                        // End or Shift+End: opposite or reset (context-aware)
+                        TradeNavigationState.SetToOppositeOrReset();
+                    }
+                    else
+                    {
+                        // End: jump to last item
+                        TradeNavigationState.JumpToLast();
+                    }
+                    handled = true;
+                }
+                else if (key == KeyCode.Delete)
+                {
+                    // Delete: reset current item to zero
+                    TradeNavigationState.ResetCurrentItem();
                     handled = true;
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
@@ -531,14 +835,42 @@ namespace RimWorldAccess
                     TradeNavigationState.AnnounceTradeBalance();
                     handled = true;
                 }
+                else if (alt && key == KeyCode.I)
+                {
+                    // Alt+I: Inspect current item
+                    TradeNavigationState.InspectCurrentItem();
+                    handled = true;
+                }
+                else if (key == KeyCode.Tab && !shift && !ctrl && !alt)
+                {
+                    // Tab: Show price breakdown (same as Alt+P)
+                    TradeNavigationState.ShowPriceBreakdown();
+                    handled = true;
+                }
                 else if (key == KeyCode.Minus || key == KeyCode.KeypadMinus)
                 {
-                    TradeNavigationState.AdjustQuantity(-1);
+                    // In quantity mode, minus starts selling input; otherwise adjust by -1
+                    if (TradeNavigationState.IsInQuantityMode && !shift && !ctrl && !alt)
+                    {
+                        TradeNavigationState.HandleNumericInput('-');
+                    }
+                    else
+                    {
+                        // Use AdjustQuantitySingle to respect selling/buying context
+                        TradeNavigationState.AdjustQuantitySingle(-1);
+                    }
                     handled = true;
                 }
                 else if (key == KeyCode.Plus || key == KeyCode.KeypadPlus || key == KeyCode.Equals)
                 {
-                    TradeNavigationState.AdjustQuantity(1);
+                    // Use AdjustQuantitySingle to respect selling/buying context
+                    TradeNavigationState.AdjustQuantitySingle(1);
+                    handled = true;
+                }
+                else if (key == KeyCode.Backspace && TradeNavigationState.IsInQuantityMode && TradeNavigationState.HasActiveNumericInput)
+                {
+                    // Backspace in quantity mode with active input: delete last digit
+                    TradeNavigationState.HandleNumericBackspace();
                     handled = true;
                 }
                 // Handle typeahead characters (letters and numbers - commands now use Alt+ so no exclusions needed)
@@ -546,11 +878,111 @@ namespace RimWorldAccess
                 {
                     bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
                     bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+                    bool isKeypadNumber = key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9;
 
-                    if ((isLetter || isNumber) && !shift && !ctrl && !alt)
+                    if ((isLetter || isNumber || isKeypadNumber) && !shift && !ctrl && !alt)
+                    {
+                        char c;
+                        if (isLetter)
+                            c = (char)('a' + (key - KeyCode.A));
+                        else if (isNumber)
+                            c = (char)('0' + (key - KeyCode.Alpha0));
+                        else
+                            c = (char)('0' + (key - KeyCode.Keypad0));
+
+                        // In quantity mode, numbers go to numeric input; in list mode, go to typeahead
+                        if (TradeNavigationState.IsInQuantityMode && (isNumber || isKeypadNumber))
+                        {
+                            TradeNavigationState.HandleNumericInput(c);
+                        }
+                        else
+                        {
+                            TradeNavigationState.ProcessTypeaheadCharacter(c);
+                        }
+                        handled = true;
+                    }
+                }
+
+                if (handled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 2.7: Handle sellable items dialog if active =====
+            if (SellableItemsState.IsActive)
+            {
+                bool handled = false;
+
+                // Handle Escape - clear search first, then close
+                if (key == KeyCode.Escape)
+                {
+                    if (SellableItemsState.HasActiveSearch)
+                    {
+                        SellableItemsState.ClearTypeaheadSearch();
+                    }
+                    else
+                    {
+                        SellableItemsState.Close();
+                    }
+                    handled = true;
+                }
+                // Handle Backspace for search
+                else if (key == KeyCode.Backspace && SellableItemsState.HasActiveSearch)
+                {
+                    SellableItemsState.ProcessBackspace();
+                    handled = true;
+                }
+                // Tab navigation
+                else if (key == KeyCode.RightArrow)
+                {
+                    SellableItemsState.NextTab();
+                    handled = true;
+                }
+                else if (key == KeyCode.LeftArrow)
+                {
+                    SellableItemsState.PreviousTab();
+                    handled = true;
+                }
+                // Item navigation
+                else if (key == KeyCode.DownArrow)
+                {
+                    if (SellableItemsState.HasActiveSearch && !SellableItemsState.HasNoMatches)
+                        SellableItemsState.SelectNextMatch();
+                    else
+                        SellableItemsState.SelectNext();
+                    handled = true;
+                }
+                else if (key == KeyCode.UpArrow)
+                {
+                    if (SellableItemsState.HasActiveSearch && !SellableItemsState.HasNoMatches)
+                        SellableItemsState.SelectPreviousMatch();
+                    else
+                        SellableItemsState.SelectPrevious();
+                    handled = true;
+                }
+                // Jump navigation
+                else if (key == KeyCode.Home)
+                {
+                    SellableItemsState.JumpToFirst();
+                    handled = true;
+                }
+                else if (key == KeyCode.End)
+                {
+                    SellableItemsState.JumpToLast();
+                    handled = true;
+                }
+                // Typeahead characters
+                else
+                {
+                    bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                    bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                    if ((isLetter || isNumber) && !Event.current.shift && !Event.current.control && !Event.current.alt)
                     {
                         char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                        TradeNavigationState.ProcessTypeaheadCharacter(c);
+                        SellableItemsState.ProcessTypeaheadCharacter(c);
                         handled = true;
                     }
                 }
@@ -882,6 +1314,16 @@ namespace RimWorldAccess
                 else if (ctrl && key == KeyCode.V)
                 {
                     WindowlessScheduleState.PasteSchedule();
+                    handled = true;
+                }
+                else if (key == KeyCode.Home)
+                {
+                    WindowlessScheduleState.JumpToFirstHour();
+                    handled = true;
+                }
+                else if (key == KeyCode.End)
+                {
+                    WindowlessScheduleState.JumpToLastHour();
                     handled = true;
                 }
 
@@ -1562,6 +2004,15 @@ namespace RimWorldAccess
                     AnimalsMenuState.ToggleSortByCurrentColumn();
                     handled = true;
                 }
+                // Handle Tab - open auto-slaughter settings
+                else if (key == KeyCode.Tab)
+                {
+                    if (Find.CurrentMap != null)
+                    {
+                        Find.WindowStack.Add(new RimWorld.Dialog_AutoSlaughter(Find.CurrentMap));
+                    }
+                    handled = true;
+                }
 
                 if (handled)
                 {
@@ -1682,19 +2133,19 @@ namespace RimWorldAccess
                 bool handled = false;
                 var typeahead = NotificationMenuState.Typeahead;
 
-                // Handle Home - jump to first (only in list view, not detail view)
-                if (key == KeyCode.Home && !NotificationMenuState.IsInDetailView)
+                // Handle Home - jump to first
+                if (key == KeyCode.Home)
                 {
                     NotificationMenuState.JumpToFirst();
                     handled = true;
                 }
-                // Handle End - jump to last (only in list view, not detail view)
-                else if (key == KeyCode.End && !NotificationMenuState.IsInDetailView)
+                // Handle End - jump to last
+                else if (key == KeyCode.End)
                 {
                     NotificationMenuState.JumpToLast();
                     handled = true;
                 }
-                // Handle Escape - clear search FIRST, then go back
+                // Handle Escape - clear search FIRST, then go back (detail->list) or close menu
                 else if (key == KeyCode.Escape)
                 {
                     if (typeahead.HasActiveSearch)
@@ -1705,7 +2156,8 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        NotificationMenuState.GoBack();
+                        // HandleEscape goes back from detail view, or closes menu from list view
+                        NotificationMenuState.HandleEscape();
                         handled = true;
                     }
                 }
@@ -1715,10 +2167,11 @@ namespace RimWorldAccess
                     NotificationMenuState.HandleBackspace();
                     handled = true;
                 }
-                // Handle Down arrow (use typeahead if active with matches, in list view)
+                // Handle Down arrow - navigate notification list or detail view
                 else if (key == KeyCode.DownArrow)
                 {
-                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    // Typeahead search only works in list view
+                    if (!NotificationMenuState.IsInDetailView && typeahead.HasActiveSearch && !typeahead.HasNoMatches)
                     {
                         // Navigate through matches only when there ARE matches
                         int newIndex = typeahead.GetNextMatch(NotificationMenuState.CurrentIndex);
@@ -1730,15 +2183,16 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        // Navigate normally (either no search active, OR search with no matches)
+                        // Navigate normally (list view without search, or detail view)
                         NotificationMenuState.SelectNext();
                     }
                     handled = true;
                 }
-                // Handle Up arrow (use typeahead if active with matches, in list view)
+                // Handle Up arrow - navigate notification list or detail view
                 else if (key == KeyCode.UpArrow)
                 {
-                    if (typeahead.HasActiveSearch && !typeahead.HasNoMatches && !NotificationMenuState.IsInDetailView)
+                    // Typeahead search only works in list view
+                    if (!NotificationMenuState.IsInDetailView && typeahead.HasActiveSearch && !typeahead.HasNoMatches)
                     {
                         // Navigate through matches only when there ARE matches
                         int newIndex = typeahead.GetPreviousMatch(NotificationMenuState.CurrentIndex);
@@ -1750,17 +2204,41 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        // Navigate normally (either no search active, OR search with no matches)
+                        // Navigate normally (list view without search, or detail view)
                         NotificationMenuState.SelectPrevious();
                     }
                     handled = true;
                 }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                // Handle Left arrow - navigate to previous button
+                else if (key == KeyCode.LeftArrow)
                 {
-                    NotificationMenuState.OpenDetailOrJump();
+                    NotificationMenuState.SelectPreviousButton();
                     handled = true;
                 }
-                else if (key == KeyCode.Delete)
+                // Handle Right arrow - navigate to next button
+                else if (key == KeyCode.RightArrow)
+                {
+                    NotificationMenuState.SelectNextButton();
+                    handled = true;
+                }
+                // Handle Enter - open detail view or activate button
+                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    if (!NotificationMenuState.IsInDetailView)
+                    {
+                        // In list view, Enter opens detail view
+                        NotificationMenuState.EnterDetailView();
+                    }
+                    else if (NotificationMenuState.IsInButtonsSection)
+                    {
+                        // In detail view and on a button, Enter activates it
+                        NotificationMenuState.ActivateCurrentButton();
+                    }
+                    // In detail view but not on a button, do nothing (continue navigating with arrows)
+                    handled = true;
+                }
+                // Handle ] (right bracket) - delete letter (acts as right-click per mod convention)
+                else if (key == KeyCode.RightBracket)
                 {
                     NotificationMenuState.DeleteSelected();
                     handled = true;
@@ -1772,20 +2250,18 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // Handle typeahead only in list view, not detail view
+                // Handle typeahead characters
+                // Handle * key - consume to prevent passthrough
+                bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
+                if (isStarKey)
+                {
+                    Event.current.Use();
+                    return;
+                }
+
+                // Handle typeahead characters for search (only in list view)
                 if (!NotificationMenuState.IsInDetailView)
                 {
-                    // Handle * key - consume to prevent passthrough
-                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
-                    bool isStarKey = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
-                    if (isStarKey)
-                    {
-                        Event.current.Use();
-                        return;
-                    }
-
-                    // Handle typeahead characters
-                    // Use KeyCode instead of Event.current.character (which is empty in Unity IMGUI)
                     bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
                     bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
 
@@ -1839,28 +2315,6 @@ namespace RimWorldAccess
                 if (key == KeyCode.Backspace)
                 {
                     StorageSettingsMenuState.ProcessBackspace();
-                    Event.current.Use();
-                    return;
-                }
-            }
-
-            // ===== PRIORITY 4.7792: Handle zone settings menu typeahead if active =====
-            if (ZoneSettingsMenuState.IsActive)
-            {
-                bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-                bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-                if (isLetter || isNumber)
-                {
-                    char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
-                    ZoneSettingsMenuState.ProcessTypeaheadCharacter(c);
-                    Event.current.Use();
-                    return;
-                }
-
-                if (key == KeyCode.Backspace)
-                {
-                    ZoneSettingsMenuState.ProcessBackspace();
                     Event.current.Use();
                     return;
                 }
@@ -2086,6 +2540,26 @@ namespace RimWorldAccess
                     WindowlessFloatMenuState.HandleTypeahead(c);
                     Event.current.Use();
                     return;  // CRITICAL: Don't fall through to T=time, R=draft, etc.
+                }
+            }
+
+            // ===== PRIORITY 5.45: Handle world map tile info keys 1-5 =====
+            if (WorldNavigationState.IsActive &&
+                Current.ProgramState == ProgramState.Playing &&
+                !Event.current.shift && !Event.current.control && !Event.current.alt)
+            {
+                int category = 0;
+                if (key == KeyCode.Alpha1 || key == KeyCode.Keypad1) category = 1;
+                else if (key == KeyCode.Alpha2 || key == KeyCode.Keypad2) category = 2;
+                else if (key == KeyCode.Alpha3 || key == KeyCode.Keypad3) category = 3;
+                else if (key == KeyCode.Alpha4 || key == KeyCode.Keypad4) category = 4;
+                else if (key == KeyCode.Alpha5 || key == KeyCode.Keypad5) category = 5;
+
+                if (category > 0)
+                {
+                    WorldNavigationState.AnnounceTileInfoCategory(category);
+                    Event.current.Use();
+                    return;
                 }
             }
 
@@ -2323,8 +2797,10 @@ namespace RimWorldAccess
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
                 // 4. On a map (not in world view)
+                // Note: Must check !WorldNavigationState.IsActive because Find.CurrentMap returns last map even in world view
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
+                    !WorldNavigationState.IsActive &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
                     !ZoneCreationState.IsInCreationMode)
                 {
@@ -2335,6 +2811,13 @@ namespace RimWorldAccess
                     Event.current.Use();
                     return;
                 }
+                // Give feedback if on world map
+                else if (Current.ProgramState == ProgramState.Playing && WorldNavigationState.IsActive)
+                {
+                    TolkHelper.Speak("Reform caravan only works on temporary maps, not the world map. Use C to form a new caravan from a settlement.");
+                    Event.current.Use();
+                    return;
+                }
             }
 
             // ===== PRIORITY 6.55: Announce time, date, and season with T key =====
@@ -2342,10 +2825,11 @@ namespace RimWorldAccess
             {
                 // Only announce time if:
                 // 1. We're in gameplay (not at main menu)
-                // 2. No windows are preventing camera motion (means a dialog is open)
-                // 3. Not in zone creation mode
+                // 2. On a map or world view
+                // 3. No windows are preventing camera motion (means a dialog is open)
+                // 4. Not in zone creation mode
                 if (Current.ProgramState == ProgramState.Playing &&
-                    Find.CurrentMap != null &&
+                    (Find.CurrentMap != null || WorldNavigationState.IsActive) &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
                     !ZoneCreationState.IsInCreationMode)
                 {
@@ -2358,6 +2842,59 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.55: Open work menu with F1 key =====
+            if (key == KeyCode.F1)
+            {
+                // Only open work menu if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                // 4. Work menu is not already active
+                // 5. No accessibility menu is active (they handle their own input)
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !WorkMenuState.IsActive &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive())
+                {
+                    // Prevent the default F1 key behavior
+                    Event.current.Use();
+
+                    // If on the world map, switch to colony map first and restore cursor
+                    if (WorldNavigationState.IsActive)
+                    {
+                        CameraJumper.TryHideWorld();
+                        MapNavigationState.RestoreCursorForCurrentMap();
+                    }
+
+                    // Get the selected pawn, or use first colonist if none selected
+                    Pawn targetPawn = null;
+                    if (Find.Selector != null && Find.Selector.NumSelected > 0)
+                    {
+                        targetPawn = Find.Selector.FirstSelectedObject as Pawn;
+                    }
+
+                    // If no pawn selected, use first colonist
+                    if (targetPawn == null && Find.CurrentMap.mapPawns.FreeColonists.Any())
+                    {
+                        targetPawn = Find.CurrentMap.mapPawns.FreeColonists.First();
+                    }
+
+                    if (targetPawn != null)
+                    {
+                        // Open the work menu
+                        WorkMenuState.Open(targetPawn);
+                    }
+                    else
+                    {
+                        TolkHelper.Speak("No colonists available");
+                    }
+
+                    return;
+                }
+            }
+
             // ===== PRIORITY 6.6: Open windowless schedule menu with F2 key =====
             if (key == KeyCode.F2)
             {
@@ -2366,14 +2903,23 @@ namespace RimWorldAccess
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
                 // 4. Schedule menu is not already active
+                // 5. No accessibility menu is active (they handle their own input)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
                     !ZoneCreationState.IsInCreationMode &&
-                    !WindowlessScheduleState.IsActive)
+                    !WindowlessScheduleState.IsActive &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive())
                 {
-                    // Prevent the default S key behavior
+                    // Prevent the default F2 key behavior
                     Event.current.Use();
+
+                    // If on the world map, switch to colony map first and restore cursor
+                    if (WorldNavigationState.IsActive)
+                    {
+                        CameraJumper.TryHideWorld();
+                        MapNavigationState.RestoreCursorForCurrentMap();
+                    }
 
                     // Open the windowless schedule menu
                     WindowlessScheduleState.Open();
@@ -2389,13 +2935,22 @@ namespace RimWorldAccess
                 // 1. We're in gameplay (not at main menu)
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
+                // 4. No accessibility menu is active (they handle their own input)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                    !ZoneCreationState.IsInCreationMode)
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive())
                 {
                     // Prevent the default F3 key behavior
                     Event.current.Use();
+
+                    // If on the world map, switch to colony map first and restore cursor
+                    if (WorldNavigationState.IsActive)
+                    {
+                        CameraJumper.TryHideWorld();
+                        MapNavigationState.RestoreCursorForCurrentMap();
+                    }
 
                     // Get the selected pawn, or use first colonist if none selected
                     Pawn targetPawn = null;
@@ -2429,35 +2984,42 @@ namespace RimWorldAccess
             // ===== PRIORITY 7.05: Open gizmo navigation with G key (if pawn or building is selected) =====
             if (key == KeyCode.G)
             {
-                // Only open gizmo navigation if:
-                // 1. We're in gameplay (not at main menu)
-                // 2. No windows are preventing camera motion (means a dialog is open)
-                // 3. Not in zone creation mode
-                // 4. Map navigation is initialized (cursor position is valid)
+                // Only open gizmo navigation if we're in gameplay and no dialogs are open
                 if (Current.ProgramState == ProgramState.Playing &&
-                    Find.CurrentMap != null &&
-                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                    !ZoneCreationState.IsInCreationMode &&
-                    MapNavigationState.IsInitialized)
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
                 {
-                    // Prevent the default G key behavior
-                    Event.current.Use();
+                    // Check if we're on the world map
+                    if (WorldRendererUtility.WorldSelected)
+                    {
+                        // World map: open gizmos for selected world objects (caravans, settlements, etc.)
+                        Event.current.Use();
+                        GizmoNavigationState.OpenFromWorldObjects();
+                        return;
+                    }
+                    // Colony map: requires map to be loaded and cursor initialized
+                    else if (Find.CurrentMap != null &&
+                             !ZoneCreationState.IsInCreationMode &&
+                             MapNavigationState.IsInitialized)
+                    {
+                        // Prevent the default G key behavior
+                        Event.current.Use();
 
-                    // Decide whether to open gizmos for selected objects or for objects at cursor
-                    // Use selected pawn gizmos ONLY if a pawn was just selected with , or .
-                    // Otherwise, use objects at the cursor position
-                    if (GizmoNavigationState.PawnJustSelected && Find.Selector != null && Find.Selector.NumSelected > 0)
-                    {
-                        // Open gizmos for the pawn that was just selected with , or .
-                        GizmoNavigationState.Open();
+                        // Decide whether to open gizmos for selected objects or for objects at cursor
+                        // Use selected pawn gizmos ONLY if a pawn was just selected with , or .
+                        // Otherwise, use objects at the cursor position
+                        if (GizmoNavigationState.PawnJustSelected && Find.Selector != null && Find.Selector.NumSelected > 0)
+                        {
+                            // Open gizmos for the pawn that was just selected with , or .
+                            GizmoNavigationState.Open();
+                        }
+                        else
+                        {
+                            // Open gizmos for objects at the cursor position
+                            IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
+                            GizmoNavigationState.OpenAtCursor(cursorPosition, Find.CurrentMap);
+                        }
+                        return;
                     }
-                    else
-                    {
-                        // Open gizmos for objects at the cursor position
-                        IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
-                        GizmoNavigationState.OpenAtCursor(cursorPosition, Find.CurrentMap);
-                    }
-                    return;
                 }
             }
 
@@ -2489,13 +3051,22 @@ namespace RimWorldAccess
                 // 1. We're in gameplay (not at main menu)
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
+                // 4. No accessibility menu is active (they handle their own input)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                    !ZoneCreationState.IsInCreationMode)
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive())
                 {
                     // Prevent the default F7 key behavior
                     Event.current.Use();
+
+                    // If on the world map, switch to colony map first and restore cursor
+                    if (WorldNavigationState.IsActive)
+                    {
+                        CameraJumper.TryHideWorld();
+                        MapNavigationState.RestoreCursorForCurrentMap();
+                    }
 
                     // Open the quest menu
                     QuestMenuState.Open();
@@ -2510,13 +3081,22 @@ namespace RimWorldAccess
                 // 1. We're in gameplay (not at main menu)
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
+                // 4. No accessibility menu is active (they handle their own input)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
-                    !ZoneCreationState.IsInCreationMode)
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive())
                 {
                     // Prevent the default F6 key behavior
                     Event.current.Use();
+
+                    // If on the world map, switch to colony map first and restore cursor
+                    if (WorldNavigationState.IsActive)
+                    {
+                        CameraJumper.TryHideWorld();
+                        MapNavigationState.RestoreCursorForCurrentMap();
+                    }
 
                     // Open the research menu
                     WindowlessResearchMenuState.Open();
@@ -2607,6 +3187,7 @@ namespace RimWorldAccess
                 // 2. No windows are preventing camera motion (means a dialog is open)
                 // 3. Not in zone creation mode
                 // 4. No accessibility menus are active (they handle their own Escape)
+                // 5. Not in targeting mode (let RimWorld handle Escape to cancel targeting)
                 if (Current.ProgramState == ProgramState.Playing &&
                     Find.CurrentMap != null &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
@@ -2614,7 +3195,8 @@ namespace RimWorldAccess
                     !KeyboardHelper.IsAnyAccessibilityMenuActive() &&
                     !QuestLocationsBrowserState.IsActive &&
                     !SettlementBrowserState.IsActive &&
-                    !CaravanStatsState.IsActive)
+                    !CaravanInspectState.IsActive &&
+                    (Find.Targeter == null || !Find.Targeter.IsTargeting))
                 {
                     // Prevent the default escape behavior (opening game's pause menu)
                     Event.current.Use();

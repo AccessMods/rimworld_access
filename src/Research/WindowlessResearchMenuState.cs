@@ -56,6 +56,72 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Opens the research menu and navigates to a specific project.
+        /// Called when activating a research hyperlink from a letter.
+        /// </summary>
+        public static void OpenAndSelectProject(ResearchProjectDef project)
+        {
+            if (project == null)
+            {
+                TolkHelper.Speak("Research project not available");
+                return;
+            }
+
+            // Open the menu normally first
+            isActive = true;
+            expandedNodes.Clear();
+            lastChildIdPerParent.Clear();
+            MenuHelper.ResetLevel("ResearchMenu");
+            typeahead.ClearSearch();
+            rootNodes = BuildCategoryTree();
+
+            // Expand all categories to find the project
+            ExpandAllCategoriesRecursive(rootNodes);
+            flatNavigationList = BuildFlatNavigationList();
+
+            // Find the project in the flat navigation list
+            int foundIndex = -1;
+            for (int i = 0; i < flatNavigationList.Count; i++)
+            {
+                if (flatNavigationList[i].Project == project)
+                {
+                    foundIndex = i;
+                    break;
+                }
+            }
+
+            if (foundIndex >= 0)
+            {
+                currentIndex = foundIndex;
+                TolkHelper.Speak("Research menu");
+                AnnounceCurrentSelection();
+            }
+            else
+            {
+                // Project not found
+                currentIndex = 0;
+                TolkHelper.Speak($"Research project {project.LabelCap} not found in menu");
+            }
+        }
+
+        /// <summary>
+        /// Recursively expands all category nodes.
+        /// </summary>
+        private static void ExpandAllCategoriesRecursive(List<ResearchMenuNode> nodes)
+        {
+            foreach (var node in nodes.Where(n => n.Type == ResearchMenuNodeType.Category))
+            {
+                node.IsExpanded = true;
+                expandedNodes.Add(node.Id);
+
+                if (node.Children != null && node.Children.Count > 0)
+                {
+                    ExpandAllCategoriesRecursive(node.Children);
+                }
+            }
+        }
+
+        /// <summary>
         /// Navigates to the next item in the flat navigation list.
         /// </summary>
         public static void SelectNext()
@@ -691,11 +757,8 @@ namespace RimWorldAccess
 
             var current = flatNavigationList[currentIndex];
 
-            // Get level prefix (only announced when level changes)
-            string levelPrefix = MenuHelper.GetLevelPrefix("ResearchMenu", current.Level);
-
-            // Build announcement: "level N. {name} {state}. {X of Y}."
-            string announcement = levelPrefix + current.Label;
+            // Build announcement: "{name} {state}. {X of Y}. level N"
+            string announcement = current.Label;
 
             // Add state for expandable nodes (categories)
             if (current.Type == ResearchMenuNodeType.Category)
@@ -716,7 +779,14 @@ namespace RimWorldAccess
                 siblings = current.Parent.Children;
             }
             int siblingPosition = siblings.IndexOf(current) + 1;
-            announcement += $". {MenuHelper.FormatPosition(siblingPosition - 1, siblings.Count)}.";
+            string positionPart = MenuHelper.FormatPosition(siblingPosition - 1, siblings.Count);
+            announcement += string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
+
+            // Add level suffix at the end (only announced when level changes)
+            announcement += MenuHelper.GetLevelSuffix("ResearchMenu", current.Level);
+
+            // Add level suffix at the end (only announced when level changes)
+            announcement += MenuHelper.GetLevelSuffix("ResearchMenu", current.Level);
 
             TolkHelper.Speak(announcement);
         }

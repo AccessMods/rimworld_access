@@ -39,15 +39,7 @@ namespace RimWorldAccess
             savedSelection = Find.Selector?.SelectedObjects?.ToList();
 
             // Announce the first option
-            if (selectedIndex >= 0 && selectedIndex < options.Count)
-            {
-                string optionText = options[selectedIndex].Label;
-                if (options[selectedIndex].Disabled)
-                {
-                    optionText += " (unavailable)";
-                }
-                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, options.Count)}");
-            }
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -70,17 +62,7 @@ namespace RimWorldAccess
                 return;
 
             selectedIndex = MenuHelper.SelectNext(selectedIndex, currentOptions.Count);
-
-            // Announce the new selection
-            if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
-            {
-                string optionText = currentOptions[selectedIndex].Label;
-                if (currentOptions[selectedIndex].Disabled)
-                {
-                    optionText += " (unavailable)";
-                }
-                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
-            }
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -92,17 +74,7 @@ namespace RimWorldAccess
                 return;
 
             selectedIndex = MenuHelper.SelectPrevious(selectedIndex, currentOptions.Count);
-
-            // Announce the new selection
-            if (selectedIndex >= 0 && selectedIndex < currentOptions.Count)
-            {
-                string optionText = currentOptions[selectedIndex].Label;
-                if (currentOptions[selectedIndex].Disabled)
-                {
-                    optionText += " (unavailable)";
-                }
-                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
-            }
+            AnnounceCurrentSelection();
         }
 
         /// <summary>
@@ -144,8 +116,12 @@ namespace RimWorldAccess
             // Call the Chosen method to execute the option's action
             selectedOption.Chosen(givesColonistOrders, null);
 
-            // Announce selection
-            TolkHelper.Speak($"{selectedOption.Label} selected");
+            // Announce selection - but skip if the action entered placement mode
+            // (placement mode already announces its own message, e.g., "bed selected. Size: 1 by 2...")
+            if (!ArchitectState.IsInPlacementMode)
+            {
+                TolkHelper.Speak($"{selectedOption.Label} selected");
+            }
         }
 
         /// <summary>
@@ -410,6 +386,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Announces the current selection without search context.
+        /// Includes tooltip text if available.
         /// </summary>
         private static void AnnounceCurrentSelection()
         {
@@ -419,16 +396,62 @@ namespace RimWorldAccess
             if (selectedIndex < 0 || selectedIndex >= currentOptions.Count)
                 return;
 
-            string optionText = currentOptions[selectedIndex].Label;
-            if (currentOptions[selectedIndex].Disabled)
+            var option = currentOptions[selectedIndex];
+            string optionText = option.Label;
+            if (option.Disabled)
             {
                 optionText += " (unavailable)";
             }
-            TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+
+            // Get tooltip text if available
+            string tooltipText = GetTooltipText(option);
+
+            // Build announcement - don't add period before tooltip since tooltips usually have their own
+            if (!string.IsNullOrEmpty(tooltipText))
+            {
+                TolkHelper.Speak($"{optionText}. {tooltipText} {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+            }
+            else
+            {
+                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+            }
+        }
+
+        /// <summary>
+        /// Gets the tooltip text for a FloatMenuOption, if available.
+        /// </summary>
+        private static string GetTooltipText(FloatMenuOption option)
+        {
+            if (option.tooltip == null || !option.tooltip.HasValue)
+                return null;
+
+            var tip = option.tooltip.Value;
+
+            // Try textGetter first (dynamic tooltip), then static text
+            string text = null;
+            if (tip.textGetter != null)
+            {
+                try
+                {
+                    text = tip.textGetter();
+                }
+                catch
+                {
+                    // Ignore errors from dynamic tooltip getters
+                }
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                text = tip.text;
+            }
+
+            return string.IsNullOrEmpty(text) ? null : text.Trim();
         }
 
         /// <summary>
         /// Announces the current selection with search context if applicable.
+        /// Includes tooltip text if available.
         /// </summary>
         private static void AnnounceWithSearch()
         {
@@ -438,19 +461,37 @@ namespace RimWorldAccess
             if (selectedIndex < 0 || selectedIndex >= currentOptions.Count)
                 return;
 
-            string optionText = currentOptions[selectedIndex].Label;
-            if (currentOptions[selectedIndex].Disabled)
+            var option = currentOptions[selectedIndex];
+            string optionText = option.Label;
+            if (option.Disabled)
             {
                 optionText += " (unavailable)";
             }
 
+            // Get tooltip text if available
+            string tooltipText = GetTooltipText(option);
+
             if (typeahead.HasActiveSearch)
             {
-                TolkHelper.Speak($"{optionText}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                if (!string.IsNullOrEmpty(tooltipText))
+                {
+                    TolkHelper.Speak($"{optionText}. {tooltipText} {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                }
+                else
+                {
+                    TolkHelper.Speak($"{optionText}, {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                }
             }
             else
             {
-                TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+                if (!string.IsNullOrEmpty(tooltipText))
+                {
+                    TolkHelper.Speak($"{optionText}. {tooltipText} {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+                }
+                else
+                {
+                    TolkHelper.Speak($"{optionText}. {MenuHelper.FormatPosition(selectedIndex, currentOptions.Count)}");
+                }
             }
         }
     }

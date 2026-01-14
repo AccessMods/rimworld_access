@@ -307,7 +307,12 @@ namespace RimWorldAccess
         public static void GoBack()
         {
             Close();
-            WindowlessPauseMenuState.Open();
+
+            // Only return to pause menu if in-game
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                WindowlessPauseMenuState.Open();
+            }
         }
 
         /// <summary>

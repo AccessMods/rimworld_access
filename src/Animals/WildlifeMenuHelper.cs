@@ -30,7 +30,7 @@ namespace RimWorldAccess
             return totalColumns;
         }
 
-        // Get column name by index
+        // Get column name by index (using RimWorld's localized strings)
         public static string GetColumnName(int columnIndex)
         {
             if (columnIndex < 0 || columnIndex >= totalColumns)
@@ -40,14 +40,14 @@ namespace RimWorldAccess
             switch (type)
             {
                 case ColumnType.Name: return "Name";
-                case ColumnType.Gender: return "Gender";
-                case ColumnType.LifeStage: return "Life Stage";
+                case ColumnType.Gender: return "Sex".Translate().Resolve();
+                case ColumnType.LifeStage: return "LifeStage".Translate().Resolve();
                 case ColumnType.Age: return "Age";
-                case ColumnType.BodySize: return "Body Size";
-                case ColumnType.Health: return "Health";
-                case ColumnType.Pregnant: return "Pregnant";
-                case ColumnType.Hunt: return "Hunt";
-                case ColumnType.Tame: return "Tame";
+                case ColumnType.BodySize: return "BodySize".Translate().Resolve();
+                case ColumnType.Health: return "TabHealth".Translate().Resolve();
+                case ColumnType.Pregnant: return HediffDefOf.Pregnant.LabelCap.Resolve();
+                case ColumnType.Hunt: return "DesignatorHunt".Translate().Resolve();
+                case ColumnType.Tame: return "DesignatorTame".Translate().Resolve();
                 default: return "Unknown";
             }
         }
@@ -95,7 +95,8 @@ namespace RimWorldAccess
 
         public static string GetGender(Pawn pawn)
         {
-            return pawn.gender.ToString();
+            // Use RimWorld's localized gender labels
+            return pawn.gender.GetLabel(animal: true).CapitalizeFirst();
         }
 
         public static string GetLifeStage(Pawn pawn)
@@ -107,7 +108,8 @@ namespace RimWorldAccess
         public static string GetAge(Pawn pawn)
         {
             if (pawn.ageTracker == null) return "Unknown";
-            return pawn.ageTracker.AgeBiologicalYearsFloat.ToString("F1") + " years";
+            // Use RimWorld's localized age string
+            return pawn.ageTracker.AgeNumberString;
         }
 
         public static string GetBodySize(Pawn pawn)
@@ -143,14 +145,15 @@ namespace RimWorldAccess
         public static string GetPregnancyStatus(Pawn pawn)
         {
             if (pawn.gender != Gender.Female) return "N/A";
-            if (pawn.health?.hediffSet == null) return "Not pregnant";
+            if (pawn.health?.hediffSet == null) return "None".Translate().Resolve();
 
             Hediff_Pregnant pregnancy = (Hediff_Pregnant)pawn.health.hediffSet.GetFirstHediffOfDef(HediffDefOf.Pregnant);
             if (pregnancy != null)
             {
-                return $"Pregnant ({pregnancy.GestationProgress.ToStringPercent()} complete)";
+                // Use hediff's localized label and progress
+                return $"{pregnancy.LabelCap} ({pregnancy.GestationProgress.ToStringPercent()})";
             }
-            return "Not pregnant";
+            return "None".Translate().Resolve();
         }
 
         public static string GetHuntStatus(Pawn pawn)
@@ -161,15 +164,19 @@ namespace RimWorldAccess
 
             // Get manhunter on damage chance
             float manhunterChance = PawnUtility.GetManhunterOnDamageChance(pawn);
-            string manhunterInfo = manhunterChance > 0f ? $", revenge chance: {manhunterChance.ToStringPercent()}" : "";
+            string revengeChanceLabel = "RevengeChance".Translate().Resolve();
+            string manhunterInfo = manhunterChance > 0f ? $", {revengeChanceLabel}: {manhunterChance.ToStringPercent()}" : "";
+
+            string markedLabel = DesignationDefOf.Hunt.label.CapitalizeFirst();
+            string notMarkedLabel = "None".Translate().Resolve();
 
             if (designation != null)
             {
-                return $"Marked for hunting{manhunterInfo}";
+                return $"{markedLabel}{manhunterInfo}";
             }
             else
             {
-                return manhunterChance > 0f ? $"Not marked (revenge chance: {manhunterChance.ToStringPercent()})" : "Not marked";
+                return manhunterChance > 0f ? $"{notMarkedLabel} ({revengeChanceLabel}: {manhunterChance.ToStringPercent()})" : notMarkedLabel;
             }
         }
 
@@ -182,7 +189,7 @@ namespace RimWorldAccess
             float wildness = pawn.GetStatValue(StatDefOf.Wildness);
             if (wildness >= 1f)
             {
-                return "Cannot tame (too wild)";
+                return "MessageMustDesignateTameable".Translate().Resolve();
             }
 
             // Get minimum handling skill required
@@ -191,26 +198,33 @@ namespace RimWorldAccess
             // Get manhunter on tame fail chance
             float manhunterChance = PawnUtility.GetManhunterOnTameFailChance(pawn);
 
-            // Build info string
+            // Build info string using localized labels
+            string wildnessLabel = StatDefOf.Wildness.LabelCap.Resolve();
+            string minHandlingLabel = StatDefOf.MinimumHandlingSkill.LabelCap.Resolve();
+
             List<string> infoParts = new List<string>();
-            infoParts.Add($"wildness: {wildness.ToStringPercent()}");
+            infoParts.Add($"{wildnessLabel}: {wildness.ToStringPercent()}");
             if (minSkill > 0)
             {
-                infoParts.Add($"requires skill {minSkill}");
+                infoParts.Add($"{minHandlingLabel}: {minSkill}");
             }
             if (manhunterChance > 0f)
             {
-                infoParts.Add($"manhunter on fail: {manhunterChance.ToStringPercent()}");
+                string manhunterLabel = "TameFailedManhunterChance".Translate().Resolve();
+                infoParts.Add($"{manhunterLabel}: {manhunterChance.ToStringPercent()}");
             }
             string infoString = string.Join(", ", infoParts);
 
             Designation designation = pawn.Map.designationManager.DesignationOn(pawn, DesignationDefOf.Tame);
+            string markedLabel = DesignationDefOf.Tame.label.CapitalizeFirst();
+            string notMarkedLabel = "None".Translate().Resolve();
+
             if (designation != null)
             {
-                return $"Marked for taming ({infoString})";
+                return $"{markedLabel} ({infoString})";
             }
 
-            return $"Not marked ({infoString})";
+            return $"{notMarkedLabel} ({infoString})";
         }
 
         // === Designation Toggles ===

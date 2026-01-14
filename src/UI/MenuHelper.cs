@@ -14,20 +14,23 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Formats position as "X of Y" (1-indexed).
+        /// Returns empty string if AnnouncePosition setting is disabled.
         /// </summary>
         public static string FormatPosition(int index, int total)
         {
+            if (RimWorldAccessMod_Settings.Settings?.AnnouncePosition == false)
+                return "";
             return $"{index + 1} of {total}";
         }
 
         /// <summary>
-        /// Gets level prefix if level changed. Returns "level N. " or empty string.
-        /// Call at START of announcement, not end.
+        /// Gets level suffix if level changed. Returns " level N" or empty string.
+        /// Call at END of announcement, not start.
         /// </summary>
         /// <param name="menuKey">Unique key for this menu (e.g., "StorageSettings", "ThingFilter")</param>
         /// <param name="currentLevel">0-indexed indent level</param>
         /// <param name="skipLevelOne">If true, don't announce level 1 (for menus always starting at level 1)</param>
-        public static string GetLevelPrefix(string menuKey, int currentLevel, bool skipLevelOne = true)
+        public static string GetLevelSuffix(string menuKey, int currentLevel, bool skipLevelOne = true)
         {
             int displayLevel = currentLevel + 1; // 1-indexed for users
 
@@ -44,7 +47,7 @@ namespace RimWorldAccess
             if (skipLevelOne && displayLevel == 1 && lastLevel == -1)
                 return "";
 
-            return $"level {displayLevel}. ";
+            return $" level {displayLevel}";
         }
 
         /// <summary>
@@ -55,28 +58,38 @@ namespace RimWorldAccess
             lastAnnouncedLevels.Remove(menuKey);
         }
 
-        // ===== NAVIGATION (NO WRAPPING) =====
+        // ===== NAVIGATION =====
 
         /// <summary>
-        /// Moves to next item. Returns new index. Does NOT wrap.
+        /// Moves to next item. Returns new index.
+        /// Wraps to beginning if WrapNavigation setting is enabled.
         /// </summary>
         public static int SelectNext(int currentIndex, int count)
         {
             if (count == 0) return 0;
             if (currentIndex < count - 1)
                 return currentIndex + 1;
-            return currentIndex; // Stay at end
+
+            // At end: wrap or stay based on setting
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
+                return 0;
+            return currentIndex;
         }
 
         /// <summary>
-        /// Moves to previous item. Returns new index. Does NOT wrap.
+        /// Moves to previous item. Returns new index.
+        /// Wraps to end if WrapNavigation setting is enabled.
         /// </summary>
         public static int SelectPrevious(int currentIndex, int count)
         {
             if (count == 0) return 0;
             if (currentIndex > 0)
                 return currentIndex - 1;
-            return currentIndex; // Stay at start
+
+            // At start: wrap or stay based on setting
+            if (RimWorldAccessMod_Settings.Settings?.WrapNavigation == true)
+                return count - 1;
+            return currentIndex;
         }
 
         /// <summary>
@@ -174,6 +187,67 @@ namespace RimWorldAccess
             }
 
             return (position, total);
+        }
+
+        /// <summary>
+        /// Finds the first sibling at the same indent level within the current node.
+        /// </summary>
+        /// <returns>Index of first sibling, or currentIndex if already at first</returns>
+        public static int JumpToFirstSibling<T>(IList<T> nodes, int currentIndex, Func<T, int> getIndentLevel)
+        {
+            if (nodes.Count == 0 || currentIndex < 0 || currentIndex >= nodes.Count)
+                return 0;
+
+            int indentLevel = getIndentLevel(nodes[currentIndex]);
+
+            // Scan backwards until we hit a lower indent level or start
+            for (int i = currentIndex - 1; i >= 0; i--)
+            {
+                if (getIndentLevel(nodes[i]) < indentLevel)
+                {
+                    // Found parent - first sibling is at i + 1
+                    return i + 1;
+                }
+            }
+
+            // No parent found - at root level, find first item at this indent
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                if (getIndentLevel(nodes[i]) == indentLevel)
+                    return i;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Finds the last sibling at the same indent level within the current node.
+        /// </summary>
+        /// <returns>Index of last sibling, or currentIndex if already at last</returns>
+        public static int JumpToLastSibling<T>(IList<T> nodes, int currentIndex, Func<T, int> getIndentLevel)
+        {
+            if (nodes.Count == 0 || currentIndex < 0 || currentIndex >= nodes.Count)
+                return nodes.Count - 1;
+
+            int indentLevel = getIndentLevel(nodes[currentIndex]);
+
+            // Scan forwards until we hit a lower indent level or end
+            int lastSibling = currentIndex;
+            for (int i = currentIndex + 1; i < nodes.Count; i++)
+            {
+                int level = getIndentLevel(nodes[i]);
+                if (level < indentLevel)
+                {
+                    // Found end of siblings
+                    break;
+                }
+                if (level == indentLevel)
+                {
+                    lastSibling = i;
+                }
+            }
+
+            return lastSibling;
         }
     }
 }

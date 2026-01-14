@@ -36,8 +36,12 @@ namespace RimWorldAccess
             bool hasActiveDesignator = Find.DesignatorManager != null &&
                                       Find.DesignatorManager.SelectedDesignator != null;
 
+            // Check if local map targeting is active (e.g., transport pod landing)
+            bool inTargetingMode = Find.Targeter != null && Find.Targeter.IsTargeting;
+
             // Only active when in architect placement mode OR when a designator is selected (e.g., from gizmos)
-            if (!inArchitectMode && !hasActiveDesignator)
+            // OR when local map targeting is active (transport pod landing)
+            if (!inArchitectMode && !hasActiveDesignator && !inTargetingMode)
                 return;
 
             // Only process keyboard events
@@ -58,6 +62,17 @@ namespace RimWorldAccess
             bool handled = false;
             bool shiftHeld = Event.current.shift;
 
+            // Handle local map targeting mode (transport pod landing) first
+            if (inTargetingMode)
+            {
+                handled = HandleTargetingModeInput(key, shiftHeld);
+                if (handled)
+                {
+                    Event.current.Use();
+                }
+                return;
+            }
+
             // Get the active designator (from either source)
             Designator activeDesignator = inArchitectMode ?
                 ArchitectState.SelectedDesignator :
@@ -69,6 +84,18 @@ namespace RimWorldAccess
             // Check if this is a zone designator
             bool isZoneDesignator = IsZoneDesignator(activeDesignator);
 
+            // Tab key - toggle between box selection and single tile selection modes (for zone designators only)
+            if (key == KeyCode.Tab && isZoneDesignator && inArchitectMode)
+            {
+                // Cancel any active rectangle selection when switching modes
+                if (ArchitectState.HasRectangleStart)
+                {
+                    ArchitectState.CancelRectangle();
+                }
+
+                ArchitectState.ToggleSelectionMode();
+                handled = true;
+            }
             // Shift+Space - Cancel blueprint at cursor position (check before regular Space)
             if (shiftHeld && key == KeyCode.Space)
             {
@@ -92,13 +119,16 @@ namespace RimWorldAccess
                         Rot4 currentRot = (Rot4)rotField.GetValue(designatorPlace);
                         currentRot.Rotate(RotationDirection.Clockwise);
                         rotField.SetValue(designatorPlace, currentRot);
-                        TolkHelper.Speak($"Rotated to {currentRot}");
+
+                        // Build a proper announcement with direction and special info
+                        string announcement = GetDesignatorRotationAnnouncement(designatorPlace, currentRot);
+                        TolkHelper.Speak(announcement);
                     }
                 }
                 handled = true;
             }
-            // Shift+Arrow keys - auto-select to wall (only for zone designators in Manual mode)
-            else if (shiftHeld && isZoneDesignator && ArchitectState.ZoneCreationMode == ZoneCreationMode.Manual)
+            // Shift+Arrow keys - auto-select to wall (for zone designators)
+            else if (shiftHeld && isZoneDesignator)
             {
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
                 Map map = Find.CurrentMap;
@@ -119,7 +149,7 @@ namespace RimWorldAccess
                     handled = true;
                 }
             }
-            // Space key - toggle selection of current cell
+            // Space key - rectangle selection for zones, instant placement for buildings
             else if (key == KeyCode.Space)
             {
                 // Cooldown to prevent rapid toggling
@@ -130,12 +160,37 @@ namespace RimWorldAccess
 
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
-                // For zone designators, use multi-cell selection with mode support
+                // For zone designators, check selection mode
                 if (isZoneDesignator)
                 {
                     if (inArchitectMode)
                     {
-                        ArchitectState.ToggleCell(currentPosition);
+                        if (ArchitectState.SelectionMode == ArchitectSelectionMode.SingleTile)
+                        {
+                            // Single tile mode - toggle the current cell
+                            ArchitectState.ToggleCell(currentPosition);
+                        }
+                        else
+                        {
+                            // Box selection mode - set corners and confirm rectangles
+                            if (!ArchitectState.HasRectangleStart)
+                            {
+                                // No start corner yet - set it
+                                ArchitectState.SetRectangleStart(currentPosition);
+                            }
+                            else if (ArchitectState.IsInPreviewMode)
+                            {
+                                // We have a preview - confirm this rectangle
+                                ArchitectState.ConfirmRectangle();
+                            }
+                            else
+                            {
+                                // Start is set but no end yet - update to create preview at current position
+                                ArchitectState.UpdatePreview(currentPosition);
+                                // Then confirm it
+                                ArchitectState.ConfirmRectangle();
+                            }
+                        }
                     }
                 }
                 // For build/place designators (including Designator_Install), place immediately
@@ -191,30 +246,16 @@ namespace RimWorldAccess
             // Enter key - confirm and execute designation (for multi-cell designators)
             else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
-                // For zone designators, handle according to mode
+                // For zone designators, execute placement immediately
                 if (isZoneDesignator && inArchitectMode)
                 {
-                    ZoneCreationMode mode = ArchitectState.ZoneCreationMode;
-                    Map map = Find.CurrentMap;
-
-                    switch (mode)
+                    // If in preview mode, confirm the rectangle first
+                    if (ArchitectState.IsInPreviewMode)
                     {
-                        case ZoneCreationMode.Manual:
-                            // Manual mode: execute placement immediately
-                            ExecuteZonePlacement(activeDesignator, map);
-                            break;
-
-                        case ZoneCreationMode.Borders:
-                            // Borders mode: auto-fill interior
-                            BordersModeAutoFill(activeDesignator, map);
-                            break;
-
-                        case ZoneCreationMode.Corners:
-                            // Corners mode: fill rectangle
-                            CornersModeAutoFill(activeDesignator, map);
-                            break;
+                        ArchitectState.ConfirmRectangle();
                     }
-
+                    Map map = Find.CurrentMap;
+                    ExecuteZonePlacement(activeDesignator, map);
                     handled = true;
                 }
                 // For place designators (build, reinstall), Enter exits placement mode
@@ -234,14 +275,22 @@ namespace RimWorldAccess
                     handled = true;
                 }
             }
-            // Escape key - cancel placement
+            // Escape key - cancel rectangle or cancel placement
             else if (key == KeyCode.Escape)
             {
-                TolkHelper.Speak("Placement cancelled");
-                if (inArchitectMode)
-                    ArchitectState.Cancel();
+                if (inArchitectMode && ArchitectState.HasRectangleStart)
+                {
+                    // Cancel current rectangle selection but stay in placement mode
+                    ArchitectState.CancelRectangle();
+                }
                 else
-                    Find.DesignatorManager.Deselect();
+                {
+                    TolkHelper.Speak("Placement cancelled");
+                    if (inArchitectMode)
+                        ArchitectState.Cancel();
+                    else
+                        Find.DesignatorManager.Deselect();
+                }
                 handled = true;
             }
 
@@ -285,6 +334,129 @@ namespace RimWorldAccess
             {
                 TolkHelper.Speak("No blueprint to cancel here");
             }
+        }
+
+        /// <summary>
+        /// Handles keyboard input during local map targeting mode (e.g., transport pod landing).
+        /// Returns true if input was handled.
+        /// </summary>
+        private static bool HandleTargetingModeInput(KeyCode key, bool shiftHeld)
+        {
+            // Space or Enter - confirm target at cursor position
+            if (key == KeyCode.Space || key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                if (shiftHeld)
+                    return false;
+
+                IntVec3 targetCell = MapNavigationState.CurrentCursorPosition;
+                Map map = Find.CurrentMap;
+
+                if (map == null || !targetCell.InBounds(map))
+                {
+                    TolkHelper.Speak("Invalid target position", SpeechPriority.High);
+                    return true;
+                }
+
+                // Validate landing spot using the game's validation
+                if (!DropCellFinder.IsGoodDropSpot(targetCell, map, allowFogged: false, canRoofPunch: true))
+                {
+                    string reason = GetLandingInvalidReason(targetCell, map);
+                    TolkHelper.Speak($"Cannot land here: {reason}", SpeechPriority.High);
+                    return true;
+                }
+
+                // Create target info and let the targeter process it
+                LocalTargetInfo target = new LocalTargetInfo(targetCell);
+
+                // Get the action BEFORE stopping targeting (StopTargeting clears the action)
+                var actionField = HarmonyLib.AccessTools.Field(typeof(Targeter), "action");
+                System.Action<LocalTargetInfo> action = null;
+                if (actionField != null)
+                {
+                    action = actionField.GetValue(Find.Targeter) as System.Action<LocalTargetInfo>;
+                }
+
+                // Check if we have an action to invoke
+                if (action != null)
+                {
+                    // Stop targeting and invoke the action
+                    Find.Targeter.StopTargeting();
+                    action.Invoke(target);
+                    TolkHelper.Speak($"Landing confirmed at {targetCell.x}, {targetCell.z}", SpeechPriority.Normal);
+                }
+                else
+                {
+                    // No action available - stop targeting but report the error
+                    Find.Targeter.StopTargeting();
+                    TolkHelper.Speak("Error: Could not confirm target. Please try using the mouse.", SpeechPriority.High);
+                }
+
+                return true;
+            }
+
+            // Escape - cancel targeting
+            if (key == KeyCode.Escape)
+            {
+                Find.Targeter.StopTargeting();
+                TolkHelper.Speak("Targeting cancelled", SpeechPriority.Normal);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets a human-readable reason why a landing spot is invalid.
+        /// Note: Thin roofs are VALID - pods punch through them.
+        /// Only thick roofs (overhead mountain) block landing.
+        /// </summary>
+        private static string GetLandingInvalidReason(IntVec3 cell, Map map)
+        {
+            if (map == null || !cell.InBounds(map))
+                return "Out of bounds";
+
+            // Check terrain
+            TerrainDef terrain = cell.GetTerrain(map);
+            if (terrain != null)
+            {
+                if (terrain.IsWater)
+                    return "Water";
+            }
+
+            // Check for thick roof (can't punch through mountain)
+            // Note: Thin roofs are OK - pods punch through
+            RoofDef roof = cell.GetRoof(map);
+            if (roof != null && roof.isThickRoof)
+                return "Overhead mountain";
+
+            // Check if walkable (basic passability)
+            if (!cell.Walkable(map))
+                return "Impassable terrain";
+
+            // Check for buildings/edifices
+            Building building = cell.GetEdifice(map);
+            if (building != null)
+            {
+                // IsClearableFreeBuilding buildings (like conduits) are OK
+                if (!building.IsClearableFreeBuilding)
+                    return building.LabelCap;
+            }
+
+            // Check for fog
+            if (cell.Fogged(map))
+                return "Fogged area";
+
+            // Check for existing skyfallers or transporters
+            List<Thing> things = cell.GetThingList(map);
+            foreach (Thing thing in things)
+            {
+                if (thing is IActiveTransporter)
+                    return "Another transport pod";
+                if (thing is Skyfaller)
+                    return "Incoming skyfaller";
+            }
+
+            return "Invalid spot";
         }
 
         /// <summary>
@@ -349,7 +521,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Executes zone placement in Manual mode.
+        /// Executes zone placement with all selected cells.
         /// </summary>
         private static void ExecuteZonePlacement(Designator designator, Map map)
         {
@@ -381,160 +553,12 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Auto-fills the interior of a zone from border cells using flood fill (Borders mode).
+        /// Gets a rotation announcement for a Designator_Place (used by reinstall gizmo, etc.)
+        /// Delegates to shared ArchitectState method to avoid duplication.
         /// </summary>
-        private static void BordersModeAutoFill(Designator designator, Map map)
+        private static string GetDesignatorRotationAnnouncement(Designator_Place designatorPlace, Rot4 rotation)
         {
-            if (ArchitectState.SelectedCells.Count == 0)
-            {
-                TolkHelper.Speak("No border cells selected. Select border tiles first", SpeechPriority.High);
-                return;
-            }
-
-            try
-            {
-                // Find the center point of the selected border cells
-                int sumX = 0, sumZ = 0;
-                foreach (IntVec3 cell in ArchitectState.SelectedCells)
-                {
-                    sumX += cell.x;
-                    sumZ += cell.z;
-                }
-                IntVec3 centerPoint = new IntVec3(sumX / ArchitectState.SelectedCells.Count, 0, sumZ / ArchitectState.SelectedCells.Count);
-
-                // Ensure center point is valid and not in the border
-                if (!centerPoint.InBounds(map))
-                {
-                    TolkHelper.Speak("Invalid border selection. Cannot find interior point", SpeechPriority.High);
-                    return;
-                }
-
-                // If center is in the border, try to find a nearby non-border cell
-                if (ArchitectState.SelectedCells.Contains(centerPoint))
-                {
-                    // Try adjacent cells
-                    bool foundStart = false;
-                    foreach (IntVec3 adjacent in GenAdj.CardinalDirections)
-                    {
-                        IntVec3 testCell = centerPoint + adjacent;
-                        if (testCell.InBounds(map) && !ArchitectState.SelectedCells.Contains(testCell) && designator.CanDesignateCell(testCell).Accepted)
-                        {
-                            centerPoint = testCell;
-                            foundStart = true;
-                            break;
-                        }
-                    }
-
-                    if (!foundStart)
-                    {
-                        TolkHelper.Speak("Cannot find interior starting point. Border may be invalid", SpeechPriority.High);
-                        return;
-                    }
-                }
-
-                // Use flood fill to find all interior cells
-                List<IntVec3> interiorCells = new List<IntVec3>();
-                HashSet<IntVec3> borderSet = new HashSet<IntVec3>(ArchitectState.SelectedCells);
-
-                map.floodFiller.FloodFill(centerPoint, (IntVec3 c) =>
-                {
-                    // Can traverse if: in bounds, not a border, and designator can place here
-                    return c.InBounds(map) && !borderSet.Contains(c) && designator.CanDesignateCell(c).Accepted;
-                }, (IntVec3 c) =>
-                {
-                    // Add to interior cells
-                    if (!borderSet.Contains(c))
-                    {
-                        interiorCells.Add(c);
-                    }
-                });
-
-                // Add all interior cells to selection
-                int addedCount = 0;
-                foreach (IntVec3 cell in interiorCells)
-                {
-                    if (!ArchitectState.SelectedCells.Contains(cell))
-                    {
-                        ArchitectState.SelectedCells.Add(cell);
-                        addedCount++;
-                    }
-                }
-
-                TolkHelper.Speak($"Filled interior with {addedCount} cells. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
-                Log.Message($"Borders mode auto-fill: added {addedCount} interior cells, total {ArchitectState.SelectedCells.Count}");
-
-                // Now execute the placement
-                ExecuteZonePlacement(designator, map);
-            }
-            catch (System.Exception ex)
-            {
-                TolkHelper.Speak($"Error filling interior: {ex.Message}", SpeechPriority.High);
-                Log.Error($"BordersModeAutoFill error: {ex}");
-            }
-        }
-
-        /// <summary>
-        /// Auto-fills a rectangular zone from 4 corner cells (Corners mode).
-        /// </summary>
-        private static void CornersModeAutoFill(Designator designator, Map map)
-        {
-            if (ArchitectState.SelectedCells.Count != 4)
-            {
-                TolkHelper.Speak($"Must select exactly 4 corners. Currently selected: {ArchitectState.SelectedCells.Count}", SpeechPriority.High);
-                return;
-            }
-
-            try
-            {
-                // Find min and max X and Z coordinates
-                int minX = int.MaxValue, maxX = int.MinValue;
-                int minZ = int.MaxValue, maxZ = int.MinValue;
-
-                foreach (IntVec3 corner in ArchitectState.SelectedCells)
-                {
-                    if (corner.x < minX) minX = corner.x;
-                    if (corner.x > maxX) maxX = corner.x;
-                    if (corner.z < minZ) minZ = corner.z;
-                    if (corner.z > maxZ) maxZ = corner.z;
-                }
-
-                // Validate rectangle size
-                if (minX >= maxX || minZ >= maxZ)
-                {
-                    TolkHelper.Speak("Invalid corner selection. Corners must form a rectangle", SpeechPriority.High);
-                    return;
-                }
-
-                // Fill all cells in the bounding rectangle
-                List<IntVec3> rectangleCells = new List<IntVec3>();
-                for (int x = minX; x <= maxX; x++)
-                {
-                    for (int z = minZ; z <= maxZ; z++)
-                    {
-                        IntVec3 cell = new IntVec3(x, 0, z);
-                        if (cell.InBounds(map) && !ArchitectState.SelectedCells.Contains(cell))
-                        {
-                            rectangleCells.Add(cell);
-                        }
-                    }
-                }
-
-                // Add all rectangle cells to selection
-                ArchitectState.SelectedCells.AddRange(rectangleCells);
-
-                int width = maxX - minX + 1;
-                int height = maxZ - minZ + 1;
-                TolkHelper.Speak($"Filled {width} by {height} rectangle. Total: {ArchitectState.SelectedCells.Count} cells. Creating zone");
-                Log.Message($"Corners mode auto-fill: {width}x{height} rectangle, total {ArchitectState.SelectedCells.Count} cells");
-
-                // Now execute the placement
-                ExecuteZonePlacement(designator, map);
-            }
-            catch (System.Exception ex)
-            {
-                TolkHelper.Speak($"Error filling rectangle: {ex.Message}", SpeechPriority.High);
-                Log.Error($"CornersModeAutoFill error: {ex}");
-            }
+            return ArchitectState.GetRotationAnnouncementForDef(designatorPlace.PlacingDef, rotation);
         }
     }
 
@@ -554,10 +578,6 @@ namespace RimWorldAccess
         [HarmonyPriority(Priority.Last)]
         public static void Postfix(CameraDriver __instance)
         {
-            // Only active when in architect placement mode
-            if (!ArchitectState.IsInPlacementMode)
-                return;
-
             // Check if an arrow key was just pressed
             if (Find.CurrentMap == null || !MapNavigationState.IsInitialized)
                 return;
@@ -568,44 +588,46 @@ namespace RimWorldAccess
                                    Input.GetKeyDown(KeyCode.LeftArrow) ||
                                    Input.GetKeyDown(KeyCode.RightArrow);
 
-            if (arrowKeyPressed)
+            if (!arrowKeyPressed)
+                return;
+
+            IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
+            Map map = Find.CurrentMap;
+
+            // Skip if in local map targeting mode (transport pod landing)
+            // We don't add extra announcements for targeting - the game handles this
+            if (Find.Targeter != null && Find.Targeter.IsTargeting)
             {
-                IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
-                Designator designator = ArchitectState.SelectedDesignator;
+                return;
+            }
 
-                if (designator == null)
-                    return;
+            // Only continue for architect placement mode
+            if (!ArchitectState.IsInPlacementMode)
+                return;
 
-                // Get the last announced info
-                string lastInfo = MapNavigationState.LastAnnouncedInfo;
+            Designator designator = ArchitectState.SelectedDesignator;
 
-                // For multi-cell designators, show if cell is already selected
-                if (!(designator is Designator_Build))
+            if (designator == null)
+                return;
+
+            // Get the last announced info
+            string lastInfo = MapNavigationState.LastAnnouncedInfo;
+
+            // For multi-cell designators (zones, etc.), show if cell is already selected
+            // Don't check placement validity here - only check when user presses Space to place
+            if (!(designator is Designator_Build))
+            {
+                if (ArchitectState.SelectedCells.Contains(currentPosition))
                 {
-                    if (ArchitectState.SelectedCells.Contains(currentPosition))
+                    if (!lastInfo.StartsWith("Selected"))
                     {
-                        if (!lastInfo.StartsWith("Selected"))
-                        {
-                            string modifiedInfo = "Selected, " + lastInfo;
-                            TolkHelper.Speak(modifiedInfo);
-                            MapNavigationState.LastAnnouncedInfo = modifiedInfo;
-                        }
-                    }
-                }
-                else
-                {
-                    // For build designators, announce if placement is valid
-                    AcceptanceReport report = designator.CanDesignateCell(currentPosition);
-
-                    if (!report.Accepted && !string.IsNullOrEmpty(report.Reason))
-                    {
-                        // Append the reason why we can't place here
-                        string modifiedInfo = lastInfo + ", " + report.Reason;
+                        string modifiedInfo = "Selected, " + lastInfo;
                         TolkHelper.Speak(modifiedInfo);
                         MapNavigationState.LastAnnouncedInfo = modifiedInfo;
                     }
                 }
             }
+            // Note: Placement validity is checked when Space is pressed, not on cursor movement
         }
     }
 

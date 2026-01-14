@@ -5,7 +5,7 @@ Keyboard navigation for world map (F8 view), settlement browsing, and caravan fo
 
 ## Files
 **Patches:** WorldNavigationPatch.cs, CaravanFormationPatch.cs, MessageBoxAccessibilityPatch.cs
-**States:** WorldNavigationState.cs, SettlementBrowserState.cs, QuestLocationsBrowserState.cs, CaravanFormationState.cs, CaravanStatsState.cs
+**States:** WorldNavigationState.cs, SettlementBrowserState.cs, QuestLocationsBrowserState.cs, CaravanFormationState.cs, CaravanInspectState.cs
 **Helpers:** WorldInfoHelper.cs
 
 ## Key Shortcuts

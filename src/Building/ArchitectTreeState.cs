@@ -90,6 +90,7 @@ namespace RimWorldAccess
             onDesignatorActivated = null;
             typeahead.ClearSearch();
             expandedCategories.Clear(); // Reset expansion state on close
+            MenuHelper.ResetLevel("Architect");
         }
 
         /// <summary>
@@ -123,57 +124,49 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets a label for a designator including cost info for build designators.
+        /// Gets a label for a designator including cost and description.
+        /// Format: "Name: cost (description)" for build designators.
+        /// Format: "Name (description)" for order designators.
         /// </summary>
         private static string GetDesignatorLabel(Designator designator)
         {
             string label = designator.LabelCap;
 
-            // Add brief cost info for build designators
+            // Add cost and description for build designators
             if (designator is Designator_Build buildDesignator)
             {
                 BuildableDef buildable = buildDesignator.PlacingDef;
                 if (buildable != null)
                 {
-                    string costInfo = GetBriefCostInfo(buildable);
-                    if (!string.IsNullOrEmpty(costInfo))
+                    string costInfo = ArchitectHelper.GetBriefCostInfo(buildable);
+                    string description = ArchitectHelper.GetDescription(buildable);
+
+                    // Format: "Name: cost (description)"
+                    if (!string.IsNullOrEmpty(costInfo) && !string.IsNullOrEmpty(description))
                     {
-                        label += $" ({costInfo})";
+                        label += $": {costInfo} ({description})";
                     }
+                    else if (!string.IsNullOrEmpty(costInfo))
+                    {
+                        label += $": {costInfo}";
+                    }
+                    else if (!string.IsNullOrEmpty(description))
+                    {
+                        label += $" ({description})";
+                    }
+                }
+            }
+            else
+            {
+                // For non-build designators (orders), add description if available
+                string description = ArchitectHelper.GetDesignatorDescriptionText(designator);
+                if (!string.IsNullOrEmpty(description))
+                {
+                    label += $" ({description})";
                 }
             }
 
             return label;
-        }
-
-        /// <summary>
-        /// Gets brief cost information for display in the menu.
-        /// </summary>
-        private static string GetBriefCostInfo(BuildableDef buildable)
-        {
-            List<string> costParts = new List<string>();
-
-            // Get stuff cost first (most common)
-            if (buildable is ThingDef thingDef && thingDef.MadeFromStuff)
-            {
-                int stuffCount = buildable.CostStuffCount;
-                if (stuffCount > 0)
-                {
-                    costParts.Add($"{stuffCount} material");
-                }
-            }
-
-            // Get fixed costs
-            List<ThingDefCountClass> costs = buildable.CostList;
-            if (costs != null)
-            {
-                foreach (ThingDefCountClass cost in costs)
-                {
-                    costParts.Add($"{cost.count} {cost.thingDef.label}");
-                }
-            }
-
-            return string.Join(", ", costParts);
         }
 
         public static void SelectNext()
@@ -181,7 +174,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex + 1) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -190,7 +183,7 @@ namespace RimWorldAccess
             if (menuItems == null || menuItems.Count == 0)
                 return;
 
-            selectedIndex = (selectedIndex - 1 + menuItems.Count) % menuItems.Count;
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, menuItems.Count);
             AnnounceCurrentSelection();
         }
 
@@ -286,6 +279,9 @@ namespace RimWorldAccess
 
             if (item.type == MenuItemType.Category)
             {
+                // Clear search when toggling expansion to avoid stale search state
+                typeahead.ClearSearch();
+
                 // Toggle expansion
                 DesignationCategoryDef category = item.data as DesignationCategoryDef;
                 if (category == null) return;
@@ -455,28 +451,80 @@ namespace RimWorldAccess
 
             MenuItem item = menuItems[selectedIndex];
             var (position, total) = GetSiblingPosition(item);
+            string positionPart = MenuHelper.FormatPosition(position - 1, total);
+            string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
 
             string announcement = "";
 
             if (item.type == MenuItemType.Category)
             {
                 string expandState = item.isExpanded ? "expanded" : "collapsed";
-                announcement = $"{item.label}, {expandState}. {position} of {total}";
+                announcement = $"{item.label}, {expandState}{positionSection}";
             }
             else
             {
-                // Designator - include parent category name for context
-                string parentName = item.parent?.label ?? "";
-                announcement = $"{item.label}. {position} of {total}";
+                // Designator
+                announcement = $"{item.label}{positionSection}";
             }
+
+            // Add level suffix at the end (only announced when level changes)
+            announcement += MenuHelper.GetLevelSuffix("Architect", item.indentLevel);
 
             TolkHelper.Speak(announcement);
         }
 
         /// <summary>
-        /// Jumps to the first item in the navigation list.
+        /// Jumps to the first sibling at the same level within the current node.
         /// </summary>
         public static void JumpToFirst()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+            selectedIndex = MenuHelper.JumpToFirstSibling(menuItems, selectedIndex, m => m.indentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope.
+        /// If on an expanded node, jumps to its last child.
+        /// Otherwise, jumps to last sibling at same level.
+        /// </summary>
+        public static void JumpToLast()
+        {
+            if (menuItems == null || menuItems.Count == 0) return;
+
+            var currentItem = menuItems[selectedIndex];
+
+            // If current item is expanded and has children, jump to last child
+            if (currentItem.isExpanded && currentItem.type == MenuItemType.Category)
+            {
+                // Find last child (items with higher indent until we hit same or lower indent)
+                int lastChildIndex = selectedIndex;
+                for (int i = selectedIndex + 1; i < menuItems.Count; i++)
+                {
+                    if (menuItems[i].indentLevel <= currentItem.indentLevel)
+                        break;
+                    lastChildIndex = i;
+                }
+                if (lastChildIndex > selectedIndex)
+                {
+                    selectedIndex = lastChildIndex;
+                    typeahead.ClearSearch();
+                    AnnounceCurrentSelection();
+                    return;
+                }
+            }
+
+            // Otherwise jump to last sibling
+            selectedIndex = MenuHelper.JumpToLastSibling(menuItems, selectedIndex, m => m.indentLevel);
+            typeahead.ClearSearch();
+            AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        public static void JumpToAbsoluteFirst()
         {
             if (menuItems == null || menuItems.Count == 0) return;
             selectedIndex = 0;
@@ -485,9 +533,9 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Jumps to the last item in the navigation list.
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
         /// </summary>
-        public static void JumpToLast()
+        public static void JumpToAbsoluteLast()
         {
             if (menuItems == null || menuItems.Count == 0) return;
             selectedIndex = menuItems.Count - 1;

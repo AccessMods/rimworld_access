@@ -20,7 +20,6 @@ namespace RimWorldAccess
             // This prevents conflicts when other menus are open
             if (KeyboardHelper.IsAnyAccessibilityMenuActive() &&
                 !ZoneRenameState.IsActive &&
-                !ZoneSettingsMenuState.IsActive &&
                 !PlaySettingsMenuState.IsActive &&
                 !StorageSettingsMenuState.IsActive &&
                 !PlantSelectionMenuState.IsActive &&
@@ -37,13 +36,6 @@ namespace RimWorldAccess
             // Only process keyboard events for other menus
             if (Event.current.type != EventType.KeyDown)
                 return;
-
-            // Handle zone settings menu
-            if (ZoneSettingsMenuState.IsActive)
-            {
-                HandleZoneSettingsInput();
-                return;
-            }
 
             // Handle play settings menu
             if (PlaySettingsMenuState.IsActive)
@@ -78,18 +70,24 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
-            // Handle Home - jump to first
+            // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.Home)
             {
-                StorageSettingsMenuState.JumpToFirst();
+                if (Event.current.control)
+                    StorageSettingsMenuState.JumpToAbsoluteFirst();
+                else
+                    StorageSettingsMenuState.JumpToFirst();
                 Event.current.Use();
                 return;
             }
 
-            // Handle End - jump to last
+            // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.End)
             {
-                StorageSettingsMenuState.JumpToLast();
+                if (Event.current.control)
+                    StorageSettingsMenuState.JumpToAbsoluteLast();
+                else
+                    StorageSettingsMenuState.JumpToLast();
                 Event.current.Use();
                 return;
             }
@@ -265,90 +263,6 @@ namespace RimWorldAccess
                     Event.current.Use();
                     break;
 
-            }
-        }
-
-        private static void HandleZoneSettingsInput()
-        {
-            KeyCode key = Event.current.keyCode;
-
-            // Handle Home - jump to first
-            if (key == KeyCode.Home)
-            {
-                ZoneSettingsMenuState.JumpToFirst();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle End - jump to last
-            if (key == KeyCode.End)
-            {
-                ZoneSettingsMenuState.JumpToLast();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Escape - clear search FIRST, then close
-            if (key == KeyCode.Escape)
-            {
-                if (ZoneSettingsMenuState.HasActiveSearch)
-                {
-                    ZoneSettingsMenuState.ClearTypeaheadSearch();
-                    Event.current.Use();
-                    return;
-                }
-                ZoneSettingsMenuState.Close();
-                TolkHelper.Speak("Closed zone settings menu");
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Backspace for search
-            if (key == KeyCode.Backspace && ZoneSettingsMenuState.HasActiveSearch)
-            {
-                ZoneSettingsMenuState.ProcessBackspace();
-                Event.current.Use();
-                return;
-            }
-
-            // Handle Up/Down with typeahead filtering (only navigate matches when there ARE matches)
-            if (key == KeyCode.UpArrow)
-            {
-                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
-                {
-                    // Navigate through matches only when there ARE matches
-                    ZoneSettingsMenuState.SelectPreviousMatch();
-                }
-                else
-                {
-                    // Navigate normally (either no search active, OR search with no matches)
-                    ZoneSettingsMenuState.SelectPrevious();
-                }
-                Event.current.Use();
-                return;
-            }
-
-            if (key == KeyCode.DownArrow)
-            {
-                if (ZoneSettingsMenuState.HasActiveSearch && !ZoneSettingsMenuState.HasNoMatches)
-                {
-                    // Navigate through matches only when there ARE matches
-                    ZoneSettingsMenuState.SelectNextMatch();
-                }
-                else
-                {
-                    // Navigate normally (either no search active, OR search with no matches)
-                    ZoneSettingsMenuState.SelectNext();
-                }
-                Event.current.Use();
-                return;
-            }
-
-            if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-            {
-                ZoneSettingsMenuState.ExecuteSelected();
-                Event.current.Use();
-                return;
             }
         }
 

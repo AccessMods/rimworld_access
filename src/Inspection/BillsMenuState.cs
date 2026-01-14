@@ -419,6 +419,90 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Moves the selected bill up in the order.
+        /// </summary>
+        public static void MoveUp()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            if (item.type != MenuItemType.ExistingBill || !(item.data is Bill bill))
+            {
+                TolkHelper.Speak("Cannot reorder this item", SpeechPriority.High);
+                return;
+            }
+
+            int billIndex = billGiver.BillStack.IndexOf(bill);
+            if (billIndex <= 0)
+            {
+                TolkHelper.Speak("Already at top");
+                return;
+            }
+
+            billGiver.BillStack.Reorder(bill, -1);
+
+            // Clear search and rebuild menu
+            typeahead.ClearSearch();
+            BuildMenuItems();
+
+            // Find the bill's new position in the menu
+            for (int i = 0; i < menuItems.Count; i++)
+            {
+                if (menuItems[i].type == MenuItemType.ExistingBill && menuItems[i].data == bill)
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+
+            TolkHelper.Speak($"Moved up: {bill.LabelCap}, now position {billGiver.BillStack.IndexOf(bill) + 1}");
+        }
+
+        /// <summary>
+        /// Moves the selected bill down in the order.
+        /// </summary>
+        public static void MoveDown()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            if (item.type != MenuItemType.ExistingBill || !(item.data is Bill bill))
+            {
+                TolkHelper.Speak("Cannot reorder this item", SpeechPriority.High);
+                return;
+            }
+
+            int billIndex = billGiver.BillStack.IndexOf(bill);
+            if (billIndex >= billGiver.BillStack.Count - 1)
+            {
+                TolkHelper.Speak("Already at bottom");
+                return;
+            }
+
+            billGiver.BillStack.Reorder(bill, 1);
+
+            // Clear search and rebuild menu
+            typeahead.ClearSearch();
+            BuildMenuItems();
+
+            // Find the bill's new position in the menu
+            for (int i = 0; i < menuItems.Count; i++)
+            {
+                if (menuItems[i].type == MenuItemType.ExistingBill && menuItems[i].data == bill)
+                {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+
+            TolkHelper.Speak($"Moved down: {bill.LabelCap}, now position {billGiver.BillStack.IndexOf(bill) + 1}");
+        }
+
+        /// <summary>
         /// Copies the currently selected bill to clipboard.
         /// </summary>
         public static void CopySelected()

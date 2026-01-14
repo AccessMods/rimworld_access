@@ -207,6 +207,24 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Jumps to hour 0.
+        /// </summary>
+        public static void JumpToFirstHour()
+        {
+            selectedHourIndex = MenuHelper.JumpToFirst();
+            UpdateClipboard();
+        }
+
+        /// <summary>
+        /// Jumps to hour 23.
+        /// </summary>
+        public static void JumpToLastHour()
+        {
+            selectedHourIndex = MenuHelper.JumpToLast(24);
+            UpdateClipboard();
+        }
+
+        /// <summary>
         /// Cycles forward through available time assignment types for current cell.
         /// Order: Anything -> Work -> Joy -> Sleep -> Meditate (if available)
         /// </summary>
@@ -424,7 +442,14 @@ namespace RimWorldAccess
                                    pendingChanges[pawn].ContainsKey(selectedHourIndex);
 
             string pendingIndicator = hasPendingChange ? " (pending)" : "";
-            string message = $"{pawn.LabelShort}, Hour {selectedHourIndex}: {currentAssignment.label}{pendingIndicator}";
+            string pawnPosition = MenuHelper.FormatPosition(selectedPawnIndex, pawns.Count);
+            string hourPosition = MenuHelper.FormatPosition(selectedHourIndex, 24);
+            string positionSuffix = "";
+            if (!string.IsNullOrEmpty(pawnPosition) || !string.IsNullOrEmpty(hourPosition))
+            {
+                positionSuffix = $". Pawn {pawnPosition}, Hour {hourPosition}";
+            }
+            string message = $"{pawn.LabelShort}, Hour {selectedHourIndex}: {currentAssignment.label}{pendingIndicator}{positionSuffix}";
             TolkHelper.Speak(message);
         }
     }

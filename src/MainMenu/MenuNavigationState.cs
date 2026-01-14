@@ -103,7 +103,11 @@ namespace RimWorldAccess
             {
                 int count = currentColumn == 0 ? column0Options.Count : column1Options.Count;
                 int index = currentColumn == 0 ? selectedIndexColumn0 : selectedIndexColumn1;
-                TolkHelper.Speak($"{selected.label}. {index + 1} of {count}");
+                string positionPart = MenuHelper.FormatPosition(index, count);
+                string announcement = string.IsNullOrEmpty(positionPart)
+                    ? $"{selected.label}."
+                    : $"{selected.label}. {positionPart}";
+                TolkHelper.Speak(announcement);
             }
         }
 
@@ -190,13 +194,17 @@ namespace RimWorldAccess
             {
                 int count = currentColumn == 0 ? column0Options.Count : column1Options.Count;
                 int index = currentColumn == 0 ? selectedIndexColumn0 : selectedIndexColumn1;
+                string positionPart = MenuHelper.FormatPosition(index, count);
+                string baseAnnouncement = string.IsNullOrEmpty(positionPart)
+                    ? $"{selected.label}."
+                    : $"{selected.label}. {positionPart}";
                 if (typeahead.HasActiveSearch)
                 {
-                    TolkHelper.Speak($"{selected.label}. {index + 1} of {count}. {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
+                    TolkHelper.Speak($"{baseAnnouncement} {typeahead.CurrentMatchPosition} of {typeahead.MatchCount} matches for '{typeahead.SearchBuffer}'");
                 }
                 else
                 {
-                    TolkHelper.Speak($"{selected.label}. {index + 1} of {count}");
+                    TolkHelper.Speak(baseAnnouncement);
                 }
             }
         }

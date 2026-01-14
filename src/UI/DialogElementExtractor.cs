@@ -139,8 +139,9 @@ namespace RimWorldAccess
                         PropertyInfo labelProp = pawn.GetType().GetProperty("LabelShort");
                         string pawnLabel = labelProp != null ? (string)labelProp.GetValue(pawn, null) : "colonist";
 
-                        // Translate the message key with pawn parameter (using TaggedString extension)
-                        TaggedString taggedMessage = messageKey.Translate(pawnLabel, pawn);
+                        // Translate the message key with pawn parameters (using NamedArgument for RimWorld 1.6+)
+                        // Game passes both the label string and the pawn object
+                        TaggedString taggedMessage = messageKey.Translate(pawnLabel.Named("PAWN"), ((Pawn)pawn).Named("SUGGESTER"));
                         string translatedMessage = taggedMessage.ToString();
 
                         // Check if there's a second message as well
@@ -153,7 +154,7 @@ namespace RimWorldAccess
                                 string secondMessageKey = secondNameMessageKeyField.GetValue(dialog) as string;
                                 if (!string.IsNullOrEmpty(secondMessageKey))
                                 {
-                                    TaggedString taggedSecond = secondMessageKey.Translate(pawnLabel, pawn);
+                                    TaggedString taggedSecond = secondMessageKey.Translate(pawnLabel.Named("PAWN"), ((Pawn)pawn).Named("SUGGESTER"));
                                     string secondMessage = taggedSecond.ToString();
                                     translatedMessage += " " + secondMessage;
                                 }
@@ -273,6 +274,9 @@ namespace RimWorldAccess
             if (dialog is Dialog_MessageBox messageBox)
             {
                 // Button A (usually Confirm/OK)
+                // Note: Only call buttonAAction, not acceptAction. The game's CreateConfirmation
+                // passes the same action to both, so calling both would execute it twice.
+                // buttonAAction is for button clicks, acceptAction is for Enter key handling.
                 if (!string.IsNullOrEmpty(messageBox.buttonAText))
                 {
                     ButtonElement buttonA = new ButtonElement
@@ -281,10 +285,6 @@ namespace RimWorldAccess
                         Action = () =>
                         {
                             messageBox.buttonAAction?.Invoke();
-                            if (messageBox.acceptAction != null)
-                            {
-                                messageBox.acceptAction();
-                            }
                         },
                         IsConfirm = messageBox.buttonAText.ToLower().Contains("confirm") || messageBox.buttonAText.ToLower().Contains("ok"),
                         IsClose = true
@@ -293,6 +293,7 @@ namespace RimWorldAccess
                 }
 
                 // Button B (usually Cancel/Go Back)
+                // Note: Only call buttonBAction, not cancelAction. Same reason as Button A above.
                 if (!string.IsNullOrEmpty(messageBox.buttonBText))
                 {
                     ButtonElement buttonB = new ButtonElement
@@ -301,10 +302,6 @@ namespace RimWorldAccess
                         Action = () =>
                         {
                             messageBox.buttonBAction?.Invoke();
-                            if (messageBox.cancelAction != null)
-                            {
-                                messageBox.cancelAction();
-                            }
                         },
                         IsCancel = messageBox.buttonBText.ToLower().Contains("cancel") || messageBox.buttonBText.ToLower().Contains("back"),
                         IsClose = true

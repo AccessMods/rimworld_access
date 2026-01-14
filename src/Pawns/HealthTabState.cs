@@ -9,34 +9,25 @@ using Verse.Sound;
 namespace RimWorldAccess
 {
     /// <summary>
-    /// State handler for the Health tab in the inspection menu.
-    /// Manages hierarchical navigation through medical settings, capacities, operations, and body parts.
+    /// State handler for Health tab operations and medical settings.
+    /// Accessed via inspection tree: Health → Operations or Health → Health Settings.
     /// </summary>
     public static class HealthTabState
     {
         private enum MenuLevel
         {
-            SectionMenu,           // Level 1: Choose section (Settings/Capacities/Operations/BodyParts)
-            MedicalSettingsList,   // Level 2a: List medical settings
-            MedicalSettingChange,  // Level 3a: Change a medical setting
-            CapacitiesList,        // Level 2b: List capacities
-            CapacityDetail,        // Level 3b: View capacity details
-            OperationsList,        // Level 2c: List operations
-            OperationActions,      // Level 3c: Actions for operation
-            AddOperationList,      // Level 3d: List available operations to add (DEPRECATED - use AddRecipeList)
-            AddRecipeList,         // Level 3d: List available recipes to add
-            SelectBodyPart,        // Level 4d: Select body part for recipe
-            BodyPartsList,         // Level 2d: List body parts
-            HediffsList,           // Level 3e: List hediffs on a part
-            HediffDetail           // Level 4e: View hediff details
+            MedicalSettingsList,   // List medical settings
+            MedicalSettingChange,  // Change a medical setting
+            OperationsList,        // List operations
+            OperationActions,      // Actions for operation
+            AddRecipeList,         // List available recipes to add
+            SelectBodyPart,        // Select body part for recipe
         }
 
         private static bool isActive = false;
         private static Pawn currentPawn = null;
 
-        private static MenuLevel currentLevel = MenuLevel.SectionMenu;
-        private static int sectionIndex = 0;
-        private static readonly List<string> sections = new List<string> { "Medical Settings", "Capacities", "Operations", "Body Parts" };
+        private static MenuLevel currentLevel = MenuLevel.OperationsList;
 
         // Medical Settings
         private static int medicalSettingIndex = 0;
@@ -46,13 +37,8 @@ namespace RimWorldAccess
         private static List<MedicalCareCategory> availableMedicalCare = new List<MedicalCareCategory>();
         private static int settingChoiceIndex = 0;
 
-        // Capacities
-        private static List<HealthTabHelper.CapacityInfo> capacities = new List<HealthTabHelper.CapacityInfo>();
-        private static int capacityIndex = 0;
-
         // Operations
         private static List<Bill> queuedOperations = new List<Bill>();
-        private static List<HealthTabHelper.OperationInfo> availableOperations = new List<HealthTabHelper.OperationInfo>();
         private static List<RecipeDef> availableRecipes = new List<RecipeDef>();
         private static RecipeDef selectedRecipe = null;
         private static List<BodyPartRecord> partsForRecipe = new List<BodyPartRecord>();
@@ -62,29 +48,7 @@ namespace RimWorldAccess
         private static readonly List<string> operationActions = new List<string> { "View Details", "Remove Operation", "Go Back" };
         private static int operationActionIndex = 0;
 
-        // Body Parts
-        private static List<HealthTabHelper.BodyPartInfo> bodyParts = new List<HealthTabHelper.BodyPartInfo>();
-        private static int bodyPartIndex = 0;
-        private static int hediffIndex = 0;
-
         public static bool IsActive => isActive;
-
-        /// <summary>
-        /// Opens the health tab for a pawn.
-        /// </summary>
-        public static void Open(Pawn pawn)
-        {
-            if (pawn == null)
-                return;
-
-            currentPawn = pawn;
-            isActive = true;
-            currentLevel = MenuLevel.SectionMenu;
-            sectionIndex = 0;
-
-            SoundDefOf.TabOpen.PlayOneShotOnCamera();
-            AnnounceCurrentSelection();
-        }
 
         /// <summary>
         /// Opens directly to the Operations section.
@@ -101,7 +65,6 @@ namespace RimWorldAccess
 
             // Build operations list
             queuedOperations.Clear();
-            availableOperations.Clear();
 
             if (currentPawn.BillStack != null)
             {
@@ -187,10 +150,6 @@ namespace RimWorldAccess
         {
             switch (currentLevel)
             {
-                case MenuLevel.SectionMenu:
-                    sectionIndex = MenuHelper.SelectNext(sectionIndex, sections.Count);
-                    break;
-
                 case MenuLevel.MedicalSettingsList:
                     medicalSettingIndex = MenuHelper.SelectNext(medicalSettingIndex, medicalSettings.Count);
                     break;
@@ -202,11 +161,6 @@ namespace RimWorldAccess
                         settingChoiceIndex = MenuHelper.SelectNext(settingChoiceIndex, availableMedicalCare.Count);
                     break;
 
-                case MenuLevel.CapacitiesList:
-                    if (capacities.Count > 0)
-                        capacityIndex = MenuHelper.SelectNext(capacityIndex, capacities.Count);
-                    break;
-
                 case MenuLevel.OperationsList:
                     int totalOps = queuedOperations.Count + 1; // +1 for "Add Operation"
                     operationIndex = MenuHelper.SelectNext(operationIndex, totalOps);
@@ -214,11 +168,6 @@ namespace RimWorldAccess
 
                 case MenuLevel.OperationActions:
                     operationActionIndex = MenuHelper.SelectNext(operationActionIndex, operationActions.Count);
-                    break;
-
-                case MenuLevel.AddOperationList:
-                    if (availableOperations.Count > 0)
-                        operationIndex = MenuHelper.SelectNext(operationIndex, availableOperations.Count);
                     break;
 
                 case MenuLevel.AddRecipeList:
@@ -230,20 +179,6 @@ namespace RimWorldAccess
                     if (partsForRecipe.Count > 0)
                         partSelectionIndex = MenuHelper.SelectNext(partSelectionIndex, partsForRecipe.Count);
                     break;
-
-                case MenuLevel.BodyPartsList:
-                    if (bodyParts.Count > 0)
-                        bodyPartIndex = MenuHelper.SelectNext(bodyPartIndex, bodyParts.Count);
-                    break;
-
-                case MenuLevel.HediffsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        int hediffCount = bodyParts[bodyPartIndex].Hediffs.Count;
-                        if (hediffCount > 0)
-                            hediffIndex = MenuHelper.SelectNext(hediffIndex, hediffCount);
-                    }
-                    break;
             }
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
@@ -254,10 +189,6 @@ namespace RimWorldAccess
         {
             switch (currentLevel)
             {
-                case MenuLevel.SectionMenu:
-                    sectionIndex = MenuHelper.SelectPrevious(sectionIndex, sections.Count);
-                    break;
-
                 case MenuLevel.MedicalSettingsList:
                     medicalSettingIndex = MenuHelper.SelectPrevious(medicalSettingIndex, medicalSettings.Count);
                     break;
@@ -269,11 +200,6 @@ namespace RimWorldAccess
                         settingChoiceIndex = MenuHelper.SelectPrevious(settingChoiceIndex, availableMedicalCare.Count);
                     break;
 
-                case MenuLevel.CapacitiesList:
-                    if (capacities.Count > 0)
-                        capacityIndex = MenuHelper.SelectPrevious(capacityIndex, capacities.Count);
-                    break;
-
                 case MenuLevel.OperationsList:
                     int totalOps = queuedOperations.Count + 1;
                     operationIndex = MenuHelper.SelectPrevious(operationIndex, totalOps);
@@ -281,11 +207,6 @@ namespace RimWorldAccess
 
                 case MenuLevel.OperationActions:
                     operationActionIndex = MenuHelper.SelectPrevious(operationActionIndex, operationActions.Count);
-                    break;
-
-                case MenuLevel.AddOperationList:
-                    if (availableOperations.Count > 0)
-                        operationIndex = MenuHelper.SelectPrevious(operationIndex, availableOperations.Count);
                     break;
 
                 case MenuLevel.AddRecipeList:
@@ -297,20 +218,6 @@ namespace RimWorldAccess
                     if (partsForRecipe.Count > 0)
                         partSelectionIndex = MenuHelper.SelectPrevious(partSelectionIndex, partsForRecipe.Count);
                     break;
-
-                case MenuLevel.BodyPartsList:
-                    if (bodyParts.Count > 0)
-                        bodyPartIndex = MenuHelper.SelectPrevious(bodyPartIndex, bodyParts.Count);
-                    break;
-
-                case MenuLevel.HediffsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        int hediffCount = bodyParts[bodyPartIndex].Hediffs.Count;
-                        if (hediffCount > 0)
-                            hediffIndex = MenuHelper.SelectPrevious(hediffIndex, hediffCount);
-                    }
-                    break;
             }
 
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
@@ -321,47 +228,6 @@ namespace RimWorldAccess
         {
             switch (currentLevel)
             {
-                case MenuLevel.SectionMenu:
-                    string section = sections[sectionIndex];
-                    if (section == "Medical Settings")
-                    {
-                        currentLevel = MenuLevel.MedicalSettingsList;
-                        medicalSettingIndex = 0;
-                    }
-                    else if (section == "Capacities")
-                    {
-                        capacities = HealthTabHelper.GetCapacities(currentPawn);
-                        if (capacities.Count == 0)
-                        {
-                            TolkHelper.Speak("No capacity information available");
-                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                            return;
-                        }
-                        currentLevel = MenuLevel.CapacitiesList;
-                        capacityIndex = 0;
-                    }
-                    else if (section == "Operations")
-                    {
-                        queuedOperations = HealthTabHelper.GetQueuedOperations(currentPawn);
-                        currentLevel = MenuLevel.OperationsList;
-                        operationIndex = 0;
-                    }
-                    else if (section == "Body Parts")
-                    {
-                        bodyParts = HealthTabHelper.GetBodyPartsWithHediffs(currentPawn);
-                        if (bodyParts.Count == 0)
-                        {
-                            TolkHelper.Speak("No health conditions");
-                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                            return;
-                        }
-                        currentLevel = MenuLevel.BodyPartsList;
-                        bodyPartIndex = 0;
-                    }
-                    SoundDefOf.Click.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    break;
-
                 case MenuLevel.MedicalSettingsList:
                     currentSettingName = medicalSettings[medicalSettingIndex];
                     if (currentSettingName == "Food Restriction")
@@ -410,15 +276,6 @@ namespace RimWorldAccess
                             currentLevel = MenuLevel.MedicalSettingsList;
                             AnnounceCurrentSelection();
                         }
-                    }
-                    break;
-
-                case MenuLevel.CapacitiesList:
-                    if (capacityIndex >= 0 && capacityIndex < capacities.Count)
-                    {
-                        currentLevel = MenuLevel.CapacityDetail;
-                        SoundDefOf.Click.PlayOneShotOnCamera();
-                        AnnounceCurrentSelection();
                     }
                     break;
 
@@ -475,26 +332,6 @@ namespace RimWorldAccess
                         currentLevel = MenuLevel.OperationsList;
                         SoundDefOf.Click.PlayOneShotOnCamera();
                         AnnounceCurrentSelection();
-                    }
-                    break;
-
-                case MenuLevel.AddOperationList:
-                    if (operationIndex >= 0 && operationIndex < availableOperations.Count)
-                    {
-                        var op = availableOperations[operationIndex];
-                        if (op.IsAvailable)
-                        {
-                            HealthTabHelper.AddOperation(currentPawn, op.Recipe, op.BodyPart);
-                            queuedOperations = HealthTabHelper.GetQueuedOperations(currentPawn);
-                            currentLevel = MenuLevel.OperationsList;
-                            operationIndex = 0;
-                            AnnounceCurrentSelection();
-                        }
-                        else
-                        {
-                            TolkHelper.Speak($"Cannot add: {op.UnavailableReason}", SpeechPriority.High);
-                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                        }
                     }
                     break;
 
@@ -562,38 +399,6 @@ namespace RimWorldAccess
                         }
                     }
                     break;
-
-                case MenuLevel.BodyPartsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        var part = bodyParts[bodyPartIndex];
-                        if (part.Hediffs.Count > 0)
-                        {
-                            currentLevel = MenuLevel.HediffsList;
-                            hediffIndex = 0;
-                            SoundDefOf.Click.PlayOneShotOnCamera();
-                            AnnounceCurrentSelection();
-                        }
-                        else
-                        {
-                            TolkHelper.Speak("No conditions on this body part");
-                            SoundDefOf.ClickReject.PlayOneShotOnCamera();
-                        }
-                    }
-                    break;
-
-                case MenuLevel.HediffsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        var part = bodyParts[bodyPartIndex];
-                        if (hediffIndex >= 0 && hediffIndex < part.Hediffs.Count)
-                        {
-                            currentLevel = MenuLevel.HediffDetail;
-                            SoundDefOf.Click.PlayOneShotOnCamera();
-                            AnnounceCurrentSelection();
-                        }
-                    }
-                    break;
             }
         }
 
@@ -601,18 +406,10 @@ namespace RimWorldAccess
         {
             switch (currentLevel)
             {
-                case MenuLevel.SectionMenu:
-                    Close();
-                    TolkHelper.Speak("Closed Health tab");
-                    break;
-
                 case MenuLevel.MedicalSettingsList:
-                case MenuLevel.CapacitiesList:
                 case MenuLevel.OperationsList:
-                case MenuLevel.BodyPartsList:
-                    currentLevel = MenuLevel.SectionMenu;
-                    SoundDefOf.Click.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
+                    Close();
+                    WindowlessInspectionState.ReannounceCurrentSelection();
                     break;
 
                 case MenuLevel.MedicalSettingChange:
@@ -621,14 +418,7 @@ namespace RimWorldAccess
                     AnnounceCurrentSelection();
                     break;
 
-                case MenuLevel.CapacityDetail:
-                    currentLevel = MenuLevel.CapacitiesList;
-                    SoundDefOf.Click.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    break;
-
                 case MenuLevel.OperationActions:
-                case MenuLevel.AddOperationList:
                 case MenuLevel.AddRecipeList:
                     currentLevel = MenuLevel.OperationsList;
                     SoundDefOf.Click.PlayOneShotOnCamera();
@@ -637,18 +427,6 @@ namespace RimWorldAccess
 
                 case MenuLevel.SelectBodyPart:
                     currentLevel = MenuLevel.AddRecipeList;
-                    SoundDefOf.Click.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    break;
-
-                case MenuLevel.HediffsList:
-                    currentLevel = MenuLevel.BodyPartsList;
-                    SoundDefOf.Click.PlayOneShotOnCamera();
-                    AnnounceCurrentSelection();
-                    break;
-
-                case MenuLevel.HediffDetail:
-                    currentLevel = MenuLevel.HediffsList;
                     SoundDefOf.Click.PlayOneShotOnCamera();
                     AnnounceCurrentSelection();
                     break;
@@ -661,12 +439,6 @@ namespace RimWorldAccess
 
             switch (currentLevel)
             {
-                case MenuLevel.SectionMenu:
-                    sb.AppendLine($"Health - {sections[sectionIndex]}");
-                    sb.AppendLine($"Section {MenuHelper.FormatPosition(sectionIndex, sections.Count)}");
-                    sb.AppendLine("Press Enter to open");
-                    break;
-
                 case MenuLevel.MedicalSettingsList:
                     string setting = medicalSettings[medicalSettingIndex];
                     sb.AppendLine($"{setting}");
@@ -713,24 +485,6 @@ namespace RimWorldAccess
                     sb.AppendLine("Press Enter to confirm");
                     break;
 
-                case MenuLevel.CapacitiesList:
-                    if (capacityIndex >= 0 && capacityIndex < capacities.Count)
-                    {
-                        var capacity = capacities[capacityIndex];
-                        sb.AppendLine($"{capacity.Label}: {capacity.LevelLabel}");
-                        sb.AppendLine($"Capacity {MenuHelper.FormatPosition(capacityIndex, capacities.Count)}");
-                        sb.AppendLine("Press Enter for details");
-                    }
-                    break;
-
-                case MenuLevel.CapacityDetail:
-                    if (capacityIndex >= 0 && capacityIndex < capacities.Count)
-                    {
-                        var capacity = capacities[capacityIndex];
-                        sb.AppendLine(capacity.DetailedBreakdown);
-                    }
-                    break;
-
                 case MenuLevel.OperationsList:
                     if (operationIndex < queuedOperations.Count)
                     {
@@ -751,24 +505,6 @@ namespace RimWorldAccess
                     sb.AppendLine($"{operationActions[operationActionIndex]}");
                     sb.AppendLine($"Action {MenuHelper.FormatPosition(operationActionIndex, operationActions.Count)}");
                     sb.AppendLine("Press Enter to execute");
-                    break;
-
-                case MenuLevel.AddOperationList:
-                    if (operationIndex >= 0 && operationIndex < availableOperations.Count)
-                    {
-                        var op = availableOperations[operationIndex];
-                        sb.AppendLine($"{op.Label}");
-                        if (!string.IsNullOrEmpty(op.Requirements))
-                        {
-                            sb.AppendLine(op.Requirements);
-                        }
-                        if (!op.IsAvailable)
-                        {
-                            sb.AppendLine($"Unavailable: {op.UnavailableReason}");
-                        }
-                        sb.AppendLine($"Operation {MenuHelper.FormatPosition(operationIndex, availableOperations.Count)}");
-                        sb.AppendLine("Press Enter to add");
-                    }
                     break;
 
                 case MenuLevel.AddRecipeList:
@@ -813,47 +549,6 @@ namespace RimWorldAccess
 
                         sb.AppendLine($"Part {MenuHelper.FormatPosition(partSelectionIndex, partsForRecipe.Count)}");
                         sb.AppendLine("Press Enter to add operation");
-                    }
-                    break;
-
-                case MenuLevel.BodyPartsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        var part = bodyParts[bodyPartIndex];
-                        sb.AppendLine($"{part.Label}");
-                        if (part.MaxHealth > 0)
-                        {
-                            sb.AppendLine($"Health: {part.Health:F0} / {part.MaxHealth:F0} ({part.Efficiency:P0})");
-                        }
-                        sb.AppendLine($"Conditions: {part.Hediffs.Count}");
-                        sb.AppendLine($"Part {MenuHelper.FormatPosition(bodyPartIndex, bodyParts.Count)}");
-                        sb.AppendLine("Press Enter to view conditions");
-                    }
-                    break;
-
-                case MenuLevel.HediffsList:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        var part = bodyParts[bodyPartIndex];
-                        if (hediffIndex >= 0 && hediffIndex < part.Hediffs.Count)
-                        {
-                            var hediff = part.Hediffs[hediffIndex];
-                            sb.AppendLine($"{hediff.Label}");
-                            sb.AppendLine($"Condition {MenuHelper.FormatPosition(hediffIndex, part.Hediffs.Count)} on {part.Label}");
-                            sb.AppendLine("Press Enter for details");
-                        }
-                    }
-                    break;
-
-                case MenuLevel.HediffDetail:
-                    if (bodyPartIndex >= 0 && bodyPartIndex < bodyParts.Count)
-                    {
-                        var part = bodyParts[bodyPartIndex];
-                        if (hediffIndex >= 0 && hediffIndex < part.Hediffs.Count)
-                        {
-                            var hediff = part.Hediffs[hediffIndex];
-                            sb.AppendLine(hediff.DetailedInfo);
-                        }
                     }
                     break;
             }

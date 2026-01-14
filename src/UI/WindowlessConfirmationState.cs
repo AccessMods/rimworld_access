@@ -54,8 +54,11 @@ namespace RimWorldAccess
             Close();
             TolkHelper.Speak("Cancelled");
 
-            // Reopen the pause menu
-            WindowlessPauseMenuState.Open();
+            // Only reopen pause menu if in-game
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                WindowlessPauseMenuState.Open();
+            }
         }
 
         /// <summary>

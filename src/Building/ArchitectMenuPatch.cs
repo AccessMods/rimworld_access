@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Verse;
 using RimWorld;
+using RimWorld.Planet;
 
 namespace RimWorldAccess
 {
@@ -57,6 +58,23 @@ namespace RimWorldAccess
             // Only process during normal gameplay with a valid map
             if (Find.CurrentMap == null || !MapNavigationState.IsInitialized)
                 return;
+
+            // If on the world map, switch to colony map first (mimics game's default Tab behavior)
+            if (Find.World?.renderer?.wantedMode == WorldRenderMode.Planet)
+            {
+                // Switch from world view to colony map
+                CameraJumper.TryHideWorld();
+
+                // Restore cursor to last known position for this map (or 0,0 if unknown)
+                MapNavigationState.RestoreCursorForCurrentMap();
+
+                // Open our architect menu
+                OpenArchitectTreeMenu();
+
+                // Consume the event so game doesn't open its inaccessible architect menu
+                Event.current.Use();
+                return;
+            }
 
             // Don't process if any dialog or window that prevents camera motion is open
             if (Find.WindowStack != null && Find.WindowStack.WindowsPreventCameraMotion)
@@ -122,18 +140,24 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Handle Home - jump to first
+            // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.Home)
             {
-                ArchitectTreeState.JumpToFirst();
+                if (Event.current.control)
+                    ArchitectTreeState.JumpToAbsoluteFirst();
+                else
+                    ArchitectTreeState.JumpToFirst();
                 Event.current.Use();
                 return;
             }
 
-            // Handle End - jump to last
+            // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.End)
             {
-                ArchitectTreeState.JumpToLast();
+                if (Event.current.control)
+                    ArchitectTreeState.JumpToAbsoluteLast();
+                else
+                    ArchitectTreeState.JumpToLast();
                 Event.current.Use();
                 return;
             }
@@ -241,10 +265,10 @@ namespace RimWorldAccess
         /// </summary>
         private static void OnDesignatorSelected(Designator designator)
         {
-            // Check if this is a zone designator - show mode selection menu
+            // Check if this is a zone designator - enter zone placement directly
             if (IsZoneDesignator(designator))
             {
-                ShowZoneModeSelectionMenu(designator);
+                EnterZonePlacement(designator);
                 return;
             }
 
@@ -329,52 +353,13 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Shows the mode selection menu for zone creation (Manual, Borders, Corners).
-        /// Stores the designator for later use.
+        /// Enters zone placement mode with rectangle selection.
         /// </summary>
-        private static void ShowZoneModeSelectionMenu(Designator designator)
+        private static void EnterZonePlacement(Designator designator)
         {
-            List<FloatMenuOption> options = new List<FloatMenuOption>();
-
-            // Manual selection mode
-            options.Add(new FloatMenuOption("Manual selection", () =>
-            {
-                OnZoneModeSelected(designator, ZoneCreationMode.Manual);
-            }));
-
-            // Borders mode
-            options.Add(new FloatMenuOption("Borders mode", () =>
-            {
-                OnZoneModeSelected(designator, ZoneCreationMode.Borders);
-            }));
-
-            // Corners mode
-            options.Add(new FloatMenuOption("Corners mode", () =>
-            {
-                OnZoneModeSelected(designator, ZoneCreationMode.Corners);
-            }));
-
-            // Open the windowless menu
-            WindowlessFloatMenuState.Open(options, false);
-
-            string zoneName = designator.Label ?? "zone";
-            TolkHelper.Speak($"Select creation mode for {zoneName}");
-            Log.Message($"Opened zone mode selection menu for {zoneName}");
-        }
-
-        /// <summary>
-        /// Called when a zone creation mode is selected.
-        /// Enters placement mode with the designator and sets up ZoneCreationState.
-        /// </summary>
-        private static void OnZoneModeSelected(Designator designator, ZoneCreationMode mode)
-        {
-            // Enter architect placement mode with the zone designator
             ArchitectState.EnterPlacementMode(designator);
-
-            // Also set the zone creation mode in ArchitectState for use during placement
-            ArchitectState.SetZoneCreationMode(mode);
-
-            Log.Message($"Zone creation mode selected: {mode} for designator {designator.Label}");
+            string zoneName = designator.Label ?? "zone";
+            Log.Message($"Entered zone placement for {zoneName}");
         }
     }
 }

@@ -2,18 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using HarmonyLib;
 using RimWorld;
 using RimWorld.Planet;
 using Verse;
+using Verse.Sound;
 using UnityEngine;
 
 namespace RimWorldAccess
 {
     /// <summary>
     /// State management for keyboard navigation in Dialog_FormCaravan.
-    /// Provides four-tab interface for selecting pawns, items, travel supplies, and viewing stats.
+    /// Provides three-tab interface for selecting pawns, items, and travel supplies.
+    /// Tab key toggles summary view with caravan stats.
     /// </summary>
     public static class CaravanFormationState
     {
@@ -21,22 +22,44 @@ namespace RimWorldAccess
         {
             Pawns,
             Items,
-            TravelSupplies,
-            Stats
+            TravelSupplies
         }
 
-        private const int TabCount = 4;
+        private const int TabCount = 3;
 
         private static bool isActive = false;
         private static Dialog_FormCaravan currentDialog = null;
         private static Tab currentTab = Tab.Pawns;
         private static int selectedIndex = 0;
-        private static bool isChoosingDestination = false;
         private static TypeaheadSearchHelper typeahead = new TypeaheadSearchHelper();
 
-        // Stats tab entries for navigation
-        private static List<string> statsEntries = new List<string>();
-        private static int statsIndex = 0;
+        // Summary toggle state (Tab key to quickly view stats)
+        private static bool showingSummary = false;
+        private static Tab savedTab = Tab.Pawns;
+        private static int savedIndex = 0;
+
+        // Summary navigation (up/down arrows to navigate through stats)
+        private static List<string> summaryItems = new List<string>();
+        private static int summaryIndex = 0;
+
+        // Flag to track if summary instructions have been shown this session (not reset on Close)
+        private static bool summaryInstructionsShown = false;
+
+        // Track if we're choosing destination (route planning mode)
+        private static bool isChoosingDestination = false;
+
+        // Flag to skip activation when route planner is being opened first
+        private static bool pendingRoutePlannerOpen = false;
+
+        // Auto-provision toggle state
+        private static bool autoProvisionEnabled = false;
+        private static Dictionary<TransferableOneWay, int> savedSupplyAmounts = new Dictionary<TransferableOneWay, int>();
+
+        // Position memory per tab - preserves selected index when switching tabs
+        private static Dictionary<Tab, int> tabPositions = new Dictionary<Tab, int>();
+
+        // Flag to track if send was attempted (to avoid announcing "cancelled" on successful send)
+        private static bool sendAttempted = false;
 
         /// <summary>
         /// Gets whether caravan formation keyboard navigation is currently active.
@@ -44,13 +67,47 @@ namespace RimWorldAccess
         public static bool IsActive => isActive;
 
         /// <summary>
-        /// Gets whether we're currently choosing a destination for the caravan.
+        /// Gets whether a send was attempted (used by PostClose to decide announcement).
+        /// </summary>
+        public static bool SendAttempted => sendAttempted;
+
+        /// <summary>
+        /// Resets the send attempted flag. Called when user cancels a confirmation dialog
+        /// (e.g., "Go back" on the low food warning) to restore normal cancel behavior.
+        /// </summary>
+        public static void ResetSendAttempted()
+        {
+            sendAttempted = false;
+        }
+
+        /// <summary>
+        /// Gets whether typeahead search is currently active.
+        /// Used by Window.OnCancelKeyPressed patch to block dialog close.
+        /// </summary>
+        public static bool HasActiveTypeahead => typeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Gets whether we're currently in destination choosing mode.
         /// </summary>
         public static bool IsChoosingDestination => isChoosingDestination;
 
         /// <summary>
+        /// Gets whether auto-provision is enabled (supplies tab is read-only).
+        /// </summary>
+        public static bool AutoProvisionEnabled => autoProvisionEnabled;
+
+        /// <summary>
+        /// Gets or sets whether route planner open is pending.
+        /// Set to true before adding dialog to window stack when route planner should open first.
+        /// </summary>
+        public static bool PendingRoutePlannerOpen
+        {
+            get => pendingRoutePlannerOpen;
+            set => pendingRoutePlannerOpen = value;
+        }
+
+        /// <summary>
         /// Triggers caravan reformation from the current map (for temporary encounter maps after ambushes).
-        /// This checks if the current map is a temporary map and opens Dialog_FormCaravan with reform=true.
         /// </summary>
         public static void TriggerReformation()
         {
@@ -62,14 +119,12 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Check if this is a temporary map that requires reformation
             if (currentMap.IsPlayerHome)
             {
                 TolkHelper.Speak("Cannot reform caravan from home settlement. Use world map to form new caravans.", SpeechPriority.High);
                 return;
             }
 
-            // Get the FormCaravanComp from the map's parent world object
             MapParent mapParent = currentMap.Parent;
             if (mapParent == null)
             {
@@ -84,10 +139,8 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Check if reformation is allowed (no active threats, etc.)
             if (!formCaravanComp.CanFormOrReformCaravanNow)
             {
-                // Try to get the reason why reformation is blocked
                 if (GenHostility.AnyHostileActiveThreatToPlayer(currentMap, countDormantPawnsAsHostile: false))
                 {
                     TolkHelper.Speak("Cannot reform caravan while enemies are present", SpeechPriority.High);
@@ -99,7 +152,6 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Open Dialog_FormCaravan in reform mode
             Dialog_FormCaravan reformDialog = new Dialog_FormCaravan(currentMap, reform: true);
             Find.WindowStack.Add(reformDialog);
 
@@ -121,12 +173,14 @@ namespace RimWorldAccess
             currentDialog = dialog;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
+            showingSummary = false;
+            isChoosingDestination = false;
             typeahead.ClearSearch();
 
             // Disable auto-select travel supplies to prevent it from resetting our manual selections
             DisableAutoSelectTravelSupplies();
 
-            TolkHelper.Speak("Caravan formation dialog opened. Use Left/Right to switch tabs, Up/Down to navigate, +/- or Enter to adjust. Press Alt+D to choose destination, Alt+T to send, Alt+R to reset, Escape to cancel.");
+            TolkHelper.Speak("Form caravan dialog opened. Tab for summary, Alt+I to inspect, Alt+S to send.");
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
@@ -140,13 +194,19 @@ namespace RimWorldAccess
             currentDialog = null;
             currentTab = Tab.Pawns;
             selectedIndex = 0;
-            statsIndex = 0;
-            statsEntries.Clear();
+            showingSummary = false;
+            isChoosingDestination = false;
+            autoProvisionEnabled = false;
+            savedSupplyAmounts.Clear();
+            tabPositions.Clear();
+            summaryItems.Clear();
+            summaryIndex = 0;
             typeahead.ClearSearch();
+            sendAttempted = false;
         }
 
         /// <summary>
-        /// Gets the transferables list from the current dialog using reflection.
+        /// Gets the transferables list from the current dialog.
         /// </summary>
         private static List<TransferableOneWay> GetTransferables()
         {
@@ -155,14 +215,10 @@ namespace RimWorldAccess
 
             try
             {
-                FieldInfo field = AccessTools.Field(typeof(Dialog_FormCaravan), "transferables");
-                if (field != null)
+                // transferables is public in Dialog_FormCaravan
+                if (currentDialog.transferables != null)
                 {
-                    var result = field.GetValue(currentDialog);
-                    if (result is List<TransferableOneWay> transferables)
-                    {
-                        return transferables;
-                    }
+                    return currentDialog.transferables;
                 }
             }
             catch (Exception ex)
@@ -179,65 +235,21 @@ namespace RimWorldAccess
         private static List<TransferableOneWay> GetCurrentTabTransferables()
         {
             List<TransferableOneWay> allTransferables = GetTransferables();
-
-            switch (currentTab)
-            {
-                case Tab.Pawns:
-                    // Pawns: anything that's a Pawn
-                    return allTransferables
-                        .Where(t => t.ThingDef.category == ThingCategory.Pawn)
-                        .ToList();
-
-                case Tab.TravelSupplies:
-                    // Travel Supplies: use RimWorld's official filtering logic from CaravanUIUtility.GetTransferableCategory
-                    return allTransferables
-                        .Where(t => GetTransferableCategory(t) == TransferableCategory.TravelSupplies)
-                        .ToList();
-
-                case Tab.Items:
-                    // Items: everything that's not a pawn and not travel supplies
-                    return allTransferables
-                        .Where(t => GetTransferableCategory(t) == TransferableCategory.Item)
-                        .ToList();
-
-                default:
-                    return allTransferables;
-            }
+            return CaravanUIHelper.FilterByCategory(allTransferables, GetCategoryForTab(currentTab));
         }
 
         /// <summary>
-        /// Replicates RimWorld's CaravanUIUtility.GetTransferableCategory logic.
-        /// This determines whether an item is a Pawn, Travel Supply, or regular Item.
+        /// Maps the local Tab enum to CaravanUIHelper.TransferableCategory.
         /// </summary>
-        private static TransferableCategory GetTransferableCategory(TransferableOneWay t)
+        private static CaravanUIHelper.TransferableCategory GetCategoryForTab(Tab tab)
         {
-            if (t.ThingDef.category == ThingCategory.Pawn)
+            switch (tab)
             {
-                return TransferableCategory.Pawn;
+                case Tab.Pawns: return CaravanUIHelper.TransferableCategory.Pawns;
+                case Tab.TravelSupplies: return CaravanUIHelper.TransferableCategory.FoodAndMedicine;
+                case Tab.Items: return CaravanUIHelper.TransferableCategory.Items;
+                default: return CaravanUIHelper.TransferableCategory.Pawns;
             }
-
-            // Travel Supplies include:
-            // 1. Medicine (in the Medicine thing category)
-            // 2. Food (ingestible, not drug, not corpse, not tree)
-            // 3. Bedrolls (beds that caravans can use)
-            if ((!t.ThingDef.thingCategories.NullOrEmpty() && t.ThingDef.thingCategories.Contains(ThingCategoryDefOf.Medicine)) ||
-                (t.ThingDef.IsIngestible && !t.ThingDef.IsDrug && !t.ThingDef.IsCorpse && (t.ThingDef.plant == null || !t.ThingDef.plant.IsTree)) ||
-                (t.AnyThing.GetInnerIfMinified().def.IsBed && t.AnyThing.GetInnerIfMinified().def.building != null && t.AnyThing.GetInnerIfMinified().def.building.bed_caravansCanUse))
-            {
-                return TransferableCategory.TravelSupplies;
-            }
-
-            return TransferableCategory.Item;
-        }
-
-        /// <summary>
-        /// Enum matching RimWorld's internal TransferableCategory enum.
-        /// </summary>
-        private enum TransferableCategory
-        {
-            Pawn,
-            Item,
-            TravelSupplies
         }
 
         /// <summary>
@@ -245,28 +257,9 @@ namespace RimWorldAccess
         /// </summary>
         private static void AnnounceCurrentTab()
         {
-            if (currentTab == Tab.Stats)
-            {
-                TolkHelper.Speak("Stats tab");
-                return;
-            }
-
-            string tabName = "";
-            switch (currentTab)
-            {
-                case Tab.Pawns:
-                    tabName = "Pawns tab";
-                    break;
-                case Tab.Items:
-                    tabName = "Items tab";
-                    break;
-                case Tab.TravelSupplies:
-                    tabName = "Travel Supplies tab";
-                    break;
-            }
-
+            string tabName = GetTabName(currentTab);
             List<TransferableOneWay> tabTransferables = GetCurrentTabTransferables();
-            TolkHelper.Speak($"{tabName}, {tabTransferables.Count} items");
+            TolkHelper.Speak($"{tabName} tab, {tabTransferables.Count} items");
         }
 
         /// <summary>
@@ -274,10 +267,9 @@ namespace RimWorldAccess
         /// </summary>
         private static void AnnounceCurrentItem()
         {
-            // Stats tab has special handling
-            if (currentTab == Tab.Stats)
+            if (showingSummary)
             {
-                AnnounceStats();
+                AnnounceSummary();
                 return;
             }
 
@@ -285,7 +277,7 @@ namespace RimWorldAccess
 
             if (transferables.Count == 0)
             {
-                TolkHelper.Speak("No items in this tab");
+                CaravanAnnouncementHelper.AnnounceNoItems();
                 return;
             }
 
@@ -295,53 +287,18 @@ namespace RimWorldAccess
             }
 
             TransferableOneWay transferable = transferables[selectedIndex];
+            string announcement = CaravanAnnouncementHelper.BuildItemAnnouncement(
+                transferable, selectedIndex, transferables.Count);
+            TolkHelper.Speak(announcement);
+        }
 
-            StringBuilder announcement = new StringBuilder();
-
-            if (transferable.AnyThing is Pawn pawn)
-            {
-                // Pawn announcement
-                announcement.Append(pawn.LabelShortCap.StripTags());
-
-                if (pawn.story != null && !pawn.story.TitleCap.NullOrEmpty())
-                {
-                    announcement.Append($", {pawn.story.TitleCap.StripTags()}");
-                }
-
-                if (transferable.CountToTransfer > 0)
-                {
-                    announcement.Append(" - Selected");
-                }
-                else
-                {
-                    announcement.Append(" - Not selected");
-                }
-            }
-            else
-            {
-                // Item announcement
-                announcement.Append(transferable.LabelCap.StripTags());
-
-                int current = transferable.CountToTransfer;
-                int max = transferable.GetMaximumToTransfer();
-
-                announcement.Append($" - {current} of {max}");
-
-                // Add mass information if significant
-                if (current > 0)
-                {
-                    float totalMass = transferable.AnyThing.GetStatValue(StatDefOf.Mass) * current;
-                    if (totalMass >= 1f)
-                    {
-                        announcement.Append($", {totalMass:F1} kg");
-                    }
-                }
-            }
-
-            // Add position at the end
-            announcement.Append($". {MenuHelper.FormatPosition(selectedIndex, transferables.Count)}");
-
-            TolkHelper.Speak(announcement.ToString());
+        /// <summary>
+        /// Gets the currently selected pawn, if any.
+        /// Works on Pawns tab or when a pawn-type transferable is selected on other tabs.
+        /// </summary>
+        private static Pawn GetSelectedPawn()
+        {
+            return CaravanUIHelper.GetSelectedPawn(GetCurrentTabTransferables(), selectedIndex);
         }
 
         /// <summary>
@@ -349,15 +306,10 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNext()
         {
-            // Stats tab has special navigation
-            if (currentTab == Tab.Stats)
+            if (showingSummary)
             {
-                RebuildStatsEntries();
-                if (statsEntries.Count > 0)
-                {
-                    statsIndex = MenuHelper.SelectNext(statsIndex, statsEntries.Count);
-                    AnnounceStats();
-                }
+                // In summary mode, navigate through summary items
+                SelectNextSummaryItem();
                 return;
             }
 
@@ -369,7 +321,6 @@ namespace RimWorldAccess
                 return;
             }
 
-            // If typeahead is active with matches, navigate to next match
             if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
             {
                 int nextMatch = typeahead.GetNextMatch(selectedIndex);
@@ -381,9 +332,7 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Navigate normally (either no search active, OR search with no matches)
             selectedIndex = MenuHelper.SelectNext(selectedIndex, transferables.Count);
-
             AnnounceCurrentItem();
         }
 
@@ -392,15 +341,10 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPrevious()
         {
-            // Stats tab has special navigation
-            if (currentTab == Tab.Stats)
+            if (showingSummary)
             {
-                RebuildStatsEntries();
-                if (statsEntries.Count > 0)
-                {
-                    statsIndex = MenuHelper.SelectPrevious(statsIndex, statsEntries.Count);
-                    AnnounceStats();
-                }
+                // In summary mode, navigate through summary items
+                SelectPreviousSummaryItem();
                 return;
             }
 
@@ -412,7 +356,6 @@ namespace RimWorldAccess
                 return;
             }
 
-            // If typeahead is active with matches, navigate to previous match
             if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
             {
                 int prevMatch = typeahead.GetPreviousMatch(selectedIndex);
@@ -424,197 +367,502 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Navigate normally (either no search active, OR search with no matches)
             selectedIndex = MenuHelper.SelectPrevious(selectedIndex, transferables.Count);
-
             AnnounceCurrentItem();
         }
 
         /// <summary>
-        /// Jumps to the first item in the current tab.
-        /// </summary>
-        public static void JumpToFirst()
-        {
-            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
-
-            if (transferables.Count == 0)
-            {
-                TolkHelper.Speak("No items in this tab");
-                return;
-            }
-
-            selectedIndex = MenuHelper.JumpToFirst();
-            AnnounceCurrentItem();
-        }
-
-        /// <summary>
-        /// Jumps to the last item in the current tab.
-        /// </summary>
-        public static void JumpToLast()
-        {
-            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
-
-            if (transferables.Count == 0)
-            {
-                TolkHelper.Speak("No items in this tab");
-                return;
-            }
-
-            selectedIndex = MenuHelper.JumpToLast(transferables.Count);
-            AnnounceCurrentItem();
-        }
-
-        /// <summary>
-        /// Switches to the next tab.
+        /// Switches to the next tab, preserving position in each tab.
         /// </summary>
         public static void NextTab()
         {
+            if (showingSummary)
+            {
+                showingSummary = false;
+            }
+
+            // Save current position before switching
+            tabPositions[currentTab] = selectedIndex;
+
             currentTab = (Tab)(((int)currentTab + 1) % TabCount);
-            selectedIndex = 0;
-            statsIndex = 0;
+
+            // Restore saved position for new tab (default to 0 if not visited yet)
+            if (tabPositions.TryGetValue(currentTab, out int savedPos))
+            {
+                // Clamp to valid range in case list changed
+                List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                selectedIndex = System.Math.Min(savedPos, System.Math.Max(0, transferables.Count - 1));
+            }
+            else
+            {
+                selectedIndex = 0;
+            }
+
             typeahead.ClearSearch();
+            SyncGameTab();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
 
         /// <summary>
-        /// Switches to the previous tab.
+        /// Switches to the previous tab, preserving position in each tab.
         /// </summary>
         public static void PreviousTab()
         {
+            if (showingSummary)
+            {
+                showingSummary = false;
+            }
+
+            // Save current position before switching
+            tabPositions[currentTab] = selectedIndex;
+
             currentTab = (Tab)(((int)currentTab + TabCount - 1) % TabCount);
-            selectedIndex = 0;
-            statsIndex = 0;
+
+            // Restore saved position for new tab (default to 0 if not visited yet)
+            if (tabPositions.TryGetValue(currentTab, out int savedPos))
+            {
+                // Clamp to valid range in case list changed
+                List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                selectedIndex = System.Math.Min(savedPos, System.Math.Max(0, transferables.Count - 1));
+            }
+            else
+            {
+                selectedIndex = 0;
+            }
+
             typeahead.ClearSearch();
+            SyncGameTab();
             AnnounceCurrentTab();
             AnnounceCurrentItem();
         }
 
         /// <summary>
-        /// Adjusts the quantity of the selected item.
+        /// Syncs the game's visual tab with our internal tab state.
+        /// The game's Dialog_FormCaravan.tab field is private, so we use reflection.
+        /// Game tab values: Pawns=0, Items=1, TravelSupplies=2
         /// </summary>
-        public static void AdjustQuantity(int delta)
+        private static void SyncGameTab()
         {
-            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
-
-            if (transferables.Count == 0)
-            {
-                TolkHelper.Speak("No items in this tab");
-                return;
-            }
-
-            if (selectedIndex < 0 || selectedIndex >= transferables.Count)
+            if (currentDialog == null)
                 return;
 
-            TransferableOneWay transferable = transferables[selectedIndex];
-
-            if (transferable.AnyThing is Pawn)
+            try
             {
-                // For pawns, toggle selection (0 or max)
-                if (transferable.CountToTransfer > 0)
+                // Map our Tab enum to game's tab values
+                int gameTabValue;
+                switch (currentTab)
                 {
-                    transferable.AdjustTo(0);
-                    TolkHelper.Speak("Deselected");
+                    case Tab.Pawns:
+                        gameTabValue = 0;
+                        break;
+                    case Tab.Items:
+                        gameTabValue = 1;
+                        break;
+                    case Tab.TravelSupplies:
+                        gameTabValue = 2;
+                        break;
+                    default:
+                        gameTabValue = 0;
+                        break;
                 }
-                else
+
+                FieldInfo tabField = AccessTools.Field(typeof(Dialog_FormCaravan), "tab");
+                if (tabField != null)
                 {
-                    int max = transferable.GetMaximumToTransfer();
-                    transferable.AdjustTo(max);
-                    TolkHelper.Speak("Selected");
+                    tabField.SetValue(currentDialog, gameTabValue);
                 }
             }
-            else
+            catch (Exception ex)
             {
-                // For items, adjust by delta
-                // Check if the item is interactive first
-                if (!transferable.Interactive)
-                {
-                    TolkHelper.Speak("This item cannot be adjusted");
-                    return;
-                }
-
-                AcceptanceReport canAdjust = transferable.CanAdjustBy(delta);
-                if (canAdjust.Accepted)
-                {
-                    transferable.AdjustBy(delta);
-                    NotifyTransferablesChanged();
-                    AnnounceCurrentItem();
-                }
-                else
-                {
-                    // Report the specific reason why adjustment failed
-                    string reason = canAdjust.Reason.NullOrEmpty() ? "Cannot adjust quantity" : canAdjust.Reason;
-                    TolkHelper.Speak(reason);
-                }
+                ModLogger.Error($"Failed to sync game tab: {ex.Message}");
             }
-
-            NotifyTransferablesChanged();
         }
 
         /// <summary>
-        /// Toggles selection for the current item (same as Enter key).
+        /// Toggles between the current tab and the Summary view.
         /// </summary>
-        public static void ToggleSelection()
+        private static void ToggleSummaryView()
         {
-            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
-
-            if (transferables.Count == 0)
+            if (showingSummary)
             {
-                TolkHelper.Speak("No items in this tab");
+                showingSummary = false;
+                currentTab = savedTab;
+                selectedIndex = savedIndex;
+                typeahead.ClearSearch();
+                SoundDefOf.Click.PlayOneShotOnCamera();
+
+                string tabName = GetTabName(currentTab);
+                TolkHelper.Speak($"Returned to {tabName} tab");
+                AnnounceCurrentItem();
+            }
+            else
+            {
+                savedTab = currentTab;
+                savedIndex = selectedIndex;
+                showingSummary = true;
+                typeahead.ClearSearch();
+                SoundDefOf.Click.PlayOneShotOnCamera();
+
+                // Only announce full instructions the first time per session
+                if (!summaryInstructionsShown)
+                {
+                    TolkHelper.Speak("Summary view. Up/Down navigates stats, Alt+I for breakdown. Tab to return.");
+                    summaryInstructionsShown = true;
+                }
+                else
+                {
+                    TolkHelper.Speak("Summary view.");
+                }
+                AnnounceSummary();
+            }
+        }
+
+        /// <summary>
+        /// Builds the list of summary items for navigation.
+        /// Preserves summaryIndex position if within valid range.
+        /// Shows exactly what CaravanUIUtility.DrawCaravanInfo displays:
+        /// Mass, Speed, Food, Foraging, Visibility.
+        /// </summary>
+        private static void BuildSummaryItems()
+        {
+            summaryItems.Clear();
+            // Don't reset summaryIndex here - preserve position across summary views
+
+            if (currentDialog == null)
+            {
+                summaryItems.Add("No caravan data available");
                 return;
             }
 
-            if (selectedIndex < 0 || selectedIndex >= transferables.Count)
+            try
+            {
+                // 1. Mass (public properties)
+                float massUsage = currentDialog.MassUsage;
+                float massCapacity = currentDialog.MassCapacity;
+                bool isOverloaded = massUsage > massCapacity;
+                summaryItems.Add(CaravanStatFormatter.FormatMass(massUsage, massCapacity));
+
+                // 2. Speed (TilesPerDay is private)
+                PropertyInfo tilesInfo = AccessTools.Property(typeof(Dialog_FormCaravan), "TilesPerDay");
+                if (tilesInfo != null)
+                {
+                    float tilesPerDay = (float)tilesInfo.GetValue(currentDialog);
+                    summaryItems.Add(CaravanStatFormatter.FormatSpeed(tilesPerDay, isOverloaded));
+                }
+
+                // 3. Food (DaysWorthOfFood is private)
+                PropertyInfo foodInfo = AccessTools.Property(typeof(Dialog_FormCaravan), "DaysWorthOfFood");
+                if (foodInfo != null)
+                {
+                    var foodObj = foodInfo.GetValue(currentDialog);
+                    var food = (ValueTuple<float, float>)foodObj;
+                    summaryItems.Add(CaravanStatFormatter.FormatFood(food.Item1, food.Item2));
+                }
+
+                // 4. Foraging (ForagedFoodPerDay is private)
+                PropertyInfo forageInfo = AccessTools.Property(typeof(Dialog_FormCaravan), "ForagedFoodPerDay");
+                if (forageInfo != null)
+                {
+                    var forageObj = forageInfo.GetValue(currentDialog);
+                    var forage = (ValueTuple<ThingDef, float>)forageObj;
+                    summaryItems.Add(CaravanStatFormatter.FormatForaging(forage.Item1, forage.Item2));
+                }
+
+                // 5. Visibility (private)
+                PropertyInfo visInfo = AccessTools.Property(typeof(Dialog_FormCaravan), "Visibility");
+                if (visInfo != null)
+                {
+                    float visibility = (float)visInfo.GetValue(currentDialog);
+                    summaryItems.Add(CaravanStatFormatter.FormatVisibility(visibility));
+                }
+
+                // Destination info
+                FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
+                if (destTileField != null)
+                {
+                    PlanetTile destTile = (PlanetTile)destTileField.GetValue(currentDialog);
+                    if (destTile.Valid && Find.WorldGrid != null)
+                    {
+                        string tileName = WorldInfoHelper.GetTileSummary(destTile);
+                        string destItem = $"Destination: {tileName}";
+
+                        PropertyInfo ticksToArriveProp = AccessTools.Property(typeof(Dialog_FormCaravan), "TicksToArrive");
+                        if (ticksToArriveProp != null)
+                        {
+                            try
+                            {
+                                int ticksToArrive = (int)ticksToArriveProp.GetValue(currentDialog);
+                                if (ticksToArrive > 0)
+                                {
+                                    float daysToArrive = ticksToArrive / 60000f;
+                                    destItem += $", ETA: {daysToArrive:F1} days";
+                                }
+                            }
+                            catch { }
+                        }
+                        summaryItems.Add(destItem);
+                    }
+                    else
+                    {
+                        summaryItems.Add("Destination: Not set");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"RimWorld Access: Failed to get caravan stats: {ex.Message}");
+                summaryItems.Add("Stats unavailable");
+            }
+        }
+
+        /// <summary>
+        /// Announces the caravan stats summary.
+        /// Builds the list and announces the first item.
+        /// </summary>
+        private static void AnnounceSummary()
+        {
+            BuildSummaryItems();
+            AnnounceCurrentSummaryItem();
+        }
+
+        /// <summary>
+        /// Announces the currently selected summary item.
+        /// </summary>
+        private static void AnnounceCurrentSummaryItem()
+        {
+            if (summaryItems.Count == 0)
+            {
+                TolkHelper.Speak("No summary data");
+                return;
+            }
+
+            if (summaryIndex < 0 || summaryIndex >= summaryItems.Count)
+            {
+                summaryIndex = 0;
+            }
+
+            string item = summaryItems[summaryIndex];
+            string position = MenuHelper.FormatPosition(summaryIndex, summaryItems.Count);
+            TolkHelper.Speak($"{item}. {position}");
+        }
+
+        /// <summary>
+        /// Moves to the next summary item.
+        /// </summary>
+        private static void SelectNextSummaryItem()
+        {
+            if (summaryItems.Count == 0)
+                return;
+
+            summaryIndex = MenuHelper.SelectNext(summaryIndex, summaryItems.Count);
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSummaryItem();
+        }
+
+        /// <summary>
+        /// Moves to the previous summary item.
+        /// </summary>
+        private static void SelectPreviousSummaryItem()
+        {
+            if (summaryItems.Count == 0)
+                return;
+
+            summaryIndex = MenuHelper.SelectPrevious(summaryIndex, summaryItems.Count);
+            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
+            AnnounceCurrentSummaryItem();
+        }
+
+        /// <summary>
+        /// Gets the explanation text for the currently selected summary stat.
+        /// Uses reflection to access the cached explanation fields from the dialog.
+        /// Detects stat type from the summary item text since order includes Foraging now.
+        /// </summary>
+        /// <returns>A tuple of (stat name, explanation text) or null if no explanation available.</returns>
+        private static (string name, string explanation)? GetCurrentStatExplanation()
+        {
+            if (currentDialog == null || summaryItems.Count == 0)
+                return null;
+
+            if (summaryIndex < 0 || summaryIndex >= summaryItems.Count)
+                return null;
+
+            string currentItem = summaryItems[summaryIndex];
+
+            try
+            {
+                // Detect stat type from the summary item text prefix
+                // IMPORTANT: We must access the property first to trigger recalculation of the cached explanation.
+                string fieldName = null;
+                string propertyName = null;
+                string statName = null;
+
+                if (currentItem.StartsWith("Mass:"))
+                {
+                    fieldName = "cachedMassCapacityExplanation";
+                    propertyName = "MassCapacity";
+                    statName = "Mass Capacity";
+                }
+                else if (currentItem.StartsWith("Speed:"))
+                {
+                    fieldName = "cachedTilesPerDayExplanation";
+                    propertyName = "TilesPerDay";
+                    statName = "Speed";
+                }
+                else if (currentItem.StartsWith("Food:"))
+                {
+                    // Food doesn't have a breakdown explanation in the game
+                    // The tooltip is just "DaysWorthOfFoodTooltip" which we already include
+                    return null;
+                }
+                else if (currentItem.StartsWith("Foraging:"))
+                {
+                    fieldName = "cachedForagedFoodPerDayExplanation";
+                    propertyName = "ForagedFoodPerDay";
+                    statName = "Foraging";
+                }
+                else if (currentItem.StartsWith("Visibility:"))
+                {
+                    fieldName = "cachedVisibilityExplanation";
+                    propertyName = "Visibility";
+                    statName = "Visibility";
+                }
+                else
+                {
+                    // Destination or other items have no breakdown
+                    return null;
+                }
+
+                if (fieldName == null)
+                    return null;
+
+                // Access the property first to trigger recalculation of the cached explanation
+                if (propertyName != null)
+                {
+                    PropertyInfo prop = AccessTools.Property(typeof(Dialog_FormCaravan), propertyName);
+                    if (prop != null)
+                    {
+                        // Just access the property getter - we don't need the value,
+                        // this triggers the game to recalculate the cached explanation
+                        prop.GetValue(currentDialog);
+                    }
+                }
+
+                FieldInfo field = AccessTools.Field(typeof(Dialog_FormCaravan), fieldName);
+                if (field == null)
+                    return null;
+
+                string explanation = field.GetValue(currentDialog) as string;
+                if (string.IsNullOrEmpty(explanation))
+                    return null;
+
+                return (statName, explanation);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"RimWorld Access: Failed to get stat explanation: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Toggles selection for a pawn (Space key in Pawns tab).
+        /// For grouped pawns (multiple animals), opens quantity menu instead.
+        /// </summary>
+        private static void TogglePawnSelection()
+        {
+            if (currentTab != Tab.Pawns)
+                return;
+
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+            if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
                 return;
 
             TransferableOneWay transferable = transferables[selectedIndex];
 
-            if (transferable.AnyThing is Pawn)
+            // For grouped pawns (multiple animals), use quantity menu
+            if (transferable.MaxCount > 1)
             {
-                // For pawns, toggle between 0 and max
-                if (transferable.CountToTransfer > 0)
-                {
-                    transferable.AdjustTo(0);
-                    TolkHelper.Speak($"Deselected {transferable.LabelCap.StripTags()}");
-                }
-                else
-                {
-                    int max = transferable.GetMaximumToTransfer();
-                    transferable.AdjustTo(max);
-                    TolkHelper.Speak($"Selected {transferable.LabelCap.StripTags()}");
-                }
-            }
-            else
-            {
-                // For items, increment by 1
-                // Check if the item is interactive first
-                if (!transferable.Interactive)
-                {
-                    TolkHelper.Speak("This item cannot be adjusted");
-                    return;
-                }
-
-                AcceptanceReport canAdjust = transferable.CanAdjustBy(1);
-                if (canAdjust.Accepted)
-                {
-                    transferable.AdjustBy(1);
-                    NotifyTransferablesChanged();
-                    AnnounceCurrentItem();
-                }
-                else
-                {
-                    // Report the specific reason why adjustment failed
-                    string reason = canAdjust.Reason.NullOrEmpty() ? "Cannot increase quantity" : canAdjust.Reason;
-                    TolkHelper.Speak(reason);
-                }
+                OpenQuantityMenu(transferable);
+                return;
             }
 
-            NotifyTransferablesChanged();
+            // For single pawns, use toggle
+            CaravanUIHelper.TogglePawnSelection(transferable, NotifyTransferablesChanged);
+        }
+
+        /// <summary>
+        /// Opens the quantity menu for a transferable with standard callbacks.
+        /// </summary>
+        private static void OpenQuantityMenu(TransferableOneWay transferable)
+        {
+            QuantityMenuState.Open(transferable, (newQty) =>
+            {
+                transferable.AdjustTo(newQty);
+                NotifyTransferablesChanged();
+                AnnounceCurrentItem();
+            });
+        }
+
+        /// <summary>
+        /// Notifies the dialog that transferables have changed.
+        /// </summary>
+        private static void NotifyTransferablesChanged()
+        {
+            if (currentDialog == null)
+                return;
+
+            try
+            {
+                MethodInfo method = AccessTools.Method(typeof(Dialog_FormCaravan), "Notify_TransferablesChanged");
+                if (method != null)
+                {
+                    method.Invoke(currentDialog, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error($"Failed to call Notify_TransferablesChanged: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets the currently selected transferable for quantity adjustment.
+        /// Returns null if no valid selection (used by TransferableQuantityHelper).
+        /// </summary>
+        private static TransferableOneWay GetCurrentTransferableForQuantity()
+        {
+            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+            if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
+                return null;
+
+            return transferables[selectedIndex];
+        }
+
+        /// <summary>
+        /// Disables auto-select travel supplies to prevent it from resetting manual selections.
+        /// </summary>
+        private static void DisableAutoSelectTravelSupplies()
+        {
+            if (currentDialog == null)
+                return;
+
+            try
+            {
+                FieldInfo field = AccessTools.Field(typeof(Dialog_FormCaravan), "autoSelectTravelSupplies");
+                if (field != null)
+                {
+                    field.SetValue(currentDialog, false);
+                }
+            }
+            catch (Exception ex)
+            {
+                ModLogger.Error($"Failed to disable auto-select travel supplies: {ex.Message}");
+            }
         }
 
         /// <summary>
         /// Opens the route planner to choose a destination for the caravan.
-        /// Switches to world view and enables destination selection mode.
         /// </summary>
         public static void ChooseRoute()
         {
@@ -626,20 +874,15 @@ namespace RimWorldAccess
 
             try
             {
-                // Enter destination selection mode BEFORE removing dialog
-                // (PostClose checks this flag to avoid clearing currentDialog)
                 isChoosingDestination = true;
 
-                // Close the dialog temporarily (don't clear currentDialog - we need it to return)
                 if (Find.WindowStack != null)
                 {
                     Find.WindowStack.TryRemove(currentDialog, doCloseSound: false);
                 }
 
-                // Switch to world view
                 CameraJumper.TryShowWorld();
 
-                // Make sure world navigation is active
                 if (!WorldNavigationState.IsActive)
                 {
                     WorldNavigationState.Open();
@@ -662,7 +905,6 @@ namespace RimWorldAccess
             if (currentDialog == null)
             {
                 TolkHelper.Speak("No dialog available", SpeechPriority.High);
-                Log.Warning("RimWorld Access: SetDestination called but currentDialog is null");
                 isChoosingDestination = false;
                 return;
             }
@@ -670,16 +912,12 @@ namespace RimWorldAccess
             if (!destinationTile.Valid)
             {
                 TolkHelper.Speak("Invalid destination tile", SpeechPriority.High);
-                Log.Warning($"RimWorld Access: SetDestination called with invalid tile: {destinationTile}");
                 isChoosingDestination = false;
                 return;
             }
 
             try
             {
-                Log.Message($"RimWorld Access: Setting caravan destination to tile {destinationTile.tileId}");
-
-                // Get the method before we do anything
                 MethodInfo notifyChoseRouteMethod = AccessTools.Method(typeof(Dialog_FormCaravan), "Notify_ChoseRoute");
                 if (notifyChoseRouteMethod == null)
                 {
@@ -688,31 +926,17 @@ namespace RimWorldAccess
                     return;
                 }
 
-                // Return to map view first
                 CameraJumper.TryHideWorld();
 
-                // Reopen the dialog BEFORE calling Notify_ChoseRoute (matches game behavior)
                 if (Find.WindowStack != null)
                 {
                     Find.WindowStack.Add(currentDialog);
                 }
 
-                // Exit destination selection mode BEFORE calling Notify_ChoseRoute
-                // (so PostOpen doesn't think we're still choosing)
                 isChoosingDestination = false;
 
-                // Now call Notify_ChoseRoute to set destination and calculate exit tile
                 notifyChoseRouteMethod.Invoke(currentDialog, new object[] { destinationTile });
 
-                // Verify the destination was set by reading it back
-                FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
-                if (destTileField != null)
-                {
-                    PlanetTile setTile = (PlanetTile)destTileField.GetValue(currentDialog);
-                    Log.Message($"RimWorld Access: After Notify_ChoseRoute, destinationTile is now: {setTile.tileId}, Valid: {setTile.Valid}");
-                }
-
-                // Announce destination set
                 string tileInfo = WorldInfoHelper.GetTileSummary(destinationTile);
                 TolkHelper.Speak($"Destination set to {tileInfo}.");
             }
@@ -737,16 +961,13 @@ namespace RimWorldAccess
 
             try
             {
-                // Return to map view
                 CameraJumper.TryHideWorld();
 
-                // Reopen the dialog
                 if (Find.WindowStack != null)
                 {
                     Find.WindowStack.Add(currentDialog);
                 }
 
-                // Exit destination selection mode
                 isChoosingDestination = false;
 
                 TolkHelper.Speak("Destination selection cancelled. Returning to caravan formation dialog.");
@@ -760,7 +981,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Attempts to send the caravan by calling Dialog_FormCaravan.TrySend() via reflection.
+        /// Attempts to send the caravan.
         /// </summary>
         public static void Send()
         {
@@ -770,49 +991,79 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Store reference locally in case it gets nulled during the operation
+            Dialog_FormCaravan dialog = currentDialog;
+
             try
             {
-                MethodInfo method = AccessTools.Method(typeof(Dialog_FormCaravan), "TrySend");
-                if (method != null)
+                bool wasActive = isActive;
+                isActive = false;
+                sendAttempted = true;
+
+                // IMPORTANT: Stop the route planner BEFORE calling OnAcceptKeyPressed
+                // The game starts WorldRoutePlanner in PostOpen for ALL caravan dialogs (including reform).
+                // For reform caravans, TryReformCaravan() removes the map, which switches to world view
+                // BEFORE PostClose fires. This leaves the route planner active when entering world view.
+                // By stopping it here, we ensure it's closed before the map switch happens.
+                try
                 {
-                    TolkHelper.Speak("Attempting to send caravan...");
-
-                    // Temporarily deactivate keyboard navigation so confirmation dialogs can be accessed
-                    // (TrySend may show "low food" or other warnings that require confirmation)
-                    bool wasActive = isActive;
-                    isActive = false;
-
-                    method.Invoke(currentDialog, null);
-
-                    // If the dialog is still in the window stack, reactivate keyboard navigation
-                    // (This happens when a confirmation dialog is shown)
-                    // If the dialog closed successfully, PostClose will have been called already
-                    if (currentDialog != null && Find.WindowStack != null && Find.WindowStack.IsOpen(currentDialog))
+                    var routePlanner = Find.WorldRoutePlanner;
+                    if (routePlanner != null)
                     {
+                        bool plannerActive = false;
+                        try { plannerActive = routePlanner.Active; } catch { }
+                        if (plannerActive)
+                        {
+                            routePlanner.Stop();
+                        }
+                    }
+                }
+                catch (Exception routeEx)
+                {
+                    Log.Warning($"RimWorld Access: Failed to stop route planner: {routeEx.Message}");
+                    // Continue anyway - stopping route planner is not critical
+                }
+
+                // IMPORTANT: Store current map's tile BEFORE sending, because reform caravans
+                // will remove the temporary map before WorldNavigationState.Open() is called.
+                // This ensures the world cursor starts at the reform location, not the colony.
+                Map currentMap = Find.CurrentMap;
+                if (currentMap != null && currentMap.Tile.Valid)
+                {
+                    WorldNavigationState.PendingStartTile = currentMap.Tile;
+                }
+
+                // Use the local reference, not the static field which might get nulled
+                dialog.OnAcceptKeyPressed();
+
+                // Check if dialog is still open (validation failed)
+                // Only restore isActive so user can keep interacting - do NOT reset sendAttempted
+                // because the dialog close might be asynchronous (e.g., confirmation dialogs)
+                // PostClose_Postfix will handle the sendAttempted flag correctly
+                if (Find.WindowStack != null)
+                {
+                    bool stillOpen = false;
+                    try { stillOpen = Find.WindowStack.IsOpen(dialog); } catch { }
+                    if (stillOpen)
+                    {
+                        // Dialog still open means send failed validation - restore isActive
+                        // but keep sendAttempted true so PostClose knows send was attempted
                         isActive = wasActive;
                     }
-                    // TrySend will show error messages if validation fails
-                    // If successful, the dialog will close and CaravanFormationPatch.PostClose will be called
-                }
-                else
-                {
-                    TolkHelper.Speak("Failed to send caravan - method not found", SpeechPriority.High);
                 }
             }
             catch (Exception ex)
             {
                 TolkHelper.Speak($"Failed to send caravan: {ex.Message}", SpeechPriority.High);
-                Log.Error($"RimWorld Access: Failed to call TrySend on Dialog_FormCaravan: {ex.Message}");
-                // Reactivate on error
-                if (currentDialog != null)
-                {
-                    isActive = true;
-                }
+                Log.Error($"RimWorld Access: Failed to send caravan: {ex.Message}\n{ex.StackTrace}");
+                isActive = true;
+                // Only reset sendAttempted on actual exception - not when dialog stays open
+                sendAttempted = false;
             }
         }
 
         /// <summary>
-        /// Resets all selections by calling Dialog_FormCaravan.CalculateAndRecacheTransferables() via reflection.
+        /// Resets all selections.
         /// </summary>
         public static void Reset()
         {
@@ -832,266 +1083,115 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Selections reset");
                     AnnounceCurrentItem();
                 }
-                else
-                {
-                    TolkHelper.Speak("Failed to reset - method not found", SpeechPriority.High);
-                }
             }
             catch (Exception ex)
             {
                 TolkHelper.Speak($"Failed to reset: {ex.Message}", SpeechPriority.High);
-                Log.Error($"RimWorld Access: Failed to call CalculateAndRecacheTransferables: {ex.Message}");
+                Log.Error($"RimWorld Access: Failed to reset caravan formation: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Disables auto-select travel supplies feature to prevent it from resetting manual selections.
+        /// Toggles automatic travel supplies selection.
+        /// When enabled: saves current amounts, auto-selects optimal supplies, locks supplies tab.
+        /// When disabled: restores previous amounts, unlocks supplies tab.
         /// </summary>
-        private static void DisableAutoSelectTravelSupplies()
+        public static void ToggleAutoProvision()
         {
             if (currentDialog == null)
+            {
+                TolkHelper.Speak("No dialog available", SpeechPriority.High);
                 return;
+            }
 
             try
             {
-                FieldInfo field = AccessTools.Field(typeof(Dialog_FormCaravan), "autoSelectTravelSupplies");
-                if (field != null)
+                if (autoProvisionEnabled)
                 {
-                    field.SetValue(currentDialog, false);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error($"Failed to disable auto-select travel supplies: {ex.Message}");
-            }
-        }
+                    // Turning OFF - restore saved amounts
+                    autoProvisionEnabled = false;
 
-        /// <summary>
-        /// Notifies the dialog that transferables have changed, which recalculates mass/food stats.
-        /// </summary>
-        private static void NotifyTransferablesChanged()
-        {
-            if (currentDialog == null)
-                return;
-
-            try
-            {
-                MethodInfo method = AccessTools.Method(typeof(Dialog_FormCaravan), "Notify_TransferablesChanged");
-                if (method != null)
-                {
-                    method.Invoke(currentDialog, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                ModLogger.Error($"Failed to call Notify_TransferablesChanged: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Rebuilds the stats entries list from current caravan data.
-        /// </summary>
-        private static void RebuildStatsEntries()
-        {
-            statsEntries.Clear();
-
-            if (currentDialog == null)
-                return;
-
-            try
-            {
-                // Get mass usage and capacity (public properties)
-                PropertyInfo massUsageProp = AccessTools.Property(typeof(Dialog_FormCaravan), "MassUsage");
-                PropertyInfo massCapacityProp = AccessTools.Property(typeof(Dialog_FormCaravan), "MassCapacity");
-
-                if (massUsageProp != null && massCapacityProp != null)
-                {
-                    float massUsage = (float)massUsageProp.GetValue(currentDialog);
-                    float massCapacity = (float)massCapacityProp.GetValue(currentDialog);
-                    float massRemaining = massCapacity - massUsage;
-
-                    string massEntry = $"Mass: {massUsage:F1} of {massCapacity:F1} kg";
-                    if (massUsage > massCapacity)
+                    // Set game's flag to false
+                    FieldInfo autoField = AccessTools.Field(typeof(Dialog_FormCaravan), "autoSelectTravelSupplies");
+                    if (autoField != null)
                     {
-                        massEntry += " - OVERLOADED!";
+                        autoField.SetValue(currentDialog, false);
                     }
-                    else
+
+                    // Restore saved amounts
+                    foreach (var kvp in savedSupplyAmounts)
                     {
-                        massEntry += $", {massRemaining:F1} kg remaining";
+                        kvp.Key.AdjustTo(kvp.Value);
                     }
-                    statsEntries.Add(massEntry);
-                }
+                    savedSupplyAmounts.Clear();
 
-                // Get days worth of food (private property)
-                try
-                {
-                    PropertyInfo daysWorthProp = AccessTools.Property(typeof(Dialog_FormCaravan), "DaysWorthOfFood");
-                    if (daysWorthProp != null)
-                    {
-                        var daysWorth = daysWorthProp.GetValue(currentDialog);
-                        float days = (float)daysWorth.GetType().GetField("Item1").GetValue(daysWorth);
-                        float tillRot = (float)daysWorth.GetType().GetField("Item2").GetValue(daysWorth);
-
-                        string foodEntry;
-                        if (days < 0.1f)
-                        {
-                            foodEntry = "Food: None!";
-                        }
-                        else
-                        {
-                            foodEntry = $"Food: {days:F1} days";
-                            if (tillRot < days && tillRot > 0)
-                            {
-                                foodEntry += $", spoils in {tillRot:F1} days";
-                            }
-                        }
-                        statsEntries.Add(foodEntry);
-                    }
-                }
-                catch { /* Skip food stats on error */ }
-
-                // Get tiles per day (private property)
-                try
-                {
-                    PropertyInfo tilesPerDayProp = AccessTools.Property(typeof(Dialog_FormCaravan), "TilesPerDay");
-                    if (tilesPerDayProp != null)
-                    {
-                        float tilesPerDay = (float)tilesPerDayProp.GetValue(currentDialog);
-                        string speedEntry = tilesPerDay > 0
-                            ? $"Speed: {tilesPerDay:F1} tiles per day"
-                            : "Speed: Cannot move!";
-                        statsEntries.Add(speedEntry);
-                    }
-                }
-                catch { /* Skip speed stats on error */ }
-
-                // Get foraging info (private property)
-                try
-                {
-                    PropertyInfo forageProp = AccessTools.Property(typeof(Dialog_FormCaravan), "ForagedFoodPerDay");
-                    if (forageProp != null)
-                    {
-                        var forageInfo = forageProp.GetValue(currentDialog);
-                        var foodDef = forageInfo.GetType().GetField("Item1").GetValue(forageInfo) as ThingDef;
-                        float perDay = (float)forageInfo.GetType().GetField("Item2").GetValue(forageInfo);
-
-                        if (foodDef != null && perDay > 0)
-                        {
-                            statsEntries.Add($"Foraging: {perDay:F1} {foodDef.label} per day");
-                        }
-                        else
-                        {
-                            statsEntries.Add("Foraging: None available");
-                        }
-                    }
-                }
-                catch { /* Skip foraging stats on error */ }
-
-                // Get visibility (private property)
-                try
-                {
-                    PropertyInfo visibilityProp = AccessTools.Property(typeof(Dialog_FormCaravan), "Visibility");
-                    if (visibilityProp != null)
-                    {
-                        float visibility = (float)visibilityProp.GetValue(currentDialog);
-                        statsEntries.Add($"Visibility: {visibility:P0}");
-                    }
-                }
-                catch { /* Skip visibility stats on error */ }
-
-                // Get destination info if set
-                try
-                {
-                    FieldInfo destTileField = AccessTools.Field(typeof(Dialog_FormCaravan), "destinationTile");
-                    if (destTileField != null)
-                    {
-                        // Cast boxed value directly to PlanetTile struct
-                        PlanetTile destTile = (PlanetTile)destTileField.GetValue(currentDialog);
-
-                        if (destTile.Valid && Find.WorldGrid != null)
-                        {
-                            string tileName = WorldInfoHelper.GetTileSummary(destTile);
-                            statsEntries.Add($"Destination: {tileName}");
-
-                            // Get ETA
-                            PropertyInfo ticksToArriveProp = AccessTools.Property(typeof(Dialog_FormCaravan), "TicksToArrive");
-                            if (ticksToArriveProp != null)
-                            {
-                                int ticksToArrive = (int)ticksToArriveProp.GetValue(currentDialog);
-                                if (ticksToArrive > 0)
-                                {
-                                    float daysToArrive = ticksToArrive / 60000f;
-                                    statsEntries.Add($"ETA: {daysToArrive:F1} days");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            statsEntries.Add("Destination: Not set (use Alt+D to choose)");
-                        }
-                    }
-                }
-                catch (Exception destEx)
-                {
-                    Log.Warning($"RimWorld Access: Failed to get destination info: {destEx.Message}");
-                    statsEntries.Add("Destination: Not set");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"RimWorld Access: Failed to rebuild caravan stats: {ex}");
-            }
-        }
-
-        /// <summary>
-        /// Announces the current stat entry.
-        /// </summary>
-        private static void AnnounceStats()
-        {
-            if (currentDialog == null)
-            {
-                TolkHelper.Speak("No caravan data available");
-                return;
-            }
-
-            // Rebuild stats entries each time to get current values
-            RebuildStatsEntries();
-
-            if (statsEntries.Count == 0)
-            {
-                TolkHelper.Speak("Could not read caravan stats");
-                return;
-            }
-
-            if (statsIndex < 0 || statsIndex >= statsEntries.Count)
-            {
-                statsIndex = 0;
-            }
-
-            string entry = statsEntries[statsIndex];
-            string position = MenuHelper.FormatPosition(statsIndex, statsEntries.Count);
-            TolkHelper.Speak($"{entry}. {position}");
-        }
-
-        /// <summary>
-        /// Gets the list of transferable labels for the current tab for typeahead search.
-        /// </summary>
-        private static List<string> GetTransferableLabels()
-        {
-            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
-            var labels = new List<string>();
-            foreach (var t in transferables)
-            {
-                if (t.AnyThing is Pawn pawn)
-                {
-                    labels.Add(pawn.LabelShortCap);
+                    NotifyTransferablesChanged();
+                    TolkHelper.Speak("Auto-provision off. Manual selection restored.");
                 }
                 else
                 {
-                    labels.Add(t.LabelCap);
+                    // Turning ON - save current amounts, then auto-select
+                    savedSupplyAmounts.Clear();
+
+                    // Save current travel supplies amounts
+                    List<TransferableOneWay> allTransferables = GetTransferables();
+                    foreach (var t in allTransferables)
+                    {
+                        if (t.ThingDef.category != ThingCategory.Pawn &&
+                            ((!t.ThingDef.thingCategories.NullOrEmpty() && t.ThingDef.thingCategories.Contains(ThingCategoryDefOf.Medicine)) ||
+                             (t.ThingDef.IsIngestible && !t.ThingDef.IsDrug && !t.ThingDef.IsCorpse && (t.ThingDef.plant == null || !t.ThingDef.plant.IsTree)) ||
+                             (t.AnyThing.GetInnerIfMinified().def.IsBed && t.AnyThing.GetInnerIfMinified().def.building != null && t.AnyThing.GetInnerIfMinified().def.building.bed_caravansCanUse)))
+                        {
+                            savedSupplyAmounts[t] = t.CountToTransfer;
+                        }
+                    }
+
+                    // Set game's flag to true
+                    FieldInfo autoField = AccessTools.Field(typeof(Dialog_FormCaravan), "autoSelectTravelSupplies");
+                    if (autoField != null)
+                    {
+                        autoField.SetValue(currentDialog, true);
+                    }
+
+                    // Call auto-select method
+                    MethodInfo method = AccessTools.Method(typeof(Dialog_FormCaravan), "SelectApproximateBestTravelSupplies");
+                    if (method != null)
+                    {
+                        method.Invoke(currentDialog, null);
+                    }
+
+                    autoProvisionEnabled = true;
+                    NotifyTransferablesChanged();
+                    TolkHelper.Speak("Auto-provision on. Supplies tab locked. Press Alt+A again to disable.");
                 }
             }
-            return labels;
+            catch (Exception ex)
+            {
+                TolkHelper.Speak($"Failed to toggle auto-provision: {ex.Message}", SpeechPriority.High);
+                Log.Error($"RimWorld Access: Failed to toggle auto-provision: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets a human-readable name for a tab.
+        /// </summary>
+        private static string GetTabName(Tab tab)
+        {
+            switch (tab)
+            {
+                case Tab.Pawns: return "Pawns";
+                case Tab.Items: return "Items";
+                case Tab.TravelSupplies: return "Travel Supplies";
+                default: return tab.ToString();
+            }
+        }
+
+        /// <summary>
+        /// Gets the list of transferable labels for typeahead search.
+        /// </summary>
+        private static List<string> GetTransferableLabels()
+        {
+            return CaravanUIHelper.GetTransferableLabels(GetCurrentTabTransferables());
         }
 
         /// <summary>
@@ -1101,64 +1201,19 @@ namespace RimWorldAccess
         {
             List<TransferableOneWay> transferables = GetCurrentTabTransferables();
 
-            if (transferables.Count == 0)
+            if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
             {
-                TolkHelper.Speak("No items in this tab");
+                CaravanAnnouncementHelper.AnnounceNoItems();
                 return;
             }
 
-            if (selectedIndex < 0 || selectedIndex >= transferables.Count)
-            {
-                selectedIndex = 0;
-            }
-
             TransferableOneWay transferable = transferables[selectedIndex];
-            StringBuilder announcement = new StringBuilder();
-
-            if (transferable.AnyThing is Pawn pawn)
-            {
-                // Pawn announcement
-                announcement.Append(pawn.LabelShortCap.StripTags());
-
-                if (pawn.story != null && !pawn.story.TitleCap.NullOrEmpty())
-                {
-                    announcement.Append($", {pawn.story.TitleCap.StripTags()}");
-                }
-
-                if (transferable.CountToTransfer > 0)
-                {
-                    announcement.Append(" - Selected");
-                }
-                else
-                {
-                    announcement.Append(" - Not selected");
-                }
-            }
-            else
-            {
-                // Item announcement
-                announcement.Append(transferable.LabelCap.StripTags());
-
-                int current = transferable.CountToTransfer;
-                int max = transferable.GetMaximumToTransfer();
-
-                announcement.Append($" - {current} of {max}");
-
-                // Add mass information if significant
-                if (current > 0)
-                {
-                    float totalMass = transferable.AnyThing.GetStatValue(StatDefOf.Mass) * current;
-                    if (totalMass >= 1f)
-                    {
-                        announcement.Append($", {totalMass:F1} kg");
-                    }
-                }
-            }
-
-            // Add search info at the end
-            announcement.Append($". '{typeahead.SearchBuffer}' match {typeahead.CurrentMatchPosition} of {typeahead.MatchCount}");
-
-            TolkHelper.Speak(announcement.ToString());
+            string announcement = CaravanAnnouncementHelper.BuildSearchAnnouncement(
+                transferable,
+                typeahead.SearchBuffer,
+                typeahead.CurrentMatchPosition,
+                typeahead.MatchCount);
+            TolkHelper.Speak(announcement);
         }
 
         /// <summary>
@@ -1170,50 +1225,60 @@ namespace RimWorldAccess
             if (!isActive)
                 return false;
 
-            // When choosing destination, let world navigation handle the input
+            // If choosing destination, let world navigation handle the input
             if (isChoosingDestination)
                 return false;
 
-            // Handle Home - jump to first
-            if (key == KeyCode.Home)
-            {
-                JumpToFirst();
-                Event.current.Use();
-                return true;
-            }
-
-            // Handle End - jump to last
-            if (key == KeyCode.End)
-            {
-                JumpToLast();
-                Event.current.Use();
-                return true;
-            }
-
-            // Handle Escape - clear search FIRST, then close dialog
+            // Handle Escape - clear search, or close dialog (especially for reform dialogs)
             if (key == KeyCode.Escape)
             {
+                // If a confirmation dialog (e.g., "food will rot soon") is on top,
+                // close both the confirmation and the caravan formation (cancel everything)
+                // PostClose_Postfix will announce "Caravan formation cancelled"
+                if (Find.WindowStack.IsOpen<Dialog_MessageBox>())
+                {
+                    Find.WindowStack.TryRemove(typeof(Dialog_MessageBox), doCloseSound: false);
+                    Find.WindowStack.TryRemove(currentDialog, doCloseSound: false);
+                    return true;
+                }
+
                 if (typeahead.HasActiveSearch)
                 {
                     typeahead.ClearSearchAndAnnounce();
                     AnnounceCurrentItem();
                     return true;
                 }
-                // Force close the dialog
-                if (Find.WindowStack != null)
+
+                // For reform dialogs, game sets closeOnCancel=false so Escape doesn't work by default.
+                // We need to handle closing ourselves.
+                if (currentDialog != null && !currentDialog.closeOnCancel)
                 {
-                    // Try to close by instance first
-                    if (currentDialog != null && Find.WindowStack.IsOpen(currentDialog))
+                    // Store the map to return to before closing anything (map field is private)
+                    Map mapToReturnTo = (Map)AccessTools.Field(typeof(Dialog_FormCaravan), "map").GetValue(currentDialog);
+
+                    // Stop the route planner first (game starts it automatically for reform dialogs)
+                    // Note: Route planner sets WorldRenderMode.Planet but Stop() doesn't revert it
+                    if (Find.WorldRoutePlanner != null && Find.WorldRoutePlanner.Active)
                     {
-                        Find.WindowStack.TryRemove(currentDialog, doCloseSound: true);
+                        Find.WorldRoutePlanner.Stop();
                     }
-                    // Also try by type in case reference is stale
-                    Find.WindowStack.TryRemove(typeof(Dialog_FormCaravan), doCloseSound: false);
+
+                    // Close the dialog
+                    Find.WindowStack.TryRemove(currentDialog, doCloseSound: false);
+
+                    // Switch back to map view (route planner switched to world view when it started)
+                    if (mapToReturnTo != null)
+                    {
+                        CameraJumper.TryHideWorld();
+                        Current.Game.CurrentMap = mapToReturnTo;
+                    }
+
+                    TolkHelper.Speak("Caravan reformation cancelled");
+                    return true;
                 }
-                // Always clean up our state
-                Close();
-                TolkHelper.Speak("Caravan formation cancelled");
-                return true;
+
+                // For regular dialogs, let the game handle escape - PostClose_Postfix will announce
+                return false;
             }
 
             // Handle Backspace for search
@@ -1229,28 +1294,87 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Handle * key - consume to prevent passthrough
-            bool isStar = key == KeyCode.KeypadMultiply || (Event.current.shift && key == KeyCode.Alpha8);
-            if (isStar)
+            // Handle Tab - toggle Summary view
+            if (key == KeyCode.Tab)
             {
+                ToggleSummaryView();
                 Event.current.Use();
                 return true;
             }
 
-            // Handle typeahead characters (letters and numbers without Alt modifier)
-            // Stats tab doesn't support typeahead - consume keys but don't process
-            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
-            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
-
-            if ((isLetter || isNumber) && !alt)
+            // Handle Space - toggle pawn or adjust quantity (same as Enter)
+            if (key == KeyCode.Space && !shift && !ctrl && !alt && !showingSummary)
             {
-                if (currentTab == Tab.Stats)
+                typeahead.ClearSearch(); // Clear search when activating an item
+
+                List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
                 {
-                    // Stats tab doesn't support typeahead search
                     Event.current.Use();
                     return true;
                 }
 
+                TransferableOneWay transferable = transferables[selectedIndex];
+
+                if (currentTab == Tab.Pawns)
+                {
+                    TogglePawnSelection();
+                }
+                else if (currentTab == Tab.Items)
+                {
+                    OpenQuantityMenu(transferable);
+                }
+                else if (currentTab == Tab.TravelSupplies)
+                {
+                    if (autoProvisionEnabled)
+                    {
+                        TolkHelper.Speak("Supplies tab locked. Press Alt+A to disable auto-provision.");
+                    }
+                    else
+                    {
+                        OpenQuantityMenu(transferable);
+                    }
+                }
+
+                Event.current.Use();
+                return true;
+            }
+
+            // Handle inline quantity adjustment (Items, TravelSupplies, and grouped Pawns)
+            if (!showingSummary)
+            {
+                // Check if quantity shortcuts should be enabled for this tab/item
+                bool allowQuantityShortcuts = currentTab != Tab.Pawns;
+
+                // For Pawns tab, allow quantity shortcuts only for grouped animals (MaxCount > 1)
+                if (!allowQuantityShortcuts)
+                {
+                    var transferable = GetCurrentTransferableForQuantity();
+                    allowQuantityShortcuts = transferable != null && transferable.MaxCount > 1;
+                }
+
+                if (allowQuantityShortcuts)
+                {
+                    if (currentTab == Tab.TravelSupplies && autoProvisionEnabled)
+                    {
+                        // Don't handle quantity keys when supplies are locked
+                        // (but don't consume the event either - let it fall through)
+                    }
+                    else if (TransferableQuantityHelper.HandleQuantityInput(key, shift, ctrl, alt,
+                        GetCurrentTransferableForQuantity, NotifyTransferablesChanged))
+                    {
+                        Event.current.Use();
+                        return true;
+                    }
+                }
+            }
+
+            // Handle typeahead characters (not in summary mode)
+            bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+            bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+            if ((isLetter || isNumber) && !alt && !showingSummary)
+            {
                 char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
                 var labels = GetTransferableLabels();
                 if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
@@ -1268,6 +1392,10 @@ namespace RimWorldAccess
                 Event.current.Use();
                 return true;
             }
+
+            // Handle Alt+H/M/N pawn info shortcuts
+            if (CaravanInputHelper.HandlePawnInfoShortcuts(key, GetSelectedPawn(), alt, shift, ctrl))
+                return true;
 
             switch (key)
             {
@@ -1288,7 +1416,7 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.LeftArrow:
-                    if (!shift && !ctrl && !alt)
+                    if (!shift && !ctrl && !alt && !showingSummary)
                     {
                         PreviousTab();
                         return true;
@@ -1296,59 +1424,162 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.RightArrow:
-                    if (!shift && !ctrl && !alt)
+                    if (!shift && !ctrl && !alt && !showingSummary)
                     {
                         NextTab();
                         return true;
                     }
                     break;
 
-                case KeyCode.Plus:
-                case KeyCode.KeypadPlus:
-                case KeyCode.Equals: // Shift+Equals is usually +
-                    if (!ctrl && !alt)
-                    {
-                        if (currentTab == Tab.Stats)
-                            return true; // Consume but do nothing
-                        AdjustQuantity(1);
-                        return true;
-                    }
-                    break;
-
-                case KeyCode.Minus:
-                case KeyCode.KeypadMinus:
-                    if (!ctrl && !alt)
-                    {
-                        if (currentTab == Tab.Stats)
-                            return true; // Consume but do nothing
-                        AdjustQuantity(-1);
-                        return true;
-                    }
-                    break;
-
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    if (!shift && !ctrl && !alt)
+                    // Shift+Enter: Add maximum that fits within remaining mass capacity
+                    if (shift && !ctrl && !alt && !showingSummary)
                     {
-                        // Stats tab doesn't have selectable items
-                        if (currentTab == Tab.Stats)
+                        typeahead.ClearSearch();
+
+                        List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                        if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
                         {
-                            return true; // Consume key but do nothing
+                            return true;
                         }
-                        ToggleSelection();
+
+                        TransferableOneWay transferable = transferables[selectedIndex];
+
+                        // Pawns tab: Shift+Enter selects all pawns of this type
+                        if (currentTab == Tab.Pawns)
+                        {
+                            CaravanQuantityHelper.SelectAllPawns(
+                                transferable,
+                                NotifyTransferablesChanged,
+                                AnnounceCurrentItem);
+                            return true;
+                        }
+
+                        // Items/TravelSupplies: Shift+Enter adds max that fits in remaining capacity
+                        if (currentTab == Tab.Items || currentTab == Tab.TravelSupplies)
+                        {
+                            if (currentTab == Tab.TravelSupplies && autoProvisionEnabled)
+                            {
+                                TolkHelper.Speak("Supplies tab locked. Press Alt+A to disable auto-provision.");
+                                return true;
+                            }
+
+                            float remainingCapacity = currentDialog.MassCapacity - currentDialog.MassUsage;
+                            var result = CaravanQuantityHelper.CalculateMaxToAdd(transferable, remainingCapacity);
+                            CaravanQuantityHelper.ApplyMaxAdd(
+                                transferable,
+                                result,
+                                NotifyTransferablesChanged);
+                            return true;
+                        }
+
                         return true;
                     }
-                    break;
-
-                case KeyCode.D:
-                    if (!shift && !ctrl && alt)
+                    // Regular Enter: Toggle/open quantity menu
+                    if (!shift && !ctrl && !alt && !showingSummary)
                     {
-                        ChooseRoute();
+                        typeahead.ClearSearch(); // Clear search when activating an item
+
+                        List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                        if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
+                        {
+                            return true;
+                        }
+
+                        TransferableOneWay transferable = transferables[selectedIndex];
+
+                        // Pawns tab: Enter toggles pawn selection (same as Space)
+                        if (currentTab == Tab.Pawns)
+                        {
+                            TogglePawnSelection();
+                            return true;
+                        }
+
+                        // Items tab: Enter opens quantity menu
+                        if (currentTab == Tab.Items)
+                        {
+                            OpenQuantityMenu(transferable);
+                            return true;
+                        }
+
+                        // TravelSupplies tab: Enter opens quantity menu only if auto-provision is off
+                        if (currentTab == Tab.TravelSupplies)
+                        {
+                            if (autoProvisionEnabled)
+                            {
+                                TolkHelper.Speak("Supplies tab locked. Press Alt+A to disable auto-provision.");
+                                return true;
+                            }
+                            OpenQuantityMenu(transferable);
+                            return true;
+                        }
+
                         return true;
                     }
                     break;
 
-                case KeyCode.T:
+                case KeyCode.Delete:
+                    // Delete: Remove all of this item (set to 0)
+                    if (!shift && !ctrl && !alt && !showingSummary)
+                    {
+                        typeahead.ClearSearch();
+
+                        List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                        if (transferables.Count == 0 || selectedIndex < 0 || selectedIndex >= transferables.Count)
+                        {
+                            return true;
+                        }
+
+                        TransferableOneWay transferable = transferables[selectedIndex];
+                        bool isPawnTab = currentTab == Tab.Pawns;
+                        bool isSuppliesLocked = currentTab == Tab.TravelSupplies && autoProvisionEnabled;
+
+                        CaravanInputHelper.HandleDeleteKey(
+                            transferable,
+                            isPawnTab,
+                            isSuppliesLocked,
+                            NotifyTransferablesChanged);
+                        return true;
+                    }
+                    break;
+
+                case KeyCode.I:
+                    // Alt+I: Inspect current item or stat breakdown
+                    if (alt && !shift && !ctrl)
+                    {
+                        if (showingSummary)
+                        {
+                            // In summary mode: show stat breakdown
+                            var statInfo = GetCurrentStatExplanation();
+                            if (statInfo.HasValue)
+                            {
+                                StatBreakdownState.Open(statInfo.Value.name, statInfo.Value.explanation);
+                            }
+                            else
+                            {
+                                TolkHelper.Speak("No breakdown available for this item");
+                            }
+                        }
+                        else
+                        {
+                            // In tab mode: inspect current item
+                            List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                            if (transferables.Count > 0 && selectedIndex >= 0 && selectedIndex < transferables.Count)
+                            {
+                                Thing thing = transferables[selectedIndex].AnyThing;
+                                if (thing != null)
+                                {
+                                    Dialog_InfoCard infoCard = new Dialog_InfoCard(thing);
+                                    Find.WindowStack.Add(infoCard);
+                                }
+                            }
+                        }
+                        return true;
+                    }
+                    break;
+
+                case KeyCode.S:
                     if (!shift && !ctrl && alt)
                     {
                         Send();
@@ -1364,11 +1595,58 @@ namespace RimWorldAccess
                     }
                     break;
 
-                default:
-                    return false;
+                case KeyCode.A:
+                    if (!shift && !ctrl && alt)
+                    {
+                        ToggleAutoProvision();
+                        return true;
+                    }
+                    break;
+
+                case KeyCode.Home:
+                    if (showingSummary)
+                    {
+                        if (summaryItems.Count > 0)
+                        {
+                            summaryIndex = 0;
+                            AnnounceCurrentSummaryItem();
+                        }
+                    }
+                    else
+                    {
+                        List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                        if (transferables.Count > 0)
+                        {
+                            selectedIndex = 0;
+                            AnnounceCurrentItem();
+                        }
+                    }
+                    return true;
+
+                case KeyCode.End:
+                    if (showingSummary)
+                    {
+                        if (summaryItems.Count > 0)
+                        {
+                            summaryIndex = summaryItems.Count - 1;
+                            AnnounceCurrentSummaryItem();
+                        }
+                    }
+                    else
+                    {
+                        List<TransferableOneWay> transferables = GetCurrentTabTransferables();
+                        if (transferables.Count > 0)
+                        {
+                            selectedIndex = transferables.Count - 1;
+                            AnnounceCurrentItem();
+                        }
+                    }
+                    return true;
             }
 
-            return false;
+            // Block ALL unhandled keys to prevent game's native handlers from processing them
+            // This makes the overlay screen modal - it captures all keyboard input while active
+            return true;
         }
     }
 }

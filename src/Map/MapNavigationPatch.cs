@@ -1,7 +1,9 @@
+using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 using Verse;
 using RimWorld;
+using RimWorld.Planet;
 
 namespace RimWorldAccess
 {
@@ -29,6 +31,7 @@ namespace RimWorldAccess
                 WindowlessDialogState.IsActive ||
                 WindowlessFloatMenuState.IsActive ||
                 ArchitectTreeState.IsActive ||
+                CaravanFormationState.IsActive ||
                 WindowlessPauseMenuState.IsActive ||
                 NotificationMenuState.IsActive ||
                 QuestMenuState.IsActive ||
@@ -36,7 +39,6 @@ namespace RimWorldAccess
                 WindowlessConfirmationState.IsActive ||
                 WindowlessDeleteConfirmationState.IsActive ||
                 WindowlessOptionsMenuState.IsActive ||
-                ZoneSettingsMenuState.IsActive ||
                 ZoneRenameState.IsActive ||
                 PlaySettingsMenuState.IsActive ||
                 StorageSettingsMenuState.IsActive ||
@@ -49,7 +51,6 @@ namespace RimWorldAccess
                 WindowlessDrugPolicyState.IsActive ||
                 WindowlessAreaState.IsActive ||
                 WindowlessScheduleState.IsActive ||
-                BuildingInspectState.IsActive ||
                 BillsMenuState.IsActive ||
                 PrisonerTabState.IsActive ||
                 BillConfigState.IsActive ||
@@ -67,7 +68,9 @@ namespace RimWorldAccess
                 DoorControlState.IsActive ||
                 ForbidControlState.IsActive ||
                 AnimalsMenuState.IsActive ||
-                WildlifeMenuState.IsActive;
+                WildlifeMenuState.IsActive ||
+                TransportPodLoadingState.IsActive;
+                // Note: TransportPodSelectionState is NOT included - it uses map navigation for cursor movement
         }
 
         /// <summary>
@@ -96,13 +99,6 @@ namespace RimWorldAccess
                 return true; // Let original run (it will also respect this flag)
             }
 
-            // When menus are open, skip the original CameraDriver.Update() entirely
-            // This prevents arrow keys from panning the camera while in menus
-            if (MapNavigationState.SuppressMapNavigation)
-            {
-                return false; // SKIP original - don't let camera pan in menus
-            }
-
             // Prevent processing input multiple times in the same frame
             // (Update() can be called multiple times per frame)
             int currentFrame = Time.frameCount;
@@ -112,7 +108,11 @@ namespace RimWorldAccess
             }
             lastProcessedFrame = currentFrame;
 
-            // Initialize cursor position if needed
+            // Check for map additions/removals and announce to user
+            MapNavigationState.CheckForMapChanges();
+
+            // Initialize cursor position if needed - MUST happen before suppression check
+            // so that new maps get initialized even if a menu is temporarily active
             if (!MapNavigationState.IsInitialized)
             {
                 MapNavigationState.Initialize(Find.CurrentMap);
@@ -125,17 +125,30 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Check for pawn selection cycling (comma and period keys)
-            if (Input.GetKeyDown(KeyCode.Period))
+            // When menus are open, skip the original CameraDriver.Update() entirely
+            // This prevents arrow keys from panning the camera while in menus
+            if (MapNavigationState.SuppressMapNavigation)
             {
-                HandlePawnCycling(true, __instance);
+                return false; // SKIP original - don't let camera pan in menus
+            }
+
+            // Check for map switching (Shift+comma/period)
+            // Regular comma/period pawn cycling is handled by ThingSelectionUtilityPatch
+            bool shiftHeldForMapSwitch = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+            if (shiftHeldForMapSwitch && Input.GetKeyDown(KeyCode.Period))
+            {
+                HandleMapSwitching(forward: true);
                 return true;
             }
-            else if (Input.GetKeyDown(KeyCode.Comma))
+            else if (shiftHeldForMapSwitch && Input.GetKeyDown(KeyCode.Comma))
             {
-                HandlePawnCycling(false, __instance);
+                HandleMapSwitching(forward: false);
                 return true;
             }
+            // Note: Regular comma/period without shift passes through to game's ShortcutKeys
+            // which calls ThingSelectionUtility.SelectNext/PreviousColonist()
+            // Our ThingSelectionUtilityPatch intercepts those to filter by current map
 
             // Check for arrow key input
             IntVec3 moveOffset = IntVec3.Zero;
@@ -147,8 +160,8 @@ namespace RimWorldAccess
             bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
             // Handle Shift+Up/Down for jump mode cycling
-            // (but not when zone creation is active in Manual mode - that uses Shift+Arrows for auto-select to wall)
-            bool blockJumpModeCycling = ZoneCreationState.IsInCreationMode && ZoneCreationState.CurrentMode == ZoneCreationMode.Manual;
+            // (but not when zone creation is active - that uses Shift+Arrows for auto-select to wall)
+            bool blockJumpModeCycling = ZoneCreationState.IsInCreationMode;
             if (shiftHeld && !blockJumpModeCycling)
             {
                 if (Input.GetKeyDown(KeyCode.UpArrow))
@@ -162,6 +175,22 @@ namespace RimWorldAccess
                     MapNavigationState.CycleJumpModeBackward();
                     hasAnnouncedThisFrame = true;
                     return true;
+                }
+                // Shift+Left/Right adjusts preset distance (only in PresetDistance mode)
+                else if (MapNavigationState.CurrentJumpMode == JumpMode.PresetDistance)
+                {
+                    if (Input.GetKeyDown(KeyCode.LeftArrow))
+                    {
+                        MapNavigationState.DecreasePresetDistance();
+                        hasAnnouncedThisFrame = true;
+                        return true;
+                    }
+                    else if (Input.GetKeyDown(KeyCode.RightArrow))
+                    {
+                        MapNavigationState.IncreasePresetDistance();
+                        hasAnnouncedThisFrame = true;
+                        return true;
+                    }
                 }
             }
 
@@ -216,6 +245,9 @@ namespace RimWorldAccess
                         case JumpMode.MinableTiles:
                             positionChanged = MapNavigationState.JumpToNextMinableTiles(moveOffset, Find.CurrentMap);
                             break;
+                        case JumpMode.PresetDistance:
+                            positionChanged = MapNavigationState.JumpPresetDistance(moveOffset, Find.CurrentMap);
+                            break;
                         default:
                             positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
                             break;
@@ -234,6 +266,24 @@ namespace RimWorldAccess
                     // Get the new cursor position
                     IntVec3 newPosition = MapNavigationState.CurrentCursorPosition;
 
+                    // Update rectangle preview if in zone creation mode with a start corner
+                    if (ZoneCreationState.IsInCreationMode && ZoneCreationState.HasRectangleStart)
+                    {
+                        ZoneCreationState.UpdatePreview(newPosition);
+                    }
+
+                    // Update rectangle preview if in area painting mode with a start corner
+                    if (AreaPaintingState.IsActive && AreaPaintingState.HasRectangleStart)
+                    {
+                        AreaPaintingState.UpdatePreview(newPosition);
+                    }
+
+                    // Update rectangle preview if in architect placement mode with a zone designator
+                    if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator() && ArchitectState.HasRectangleStart)
+                    {
+                        ArchitectState.UpdatePreview(newPosition);
+                    }
+
                     // Move camera to center on new cursor position
                     __instance.JumpToCurrentMapLoc(newPosition);
 
@@ -244,15 +294,41 @@ namespace RimWorldAccess
                     // Get tile information and announce it
                     string tileInfo = TileInfoHelper.GetTileSummary(newPosition, Find.CurrentMap);
 
-                    // If in zone creation mode and this cell is selected, prepend "Selected"
-                    if (ZoneCreationState.IsInCreationMode && ZoneCreationState.IsCellSelected(newPosition))
+                    // If in zone creation mode, prepend selection state
+                    if (ZoneCreationState.IsInCreationMode)
                     {
-                        tileInfo = "Selected, " + tileInfo;
+                        if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(newPosition))
+                        {
+                            tileInfo = "Preview, " + tileInfo;
+                        }
+                        else if (ZoneCreationState.IsCellSelected(newPosition))
+                        {
+                            tileInfo = "Selected, " + tileInfo;
+                        }
                     }
-                    // If in area painting mode and this cell is staged, prepend "Selected"
-                    else if (AreaPaintingState.IsActive && AreaPaintingState.StagedCells.Contains(newPosition))
+                    // If in area painting mode, prepend selection/preview state
+                    else if (AreaPaintingState.IsActive)
                     {
-                        tileInfo = "Selected, " + tileInfo;
+                        if (AreaPaintingState.IsInPreviewMode && AreaPaintingState.PreviewCells.Contains(newPosition))
+                        {
+                            tileInfo = "Preview, " + tileInfo;
+                        }
+                        else if (AreaPaintingState.StagedCells.Contains(newPosition))
+                        {
+                            tileInfo = "Selected, " + tileInfo;
+                        }
+                    }
+                    // If in architect mode zone placement, prepend selection/preview state
+                    else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
+                    {
+                        if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(newPosition))
+                        {
+                            tileInfo = "Preview, " + tileInfo;
+                        }
+                        else if (ArchitectState.SelectedCells.Contains(newPosition))
+                        {
+                            tileInfo = "Selected, " + tileInfo;
+                        }
                     }
 
                     // Only announce if different from last announcement (avoids spam when hitting map edge)
@@ -284,47 +360,59 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Handles pawn selection cycling when comma or period keys are pressed.
+        /// Handles switching between maps when Shift+comma or Shift+period is pressed.
+        /// Restores cursor to last known position on the target map.
         /// </summary>
-        /// <param name="cycleForward">True for period (next), false for comma (previous)</param>
-        /// <param name="cameraDriver">The camera driver instance to move the camera</param>
-        private static void HandlePawnCycling(bool cycleForward, CameraDriver cameraDriver)
+        /// <param name="forward">True for Shift+period (next map), false for Shift+comma (previous map)</param>
+        private static void HandleMapSwitching(bool forward)
         {
-            // Select the next or previous pawn
-            Pawn selectedPawn = cycleForward
-                ? PawnSelectionState.SelectNextColonist()
-                : PawnSelectionState.SelectPreviousColonist();
+            int mapCount = PawnSelectionState.GetMapCount();
 
-            if (selectedPawn == null)
+            if (mapCount <= 1)
             {
-                // No colonists available to select
-                TolkHelper.Speak("No colonists available");
+                TolkHelper.Speak("Only one map available");
                 hasAnnouncedThisFrame = true;
                 return;
             }
 
-            // Clear current selection and select the new pawn
+            // Switch to the next/previous map
+            Pawn focusPawn = forward
+                ? PawnSelectionState.SwitchToNextMap(out string mapName, out int pawnCount)
+                : PawnSelectionState.SwitchToPreviousMap(out mapName, out pawnCount);
+
+            // Check if map switch actually happened (mapName will be set if successful)
+            if (string.IsNullOrEmpty(mapName))
+            {
+                TolkHelper.Speak("Could not switch maps");
+                hasAnnouncedThisFrame = true;
+                return;
+            }
+
+            // Restore cursor to last known position for this map
+            MapNavigationState.RestoreCursorForCurrentMap();
+
+            // Invalidate scanner cache so it refreshes for the new map
+            ScannerState.Invalidate();
+
+            // Clear any selection when switching maps
             if (Find.Selector != null)
             {
                 Find.Selector.ClearSelection();
-                Find.Selector.Select(selectedPawn);
             }
 
-            // Set flag indicating pawn was just selected (for gizmo navigation)
-            GizmoNavigationState.PawnJustSelected = true;
-
-            // Get current task for the pawn
-            string currentTask = selectedPawn.GetJobReport();
-            if (string.IsNullOrEmpty(currentTask))
+            // Build announcement: "Now at [MapName] ([X] colonists)"
+            string colonistWord = pawnCount == 1 ? "colonist" : "colonists";
+            string fullAnnouncement;
+            if (pawnCount == 0)
             {
-                currentTask = "Idle";
+                fullAnnouncement = $"Now at {mapName}. No colonists here.";
             }
-
-            // Announce the selected pawn's name and current task
-            // Note: Camera does NOT jump - user can use Alt+C to manually jump to pawn
-            string announcement = $"{selectedPawn.LabelShort} selected - {currentTask}";
-            TolkHelper.Speak(announcement);
-            MapNavigationState.LastAnnouncedInfo = announcement;
+            else
+            {
+                fullAnnouncement = $"Now at {mapName} ({pawnCount} {colonistWord})";
+            }
+            TolkHelper.Speak(fullAnnouncement);
+            MapNavigationState.LastAnnouncedInfo = fullAnnouncement;
             hasAnnouncedThisFrame = true;
         }
 
@@ -343,6 +431,108 @@ namespace RimWorldAccess
                 Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
                 Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
             }
+        }
+    }
+
+    /// <summary>
+    /// Harmony patches for ThingSelectionUtility to override the game's colonist cycling.
+    /// By default, the game cycles through ALL colonists across all maps.
+    /// We override this to only cycle through colonists on the CURRENT map.
+    /// Shift+comma/period for map switching is handled separately in MapNavigationPatch.
+    /// </summary>
+    [HarmonyPatch(typeof(ThingSelectionUtility))]
+    public static class ThingSelectionUtilityPatch
+    {
+        /// <summary>
+        /// Prefix patch for SelectNextColonist to filter by current map.
+        /// </summary>
+        [HarmonyPatch("SelectNextColonist")]
+        [HarmonyPrefix]
+        public static bool SelectNextColonist_Prefix()
+        {
+            // If world view is selected, let the original method handle it (caravan cycling)
+            if (WorldRendererUtility.WorldRendered)
+                return true;
+
+            // Check if shift is held - if so, this is a map switch request
+            // Let our HandleMapSwitching in MapNavigationPatch handle it (it already ran)
+            // Just block the original to prevent double-handling
+            bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (shiftHeld)
+                return false; // Block original - our map switching already handled it
+
+            // Use our map-filtered pawn cycling
+            Pawn selectedPawn = PawnSelectionState.SelectNextColonist();
+
+            if (selectedPawn == null)
+            {
+                TolkHelper.Speak("No colonists on this map");
+                return false;
+            }
+
+            // Select the pawn (but don't jump camera - user can use Alt+C)
+            if (Find.Selector != null)
+            {
+                Find.Selector.ClearSelection();
+                Find.Selector.Select(selectedPawn);
+            }
+
+            // Set flag for gizmo navigation
+            GizmoNavigationState.PawnJustSelected = true;
+
+            // Announce selection
+            string currentTask = selectedPawn.GetJobReport();
+            if (string.IsNullOrEmpty(currentTask))
+                currentTask = "Idle";
+
+            TolkHelper.Speak($"{selectedPawn.LabelShort} selected - {currentTask}");
+
+            return false; // Block original method
+        }
+
+        /// <summary>
+        /// Prefix patch for SelectPreviousColonist to filter by current map.
+        /// </summary>
+        [HarmonyPatch("SelectPreviousColonist")]
+        [HarmonyPrefix]
+        public static bool SelectPreviousColonist_Prefix()
+        {
+            // If world view is selected, let the original method handle it (caravan cycling)
+            if (WorldRendererUtility.WorldRendered)
+                return true;
+
+            // Check if shift is held - if so, this is a map switch request
+            bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (shiftHeld)
+                return false; // Block original - our map switching already handled it
+
+            // Use our map-filtered pawn cycling
+            Pawn selectedPawn = PawnSelectionState.SelectPreviousColonist();
+
+            if (selectedPawn == null)
+            {
+                TolkHelper.Speak("No colonists on this map");
+                return false;
+            }
+
+            // Select the pawn (but don't jump camera - user can use Alt+C)
+            if (Find.Selector != null)
+            {
+                Find.Selector.ClearSelection();
+                Find.Selector.Select(selectedPawn);
+            }
+
+            // Set flag for gizmo navigation
+            GizmoNavigationState.PawnJustSelected = true;
+
+            // Announce selection
+            string currentTask = selectedPawn.GetJobReport();
+            if (string.IsNullOrEmpty(currentTask))
+                currentTask = "Idle";
+
+            TolkHelper.Speak($"{selectedPawn.LabelShort} selected - {currentTask}");
+
+            return false; // Block original method
         }
     }
 }

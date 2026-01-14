@@ -19,11 +19,12 @@ namespace RimWorldAccess
             if (window == null)
                 return true;
 
-            // Special handling for FloatMenu when executing a gizmo
-            // (e.g., long-range scanner mineral selection)
-            if (window is FloatMenu floatMenu && GizmoNavigationState.IsExecutingGizmo)
+            // Special handling for FloatMenu when:
+            // 1. Executing a gizmo (e.g., long-range scanner mineral selection)
+            // 2. Confirming a transport pod destination (arrival options)
+            if (window is FloatMenu floatMenu &&
+                (GizmoNavigationState.IsExecutingGizmo || TransportPodLaunchState.IsConfirmingDestination))
             {
-
                 // Extract options from the FloatMenu and open windowless version
                 var optionsField = typeof(FloatMenu).GetField("options",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -32,12 +33,37 @@ namespace RimWorldAccess
                     var options = optionsField.GetValue(floatMenu) as System.Collections.Generic.List<FloatMenuOption>;
                     if (options != null && options.Count > 0)
                     {
+                        // Clear the confirming flag since we're handling it now
+                        TransportPodLaunchState.ClearConfirmingFlag();
+
                         WindowlessFloatMenuState.Open(options, floatMenu.givesColonistOrders);
                         return false; // Prevent FloatMenu from being added
                     }
                 }
 
+                // Clear flag even if we couldn't extract options
+                TransportPodLaunchState.ClearConfirmingFlag();
+
                 // Fallback: let it through if we couldn't extract options
+                return true;
+            }
+
+            // Special handling for Dialog_AssignBuildingOwner (bed/throne owner assignment)
+            if (window is Dialog_AssignBuildingOwner assignDialog)
+            {
+                // Extract the assignable component via reflection
+                var assignableField = typeof(Dialog_AssignBuildingOwner).GetField("assignable",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (assignableField != null)
+                {
+                    var assignable = assignableField.GetValue(assignDialog) as CompAssignableToPawn;
+                    if (assignable?.parent is Building_Bed bed)
+                    {
+                        BedAssignmentState.Open(bed);
+                        return false; // Prevent dialog from being added
+                    }
+                }
+                // Fallback: let it through if not a bed or couldn't extract
                 return true;
             }
 

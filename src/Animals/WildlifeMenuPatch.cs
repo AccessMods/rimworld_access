@@ -1,5 +1,6 @@
 using HarmonyLib;
 using RimWorld;
+using RimWorld.Planet;
 using UnityEngine;
 using Verse;
 
@@ -28,6 +29,13 @@ namespace RimWorldAccess
             if (!hasIntercepted)
             {
                 hasIntercepted = true;
+
+                // If on the world map, switch to colony map first
+                if (Find.World?.renderer?.wantedMode == WorldRenderMode.Planet)
+                {
+                    CameraJumper.TryHideWorld();
+                    MapNavigationState.RestoreCursorForCurrentMap();
+                }
 
                 // Open our windowless version instead
                 WildlifeMenuState.Open();

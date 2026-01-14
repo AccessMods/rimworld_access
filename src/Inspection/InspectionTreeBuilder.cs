@@ -9,6 +9,24 @@ using Verse.AI;
 namespace RimWorldAccess
 {
     /// <summary>
+    /// Controls what type of inspection tree to build.
+    /// </summary>
+    public enum InspectionMode
+    {
+        /// <summary>
+        /// Full inspection with all actions (operations, drop/consume, job cancellation, etc.)
+        /// </summary>
+        Full,
+
+        /// <summary>
+        /// Read-only inspection showing only data, no modifying actions.
+        /// Used in contexts like caravan formation where you just want to view pawn info.
+        /// </summary>
+        ReadOnly
+    }
+
+
+    /// <summary>
     /// Builds the inspection tree for objects.
     /// </summary>
     public static class InspectionTreeBuilder
@@ -23,9 +41,43 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Checks if a hediff is a missing part caused by surgical addition (bionic).
+        /// These clutter the display since they're just side effects of having bionics.
+        /// </summary>
+        private static bool IsSurgicallyRemovedPart(Hediff hediff, Pawn pawn)
+        {
+            // Only filter Hediff_MissingPart
+            if (!(hediff is Hediff_MissingPart missingPart))
+                return false;
+
+            // Filter if the parent part has a bionic/added part
+            if (hediff.Part != null && pawn.health.hediffSet.PartOrAnyAncestorHasDirectlyAddedParts(hediff.Part))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Extracts a pawn from a thing (pawn or corpse).
+        /// Returns null if the thing is neither a pawn nor a corpse with an inner pawn.
+        /// </summary>
+        private static Pawn GetPawnFromThing(object obj)
+        {
+            if (obj is Pawn pawn)
+                return pawn;
+
+            if (obj is Corpse corpse)
+                return corpse.InnerPawn;
+
+            return null;
+        }
+
+        /// <summary>
         /// Builds the root tree for all objects at a position.
         /// </summary>
-        public static InspectionTreeItem BuildTree(List<object> objects)
+        /// <param name="objects">The objects to inspect.</param>
+        /// <param name="mode">The inspection mode (Full or ReadOnly). Defaults to Full.</param>
+        public static InspectionTreeItem BuildTree(List<object> objects, InspectionMode mode = InspectionMode.Full)
         {
             var root = new InspectionTreeItem
             {
@@ -38,7 +90,7 @@ namespace RimWorldAccess
 
             foreach (var obj in objects)
             {
-                AddChild(root, BuildObjectItem(obj, 0));
+                AddChild(root, BuildObjectItem(obj, 0, mode));
             }
 
             return root;
@@ -47,7 +99,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds a tree item for a single object (pawn, building, etc.).
         /// </summary>
-        private static InspectionTreeItem BuildObjectItem(object obj, int indent)
+        private static InspectionTreeItem BuildObjectItem(object obj, int indent, InspectionMode mode)
         {
             var item = new InspectionTreeItem
             {
@@ -60,68 +112,258 @@ namespace RimWorldAccess
             };
 
             // We'll build children lazily when expanded
-            item.OnActivate = () => BuildObjectChildren(item);
+            item.OnActivate = () => BuildObjectChildren(item, mode);
 
             return item;
         }
 
         /// <summary>
         /// Builds category children for an object when it's expanded.
+        /// Uses dynamic tab discovery for Things (pawns, buildings, items).
         /// </summary>
-        private static void BuildObjectChildren(InspectionTreeItem objectItem)
+        private static void BuildObjectChildren(InspectionTreeItem objectItem, InspectionMode mode)
         {
             if (objectItem.Children.Count > 0)
                 return; // Already built
 
             var obj = objectItem.Data;
-            var categories = InspectionInfoHelper.GetAvailableCategories(obj);
 
-            foreach (var category in categories)
+            // Ensure the object is selected before discovering tabs.
+            // Many tabs (like ITab_Storage) check IsVisible via Find.Selector.SingleSelectedThing.
+            // The selection may have changed since the inspection panel opened.
+            if (obj is Thing thingToSelect && !Find.Selector.IsSelected(thingToSelect))
             {
-                AddChild(objectItem, BuildCategoryItem(obj, category, objectItem.IndentLevel + 1));
+                Find.Selector.ClearSelection();
+                Find.Selector.Select(thingToSelect, playSound: false, forceDesignatorDeselect: false);
+            }
+            else if (obj is Zone zoneToSelect && !Find.Selector.IsSelected(zoneToSelect))
+            {
+                Find.Selector.ClearSelection();
+                Find.Selector.Select(zoneToSelect, playSound: false, forceDesignatorDeselect: false);
+            }
+
+            // Use new dynamic categories that discover tabs from the game
+            var dynamicCategories = InspectionInfoHelper.GetDynamicCategories(obj);
+
+            foreach (var categoryInfo in dynamicCategories)
+            {
+                // Skip actionable categories in read-only mode
+                if (mode == InspectionMode.ReadOnly && categoryInfo.Handler == TabHandlerType.Action)
+                    continue;
+
+                AddChild(objectItem, BuildCategoryItemFromInfo(obj, categoryInfo, objectItem.IndentLevel + 1, mode));
+            }
+
+            // Add Info Card action for Things (pawns, buildings, items)
+            // Info Card is read-only so it's available in all modes
+            if (obj is Thing thing)
+            {
+                var infoCardItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Action,
+                    Label = ConceptDefOf.InfoCard.label.CapitalizeFirst(),
+                    Data = thing,
+                    IndentLevel = objectItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                infoCardItem.OnActivate = () =>
+                {
+                    // Close inspection menu before opening Info Card
+                    WindowlessInspectionState.Close();
+
+                    // Open the visual Dialog_InfoCard (InfoCardPatch will activate InfoCardState)
+                    var dialog = new Dialog_InfoCard(thing);
+                    Find.WindowStack.Add(dialog);
+                };
+                AddChild(objectItem, infoCardItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds a tree item from a TabCategoryInfo (dynamic tab discovery).
+        /// </summary>
+        private static InspectionTreeItem BuildCategoryItemFromInfo(object obj, TabCategoryInfo categoryInfo, int indent, InspectionMode mode = InspectionMode.Full)
+        {
+            // Use OriginalCategoryName (English) for internal logic
+            string categoryKey = categoryInfo.OriginalCategoryName ?? categoryInfo.Name;
+            // Use Name (translated) for display
+            string displayName = categoryInfo.Name ?? categoryKey;
+
+            var item = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.Category,
+                Label = GetCategoryLabel(obj, categoryKey, displayName),
+                Data = obj,
+                IndentLevel = indent
+            };
+
+            // Check if this is a single-item category (just show inline)
+            if (IsSingleItemCategory(obj, categoryKey))
+            {
+                string content = GetSimplifiedCategoryContent(obj, categoryKey);
+                if (!string.IsNullOrEmpty(content))
+                {
+                    item.Label = $"{displayName}: {content}";
+                }
+                else
+                {
+                    item.Label = displayName;
+                }
+                item.IsExpandable = false;
+                return item;
+            }
+
+            // Use the handler type from the registry to determine behavior
+            switch (categoryInfo.Handler)
+            {
+                case TabHandlerType.Action:
+                    // Actionable category (Bills, Storage, etc.) - opens separate menu
+                    item.IsExpandable = false;
+                    item.OnActivate = () => ExecuteCategoryAction(obj, categoryKey);
+                    break;
+
+                case TabHandlerType.RichNavigation:
+                    // Rich navigation with sub-items (Health, Gear, Skills, etc.)
+                    if (IsExpandableCategory(obj, categoryKey))
+                    {
+                        item.IsExpandable = true;
+                        item.IsExpanded = false;
+                        item.OnActivate = () => BuildCategoryChildren(item, obj, categoryKey, mode);
+                    }
+                    else
+                    {
+                        // Fallback to detailed info display
+                        item.IsExpandable = true;
+                        item.IsExpanded = false;
+                        item.OnActivate = () => BuildDetailedInfoChildren(item, obj, categoryKey);
+                    }
+                    break;
+
+                case TabHandlerType.BasicInspectString:
+                    // Basic fallback - show GetInspectString content or tab info
+                    item.IsExpandable = true;
+                    item.IsExpanded = false;
+                    if (categoryInfo.Tab != null)
+                    {
+                        // This is an actual game tab - use dynamic tab info
+                        item.OnActivate = () => BuildDynamicTabChildren(item, obj, categoryInfo);
+                    }
+                    else
+                    {
+                        // Synthetic category - use existing detailed info
+                        item.OnActivate = () => BuildDetailedInfoChildren(item, obj, categoryKey);
+                    }
+                    break;
+
+                default:
+                    // Default behavior: show detailed info when expanded
+                    item.IsExpandable = true;
+                    item.IsExpanded = false;
+                    item.OnActivate = () => BuildDetailedInfoChildren(item, obj, categoryKey);
+                    break;
+            }
+
+            return item;
+        }
+
+        /// <summary>
+        /// Builds children for a dynamic tab (tabs discovered from the game but not explicitly supported).
+        /// Uses GetInspectString as fallback content.
+        /// </summary>
+        private static void BuildDynamicTabChildren(InspectionTreeItem parentItem, object obj, TabCategoryInfo categoryInfo)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            // Defensive null checks
+            if (categoryInfo == null || categoryInfo.Tab == null || !(obj is Thing thing))
+            {
+                // Fallback to simple message
+                AddChild(parentItem, new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = "No information available for this tab.",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                });
+                return;
+            }
+
+            // Get fallback info from the tab
+            string info = TabRegistry.GetFallbackInfo(thing, categoryInfo.Tab);
+
+            if (string.IsNullOrEmpty(info) || info == "No information available.")
+            {
+                AddChild(parentItem, new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = $"Tab '{categoryInfo.Name}' has no keyboard-accessible content.",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                });
+
+                // Add a hint if tab is known but not rich-supported
+                if (!categoryInfo.IsKnown)
+                {
+                    AddChild(parentItem, new InspectionTreeItem
+                    {
+                        Type = InspectionTreeItem.ItemType.DetailText,
+                        Label = "This is an unrecognized tab from a mod or DLC.",
+                        IndentLevel = parentItem.IndentLevel + 1,
+                        IsExpandable = false
+                    });
+                }
+                return;
+            }
+
+            // Strip tags and split into lines
+            info = info.StripTags();
+            var lines = info.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            {
+                AddChild(parentItem, new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = line.Trim(),
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                });
             }
         }
 
         /// <summary>
         /// Gets the label for a category, potentially with additional info.
         /// </summary>
-        private static string GetCategoryLabel(object obj, string category)
+        /// <param name="obj">The object being inspected</param>
+        /// <param name="categoryKey">English category name for logic comparisons</param>
+        /// <param name="displayName">Translated category name for display (defaults to categoryKey if not provided)</param>
+        private static string GetCategoryLabel(object obj, string categoryKey, string displayName = null)
         {
-            // Special handling for Mood category to show percentage and break thresholds
-            if (category == "Mood" && obj is Pawn pawn && pawn.needs?.mood != null)
+            displayName = displayName ?? categoryKey;
+
+            // Special handling for Mood category to show percentage and descriptor
+            if (categoryKey == "Mood" && obj is Pawn pawn && pawn.needs?.mood != null)
             {
                 float moodPercentage = pawn.needs.mood.CurLevelPercentage * 100f;
-                var sb = new StringBuilder();
-                sb.Append($"{category} ({moodPercentage:F0}%)");
-
-                // Add break thresholds if pawn can have mental breaks
-                if (pawn.mindState?.mentalBreaker != null &&
-                    pawn.mindState.mentalBreaker.CanDoRandomMentalBreaks)
-                {
-                    float minor = pawn.mindState.mentalBreaker.BreakThresholdMinor * 100f;
-                    float major = pawn.mindState.mentalBreaker.BreakThresholdMajor * 100f;
-                    float extreme = pawn.mindState.mentalBreaker.BreakThresholdExtreme * 100f;
-
-                    sb.Append($" - Breaks: Minor {minor:F0}%, Major {major:F0}%, Extreme {extreme:F0}%");
-                }
-
-                return sb.ToString();
+                string moodDescriptor = pawn.needs.mood.MoodString;
+                return $"{displayName}: {moodPercentage:F0}% ({moodDescriptor})";
             }
 
             // Special handling for Job Queue category to show count
-            if (category == "Job Queue" && obj is Pawn jobPawn && jobPawn.jobs?.jobQueue != null)
+            if (categoryKey == "Job Queue" && obj is Pawn jobPawn && jobPawn.jobs?.jobQueue != null)
             {
                 int queueCount = jobPawn.jobs.jobQueue.Count;
-                return $"Job Queue ({queueCount} queued)";
+                return $"{displayName} ({queueCount} queued)";
             }
 
-            return category;
+            return displayName;
         }
 
         /// <summary>
         /// Builds a tree item for a category.
         /// </summary>
-        private static InspectionTreeItem BuildCategoryItem(object obj, string category, int indent)
+        private static InspectionTreeItem BuildCategoryItem(object obj, string category, int indent, InspectionMode mode)
         {
             var item = new InspectionTreeItem
             {
@@ -149,6 +391,7 @@ namespace RimWorldAccess
             else if (IsActionableCategory(obj, category))
             {
                 // This is an actionable category (Bills, Storage, etc.)
+                // Note: In ReadOnly mode, actionable categories are filtered out at the parent level
                 item.IsExpandable = false;
                 item.OnActivate = () => ExecuteCategoryAction(obj, category);
             }
@@ -157,7 +400,7 @@ namespace RimWorldAccess
                 // This category has sub-items (Gear, Skills, etc.)
                 item.IsExpandable = true;
                 item.IsExpanded = false;
-                item.OnActivate = () => BuildCategoryChildren(item, obj, category);
+                item.OnActivate = () => BuildCategoryChildren(item, obj, category, mode);
             }
             else
             {
@@ -242,8 +485,19 @@ namespace RimWorldAccess
                        (category == "Bed Assignment" && building is Building_Bed) ||
                        (category == "Temperature" && building.TryGetComp<CompTempControl>() != null) ||
                        (category == "Storage" && building is IStoreSettingsParent) ||
+                       (category == "Shells" && building is Building_TurretGun) ||
                        (category == "Plant Selection" && building is IPlantToGrowSettable) ||
+                       (category == "Pen Animals" && building.TryGetComp<CompAnimalPenMarker>() != null) ||
+                       (category == "Pen Auto-Cut" && building.TryGetComp<CompAnimalPenMarker>() != null) ||
                        BuildingComponentsHelper.GetDiscoverableComponents(building).Any(c => c.CategoryName == category && !c.IsReadOnly);
+            }
+
+            // Check for zone-specific actionable categories
+            if (obj is Zone zone)
+            {
+                string renameLabel = "Rename".Translate().ToString();
+                return (category == "Storage" && zone is IStoreSettingsParent)
+                    || category == renameLabel;
             }
 
             return false;
@@ -254,16 +508,23 @@ namespace RimWorldAccess
         /// </summary>
         private static bool IsExpandableCategory(object obj, string category)
         {
-            return category == "Gear" ||
-                   category == "Skills" ||
-                   category == "Health" ||
-                   category == "Needs" ||
-                   category == "Mood" ||
-                   category == "Social" ||
-                   category == "Training" ||
-                   category == "Character" ||
-                   category == "Log" ||
-                   category == "Job Queue";
+            if (category == "Gear" ||
+                category == "Skills" ||
+                category == "Health" ||
+                category == "Needs" ||
+                category == "Mood" ||
+                category == "Social" ||
+                category == "Training" ||
+                category == "Character" ||
+                category == "Log" ||
+                category == "Job Queue")
+                return true;
+
+            // Pen Food is expandable if building has pen marker
+            if (category == "Pen Food" && obj is Building building)
+                return building.TryGetComp<CompAnimalPenMarker>() != null;
+
+            return false;
         }
 
         /// <summary>
@@ -278,6 +539,29 @@ namespace RimWorldAccess
                 {
                     WindowlessInspectionState.Close();
                     PrisonerTabState.Open(pawn);
+                    return;
+                }
+            }
+
+            // Handle zone-specific actions
+            if (obj is Zone zone)
+            {
+                string renameLabel = "Rename".Translate().ToString();
+                if (category == renameLabel)
+                {
+                    WindowlessInspectionState.Close();
+                    ZoneRenameState.Open(zone);
+                    return;
+                }
+
+                if (category == "Storage" && zone is IStoreSettingsParent zoneStorageParent)
+                {
+                    var settings = zoneStorageParent.GetStoreSettings();
+                    if (settings != null)
+                    {
+                        WindowlessInspectionState.Close();
+                        StorageSettingsMenuState.Open(settings);
+                    }
                     return;
                 }
             }
@@ -312,9 +596,39 @@ namespace RimWorldAccess
                     StorageSettingsMenuState.Open(settings);
                 }
             }
+            else if (category == "Shells" && building is Building_TurretGun turretGun)
+            {
+                var shellComp = turretGun.gun?.TryGetComp<CompChangeableProjectile>();
+                if (shellComp != null)
+                {
+                    var settings = shellComp.GetStoreSettings();
+                    var parentSettings = shellComp.GetParentStoreSettings();
+                    if (settings != null)
+                    {
+                        ThingFilterMenuState.Open(settings.filter, parentSettings?.filter, "Ammunition");
+                    }
+                }
+            }
             else if (category == "Plant Selection" && building is IPlantToGrowSettable plantGrower)
             {
                 PlantSelectionMenuState.Open(plantGrower);
+            }
+            else if (category == "Pen Animals")
+            {
+                var penMarker = building.TryGetComp<CompAnimalPenMarker>();
+                if (penMarker != null)
+                {
+                    ThingFilterMenuState.Open(penMarker.AnimalFilter, AnimalPenUtility.GetFixedAnimalFilter(), "Pen Animals");
+                }
+            }
+            else if (category == "Pen Auto-Cut")
+            {
+                var penMarker = building.TryGetComp<CompAnimalPenMarker>();
+                if (penMarker != null)
+                {
+                    var fixedFilter = penMarker.parent.Map?.animalPenManager?.GetFixedAutoCutFilter();
+                    ThingFilterMenuState.Open(penMarker.AutoCutFilter, fixedFilter, "Pen Auto-Cut");
+                }
             }
             else
             {
@@ -358,17 +672,29 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds children for expandable categories (Gear, Skills, etc.).
         /// </summary>
-        private static void BuildCategoryChildren(InspectionTreeItem categoryItem, object obj, string category)
+        private static void BuildCategoryChildren(InspectionTreeItem categoryItem, object obj, string category, InspectionMode mode)
         {
             if (categoryItem.Children.Count > 0)
                 return; // Already built
 
-            if (!(obj is Pawn pawn))
+            // Handle Building-specific categories
+            if (obj is Building building)
+            {
+                if (category == "Pen Food")
+                {
+                    BuildPenFoodChildren(categoryItem, building);
+                    return;
+                }
+            }
+
+            // Handle Pawn-specific categories (supports both live pawns and corpses)
+            Pawn pawn = GetPawnFromThing(obj);
+            if (pawn == null)
                 return;
 
             if (category == "Gear")
             {
-                BuildGearChildren(categoryItem, pawn);
+                BuildGearChildren(categoryItem, pawn, mode);
             }
             else if (category == "Skills")
             {
@@ -376,7 +702,7 @@ namespace RimWorldAccess
             }
             else if (category == "Health")
             {
-                BuildHealthChildren(categoryItem, pawn);
+                BuildHealthChildren(categoryItem, pawn, mode);
             }
             else if (category == "Needs")
             {
@@ -404,7 +730,7 @@ namespace RimWorldAccess
             }
             else if (category == "Job Queue")
             {
-                BuildJobQueueChildren(categoryItem, pawn);
+                BuildJobQueueChildren(categoryItem, pawn, mode);
             }
         }
 
@@ -412,7 +738,7 @@ namespace RimWorldAccess
         /// Builds children for Job Queue category.
         /// Shows current job and all queued jobs with delete capability.
         /// </summary>
-        private static void BuildJobQueueChildren(InspectionTreeItem parentItem, Pawn pawn)
+        private static void BuildJobQueueChildren(InspectionTreeItem parentItem, Pawn pawn, InspectionMode mode)
         {
             if (pawn.jobs == null)
                 return;
@@ -455,7 +781,7 @@ namespace RimWorldAccess
                 parentItem.Children.Add(idleItem);
             }
 
-            // Add queued jobs (deletable)
+            // Add queued jobs (deletable in Full mode only)
             var jobQueue = jobTracker.jobQueue;
             if (jobQueue != null && jobQueue.Count > 0)
             {
@@ -484,20 +810,24 @@ namespace RimWorldAccess
                         IsExpandable = false
                     };
 
-                    // Capture the job for the closure
-                    var jobToCancel = queuedJob.job;
-                    var jobLabel = jobReport;
-                    queuedItem.OnDelete = () =>
+                    // Only add delete action in Full mode
+                    if (mode == InspectionMode.Full)
                     {
-                        // Cancel the queued job
-                        jobQueue.Extract(jobToCancel);
-                        TolkHelper.Speak($"Cancelled: {jobLabel}", SpeechPriority.High);
+                        // Capture the job for the closure
+                        var jobToCancel = queuedJob.job;
+                        var jobLabel = jobReport;
+                        queuedItem.OnDelete = () =>
+                        {
+                            // Cancel the queued job
+                            jobQueue.Extract(jobToCancel);
+                            TolkHelper.Speak($"Cancelled: {jobLabel}", SpeechPriority.High);
 
-                        // Rebuild the parent to reflect the change
-                        parentItem.Children.Clear();
-                        BuildJobQueueChildren(parentItem, pawn);
-                        WindowlessInspectionState.RebuildAfterAction();
-                    };
+                            // Rebuild the parent to reflect the change
+                            parentItem.Children.Clear();
+                            BuildJobQueueChildren(parentItem, pawn, mode);
+                            WindowlessInspectionState.RebuildAfterAction();
+                        };
+                    }
 
                     parentItem.Children.Add(queuedItem);
                     queueIndex++;
@@ -508,7 +838,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds children for Gear category.
         /// </summary>
-        private static void BuildGearChildren(InspectionTreeItem parentItem, Pawn pawn)
+        private static void BuildGearChildren(InspectionTreeItem parentItem, Pawn pawn, InspectionMode mode)
         {
             var gearCategories = new[] { "Equipment", "Apparel", "Inventory" };
 
@@ -524,7 +854,7 @@ namespace RimWorldAccess
                     IsExpanded = false
                 };
 
-                gearItem.OnActivate = () => BuildGearItemsChildren(gearItem, pawn, gearCat);
+                gearItem.OnActivate = () => BuildGearItemsChildren(gearItem, pawn, gearCat, mode);
                 AddChild(parentItem, gearItem);
             }
         }
@@ -532,7 +862,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds children for a specific gear category (Equipment/Apparel/Inventory).
         /// </summary>
-        private static void BuildGearItemsChildren(InspectionTreeItem gearCatItem, Pawn pawn, string gearCategory)
+        private static void BuildGearItemsChildren(InspectionTreeItem gearCatItem, Pawn pawn, string gearCategory, InspectionMode mode)
         {
             if (gearCatItem.Children.Count > 0)
                 return; // Already built
@@ -563,11 +893,17 @@ namespace RimWorldAccess
                     Label = gearItem.Label,
                     Data = gearItem,
                     IndentLevel = gearCatItem.IndentLevel + 1,
-                    IsExpandable = true,
+                    // In ReadOnly mode, gear items are not expandable (no actions)
+                    IsExpandable = mode == InspectionMode.Full,
                     IsExpanded = false
                 };
 
-                item.OnActivate = () => BuildGearActionChildren(item, pawn, gearItem);
+                // Only add action activation in Full mode
+                if (mode == InspectionMode.Full)
+                {
+                    item.OnActivate = () => BuildGearActionChildren(item, pawn, gearItem);
+                }
+
                 AddChild(gearCatItem, item);
             }
         }
@@ -720,19 +1056,6 @@ namespace RimWorldAccess
             relationsItem.OnActivate = () => BuildSocialRelationsChildren(relationsItem, pawn);
             AddChild(parentItem, relationsItem);
 
-            // Add Social Interactions as expandable item
-            var interactionsItem = new InspectionTreeItem
-            {
-                Type = InspectionTreeItem.ItemType.SubCategory,
-                Label = "Social Interactions",
-                Data = pawn,
-                IndentLevel = parentItem.IndentLevel + 1,
-                IsExpandable = true,
-                IsExpanded = false
-            };
-            interactionsItem.OnActivate = () => BuildSocialInteractionsChildren(interactionsItem, pawn);
-            AddChild(parentItem, interactionsItem);
-
             // Add Ideology if applicable
             if (ModsConfig.IdeologyActive && pawn.ideo != null)
             {
@@ -801,11 +1124,8 @@ namespace RimWorldAccess
             string detailedInfo = relation.DetailedInfo.StripTags();
             var lines = detailedInfo.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var line in lines)
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
                 var detailItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.DetailText,
@@ -814,79 +1134,6 @@ namespace RimWorldAccess
                     IsExpandable = false
                 };
                 AddChild(relationItem, detailItem);
-            }
-        }
-
-        /// <summary>
-        /// Builds children for Social Interactions sub-category.
-        /// </summary>
-        private static void BuildSocialInteractionsChildren(InspectionTreeItem parentItem, Pawn pawn)
-        {
-            if (parentItem.Children.Count > 0)
-                return; // Already built
-
-            var interactions = SocialTabHelper.GetSocialInteractions(pawn);
-
-            if (interactions.Count == 0)
-            {
-                var noInteractionsItem = new InspectionTreeItem
-                {
-                    Type = InspectionTreeItem.ItemType.DetailText,
-                    Label = "No recent social interactions",
-                    IndentLevel = parentItem.IndentLevel + 1,
-                    IsExpandable = false
-                };
-                AddChild(parentItem, noInteractionsItem);
-                return;
-            }
-
-            foreach (var interaction in interactions)
-            {
-                string interactionName = !string.IsNullOrEmpty(interaction.InteractionLabel)
-                    ? interaction.InteractionLabel
-                    : interaction.InteractionType;
-
-                var interactionItem = new InspectionTreeItem
-                {
-                    Type = InspectionTreeItem.ItemType.Item,
-                    Label = $"{interactionName} - {interaction.Timestamp} ago",
-                    Data = interaction,
-                    IndentLevel = parentItem.IndentLevel + 1,
-                    IsExpandable = true,
-                    IsExpanded = false
-                };
-                interactionItem.OnActivate = () => BuildInteractionDetailChildren(interactionItem, interaction);
-                AddChild(parentItem, interactionItem);
-            }
-        }
-
-        /// <summary>
-        /// Builds detail children for a specific social interaction.
-        /// </summary>
-        private static void BuildInteractionDetailChildren(InspectionTreeItem interactionItem, SocialTabHelper.SocialInteractionInfo interaction)
-        {
-            if (interactionItem.Children.Count > 0)
-                return; // Already built
-
-            var detailItem = new InspectionTreeItem
-            {
-                Type = InspectionTreeItem.ItemType.DetailText,
-                Label = interaction.Description,
-                IndentLevel = interactionItem.IndentLevel + 1,
-                IsExpandable = false
-            };
-            AddChild(interactionItem, detailItem);
-
-            if (interaction.IsFaded)
-            {
-                var fadedItem = new InspectionTreeItem
-                {
-                    Type = InspectionTreeItem.ItemType.DetailText,
-                    Label = "[Old interaction]",
-                    IndentLevel = interactionItem.IndentLevel + 1,
-                    IsExpandable = false
-                };
-                AddChild(interactionItem, fadedItem);
             }
         }
 
@@ -950,11 +1197,8 @@ namespace RimWorldAccess
             {
                 var certaintyDetails = ideologyInfo.CertaintyDetails.StripTags();
                 var lines = certaintyDetails.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var line in lines)
+                foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
                 {
-                    if (string.IsNullOrWhiteSpace(line))
-                        continue;
-
                     var detailItem = new InspectionTreeItem
                     {
                         Type = InspectionTreeItem.ItemType.DetailText,
@@ -971,11 +1215,8 @@ namespace RimWorldAccess
             {
                 var roleDetails = ideologyInfo.RoleDetails.StripTags();
                 var lines = roleDetails.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var line in lines)
+                foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
                 {
-                    if (string.IsNullOrWhiteSpace(line))
-                        continue;
-
                     var detailItem = new InspectionTreeItem
                     {
                         Type = InspectionTreeItem.ItemType.DetailText,
@@ -991,42 +1232,45 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds children for Health category.
         /// </summary>
-        private static void BuildHealthChildren(InspectionTreeItem parentItem, Pawn pawn)
+        private static void BuildHealthChildren(InspectionTreeItem parentItem, Pawn pawn, InspectionMode mode)
         {
             if (parentItem.Children.Count > 0)
                 return; // Already built
 
-            // Add Operations option
-            var operationsItem = new InspectionTreeItem
+            // Add Operations option (Full mode only)
+            if (mode == InspectionMode.Full)
             {
-                Type = InspectionTreeItem.ItemType.Action,
-                Label = "Operations",
-                Data = pawn,
-                IndentLevel = parentItem.IndentLevel + 1,
-                IsExpandable = false
-            };
-            operationsItem.OnActivate = () =>
-            {
-                WindowlessInspectionState.Close();
-                HealthTabState.OpenOperations(pawn);
-            };
-            AddChild(parentItem, operationsItem);
+                var operationsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Action,
+                    Label = "Operations",
+                    Data = pawn,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                operationsItem.OnActivate = () =>
+                {
+                    WindowlessInspectionState.Close();
+                    HealthTabState.OpenOperations(pawn);
+                };
+                AddChild(parentItem, operationsItem);
 
-            // Add Health Settings option
-            var healthSettingsItem = new InspectionTreeItem
-            {
-                Type = InspectionTreeItem.ItemType.Action,
-                Label = "Health Settings",
-                Data = pawn,
-                IndentLevel = parentItem.IndentLevel + 1,
-                IsExpandable = false
-            };
-            healthSettingsItem.OnActivate = () =>
-            {
-                WindowlessInspectionState.Close();
-                HealthTabState.OpenMedicalSettings(pawn);
-            };
-            AddChild(parentItem, healthSettingsItem);
+                // Add Health Settings option
+                var healthSettingsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Action,
+                    Label = "Health Settings",
+                    Data = pawn,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                healthSettingsItem.OnActivate = () =>
+                {
+                    WindowlessInspectionState.Close();
+                    HealthTabState.OpenMedicalSettings(pawn);
+                };
+                AddChild(parentItem, healthSettingsItem);
+            }
 
             // Add overall health state
             var stateItem = new InspectionTreeItem
@@ -1051,6 +1295,20 @@ namespace RimWorldAccess
                 AddChild(parentItem, bleedingItem);
             }
 
+            // Add blood loss level if applicable
+            var bloodLoss = pawn.health.hediffSet.GetFirstHediffOfDef(HediffDefOf.BloodLoss);
+            if (bloodLoss != null)
+            {
+                var bloodLossItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = $"Blood Loss: {bloodLoss.Severity:P0}",
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                AddChild(parentItem, bloodLossItem);
+            }
+
             // Add pain level if applicable
             float painTotal = pawn.health.hediffSet.PainTotal;
             if (painTotal > 0.01f)
@@ -1069,12 +1327,20 @@ namespace RimWorldAccess
             var hediffs = pawn.health.hediffSet.hediffs;
             if (hediffs != null && hediffs.Count > 0)
             {
-                int visibleHediffCount = hediffs.Count(h => h.Visible);
+                int totalVisible = hediffs.Count(h => h.Visible);
+                int afterFiltering = hediffs.Count(h => h.Visible && !IsSurgicallyRemovedPart(h, pawn));
+                int filteredCount = totalVisible - afterFiltering;
+
+                string conditionsLabel = $"Conditions ({afterFiltering})";
+                if (filteredCount > 0)
+                {
+                    conditionsLabel += $" ({filteredCount} filtered)";
+                }
 
                 var conditionsItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.SubCategory,
-                    Label = $"Conditions ({visibleHediffCount})",
+                    Label = conditionsLabel,
                     Data = pawn,
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = true,
@@ -1120,10 +1386,19 @@ namespace RimWorldAccess
             if (parentItem.Children.Count > 0)
                 return; // Already built
 
-            var hediffs = pawn.health.hediffSet.hediffs.Where(h => h.Visible).ToList();
+            var hediffs = pawn.health.hediffSet.hediffs
+                .Where(h => h.Visible)
+                .Where(h => !IsSurgicallyRemovedPart(h, pawn))
+                .ToList();
 
             // Group hediffs by body part (null for whole-body conditions)
-            var hediffsByPart = hediffs.GroupBy(h => h.Part).OrderBy(g => g.Key == null ? 0 : 1);
+            // Sort by: whole-body first, then by part health percentage (most damaged first)
+            var hediffsByPart = hediffs
+                .GroupBy(h => h.Part)
+                .OrderBy(g => g.Key == null ? 0 : 1)
+                .ThenBy(g => g.Key != null
+                    ? pawn.health.hediffSet.GetPartHealth(g.Key) / g.Key.def.GetMaxHealth(pawn)
+                    : 0f);
 
             foreach (var group in hediffsByPart)
             {
@@ -1227,10 +1502,22 @@ namespace RimWorldAccess
             if (bodyPartItem.Children.Count > 0)
                 return; // Already built
 
-            foreach (var hediff in hediffs)
+            // Sort hediffs by severity (most severe first)
+            var sortedHediffs = hediffs.OrderByDescending(h => h.Severity).ToList();
+
+            foreach (var hediff in sortedHediffs)
             {
-                // Get hediff label
+                // Get hediff label with inline impacts
                 string hediffLabel = hediff.LabelCap.StripTags();
+                string impacts = GetHediffImpactsSummary(hediff);
+                if (!string.IsNullOrEmpty(impacts))
+                {
+                    hediffLabel += $". {impacts}";
+                }
+
+                // Expandable if TipStringExtra has effects OR Description exists
+                bool hasExpandableContent = !string.IsNullOrWhiteSpace(hediff.TipStringExtra)
+                                         || !string.IsNullOrWhiteSpace(hediff.Description);
 
                 var hediffItem = new InspectionTreeItem
                 {
@@ -1238,13 +1525,80 @@ namespace RimWorldAccess
                     Label = hediffLabel,
                     Data = hediff,
                     IndentLevel = bodyPartItem.IndentLevel + 1,
-                    IsExpandable = true,
+                    IsExpandable = hasExpandableContent,
                     IsExpanded = false
                 };
 
-                hediffItem.OnActivate = () => BuildHediffDetailChildren(hediffItem, hediff, pawn);
+                if (hasExpandableContent)
+                {
+                    hediffItem.OnActivate = () => BuildHediffDetailChildren(hediffItem, hediff, pawn);
+                }
                 AddChild(bodyPartItem, hediffItem);
             }
+        }
+
+        /// <summary>
+        /// Gets a compact summary of hediff impacts for inline display.
+        /// </summary>
+        private static string GetHediffImpactsSummary(Hediff hediff)
+        {
+            var impacts = new List<string>();
+
+            // Bleeding
+            if (hediff.Bleeding)
+            {
+                impacts.Add($"Bleeding {hediff.BleedRate:F1}/day");
+            }
+
+            // Pain
+            float pain = hediff.PainOffset;
+            if (pain > 0.01f)
+            {
+                impacts.Add($"Pain +{pain:P0}");
+            }
+
+            // Capacity impacts
+            if (hediff.CapMods != null)
+            {
+                foreach (var capMod in hediff.CapMods)
+                {
+                    if (capMod.capacity == null)
+                        continue;
+
+                    string capName = capMod.capacity.LabelCap.ToString().StripTags();
+
+                    if (capMod.offset != 0f)
+                    {
+                        string sign = capMod.offset > 0 ? "+" : "";
+                        impacts.Add($"{capName} {sign}{capMod.offset:P0}");
+                    }
+                    else if (capMod.postFactor != 1f)
+                    {
+                        float percentChange = (capMod.postFactor - 1f) * 100f;
+                        string sign = percentChange > 0 ? "+" : "";
+                        impacts.Add($"{capName} {sign}{percentChange:F0}%");
+                    }
+                }
+            }
+
+            // Tend status
+            var tendComp = hediff.TryGetComp<HediffComp_TendDuration>();
+            if (tendComp != null)
+            {
+                if (tendComp.IsTended)
+                {
+                    impacts.Add($"Tended {tendComp.tendQuality:P0}");
+                }
+                else if (hediff.TendableNow())
+                {
+                    impacts.Add("Needs tending");
+                }
+            }
+
+            if (impacts.Count == 0)
+                return string.Empty;
+
+            return string.Join(", ", impacts);
         }
 
         /// <summary>
@@ -1312,40 +1666,79 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Builds children for Capacities subcategory.
+        /// Uses HealthTabHelper for consistent capacity data with descriptions.
         /// </summary>
         private static void BuildCapacitiesChildren(InspectionTreeItem parentItem, Pawn pawn)
         {
             if (parentItem.Children.Count > 0)
                 return; // Already built
 
-            var keyCapacities = new[]
-            {
-                PawnCapacityDefOf.Consciousness,
-                PawnCapacityDefOf.Moving,
-                PawnCapacityDefOf.Manipulation,
-                PawnCapacityDefOf.Sight,
-                PawnCapacityDefOf.Hearing,
-                PawnCapacityDefOf.Talking,
-                PawnCapacityDefOf.Breathing,
-                PawnCapacityDefOf.BloodFiltration,
-                PawnCapacityDefOf.BloodPumping
-            };
+            // Use HealthTabHelper for consistent capacity data (already sorted by level)
+            var capacities = HealthTabHelper.GetCapacities(pawn);
 
-            foreach (var capacity in keyCapacities)
+            foreach (var capacity in capacities)
             {
-                if (capacity != null && pawn.health.capacities.CapableOf(capacity))
+                var capacityItem = new InspectionTreeItem
                 {
-                    float level = pawn.health.capacities.GetLevel(capacity);
-                    string status = $"{level:P0}";
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"{capacity.Label}: {capacity.LevelLabel}",
+                    Data = capacity,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
 
-                    var capacityItem = new InspectionTreeItem
+                capacityItem.OnActivate = () => BuildCapacityDetailChildren(capacityItem, capacity);
+                AddChild(parentItem, capacityItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds detail children for a capacity showing description and factors.
+        /// </summary>
+        private static void BuildCapacityDetailChildren(InspectionTreeItem capacityItem, HealthTabHelper.CapacityInfo capacity)
+        {
+            if (capacityItem.Children.Count > 0)
+                return; // Already built
+
+            // Add description if available
+            if (!string.IsNullOrEmpty(capacity.Description))
+            {
+                var descItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.DetailText,
+                    Label = capacity.Description,
+                    IndentLevel = capacityItem.IndentLevel + 1,
+                    IsExpandable = false
+                };
+                AddChild(capacityItem, descItem);
+            }
+
+            // Add breakdown factors
+            if (!string.IsNullOrEmpty(capacity.DetailedBreakdown))
+            {
+                var lines = capacity.DetailedBreakdown.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var line in lines)
+                {
+                    string trimmedLine = line.Trim();
+                    if (string.IsNullOrEmpty(trimmedLine))
+                        continue;
+
+                    // Skip header and current level (already in parent label)
+                    if (trimmedLine.EndsWith(":") && trimmedLine == $"{capacity.Label}:")
+                        continue;
+                    if (trimmedLine.StartsWith("Current level:"))
+                        continue;
+
+                    var detailItem = new InspectionTreeItem
                     {
                         Type = InspectionTreeItem.ItemType.DetailText,
-                        Label = $"{capacity.LabelCap}: {status}",
-                        IndentLevel = parentItem.IndentLevel + 1,
+                        Label = trimmedLine,
+                        IndentLevel = capacityItem.IndentLevel + 1,
                         IsExpandable = false
                     };
-                    AddChild(parentItem, capacityItem);
+                    AddChild(capacityItem, detailItem);
                 }
             }
         }
@@ -1373,6 +1766,23 @@ namespace RimWorldAccess
 
             Need_Mood mood = pawn.needs.mood;
 
+            // Add Break Thresholds as expandable subcategory if pawn can have mental breaks
+            if (pawn.mindState?.mentalBreaker != null &&
+                pawn.mindState.mentalBreaker.CanDoRandomMentalBreaks)
+            {
+                var breakThresholdsItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = "Break Thresholds",
+                    Data = pawn,
+                    IndentLevel = parentItem.IndentLevel + 1,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                breakThresholdsItem.OnActivate = () => BuildBreakThresholdsChildren(breakThresholdsItem, pawn);
+                AddChild(parentItem, breakThresholdsItem);
+            }
+
             // Get thoughts affecting mood
             List<Thought> thoughtGroups = new List<Thought>();
             PawnNeedsUIUtility.GetThoughtGroupsInDisplayOrder(mood, thoughtGroups);
@@ -1387,7 +1797,6 @@ namespace RimWorldAccess
                     IsExpandable = false
                 };
                 AddChild(parentItem, noThoughtsItem);
-                return;
             }
 
             // Process each thought group
@@ -1408,8 +1817,19 @@ namespace RimWorldAccess
                 // Get mood offset for this thought group
                 float moodOffset = mood.thoughts.MoodOffsetOfGroup(group);
 
-                // Format the thought label
+                // Get the flavor text from thought Description (properly formatted with weapon names, etc.)
                 string thoughtLabel = leadingThought.LabelCap.StripTags();
+                string flavorText = "";
+                if (leadingThought.CurStage != null && !string.IsNullOrEmpty(leadingThought.CurStage.description))
+                {
+                    // Use Description property which resolves placeholders like {WEAPON_indefinite}
+                    // Extract just the first paragraph (before precept/nullified info)
+                    string fullDescription = leadingThought.Description;
+                    int splitIndex = fullDescription.IndexOf("\n\n");
+                    string resolvedDescription = splitIndex > 0 ? fullDescription.Substring(0, splitIndex) : fullDescription;
+                    flavorText = $"\"{resolvedDescription.StripTags()}\" ";
+                }
+
                 if (thoughtGroup.Count > 1)
                 {
                     thoughtLabel = $"{thoughtLabel} x{thoughtGroup.Count}";
@@ -1418,10 +1838,41 @@ namespace RimWorldAccess
                 // Format mood offset with sign
                 string offsetText = moodOffset.ToString("+0;-0;0");
 
+                // Build expiry info if this is a memory-based thought
+                string expiryText = "";
+                int durationTicks = group.DurationTicks;
+                if (durationTicks > 5 && leadingThought is Thought_Memory)
+                {
+                    if (thoughtGroup.Count == 1)
+                    {
+                        // Single thought - simple expiry
+                        Thought_Memory memory = (Thought_Memory)leadingThought;
+                        int remaining = durationTicks - memory.age;
+                        expiryText = $" (expires in {remaining.ToStringTicksToPeriod()})";
+                    }
+                    else
+                    {
+                        // Multiple stacked thoughts - show range
+                        int minAge = int.MaxValue;
+                        int maxAge = int.MinValue;
+                        foreach (Thought thought in thoughtGroup)
+                        {
+                            if (thought is Thought_Memory mem)
+                            {
+                                minAge = Math.Min(minAge, mem.age);
+                                maxAge = Math.Max(maxAge, mem.age);
+                            }
+                        }
+                        int firstExpires = durationTicks - maxAge;
+                        int lastExpires = durationTicks - minAge;
+                        expiryText = $" (expires in {firstExpires.ToStringTicksToPeriod()} to {lastExpires.ToStringTicksToPeriod()})";
+                    }
+                }
+
                 var thoughtItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.Item,
-                    Label = $"{thoughtLabel}: {offsetText}",
+                    Label = $"{flavorText}{thoughtLabel}: {offsetText}{expiryText}.",
                     IndentLevel = parentItem.IndentLevel + 1,
                     IsExpandable = false
                 };
@@ -1430,6 +1881,51 @@ namespace RimWorldAccess
 
                 thoughtGroup.Clear();
             }
+        }
+
+        /// <summary>
+        /// Builds children for Break Thresholds subcategory.
+        /// </summary>
+        private static void BuildBreakThresholdsChildren(InspectionTreeItem parentItem, Pawn pawn)
+        {
+            if (parentItem.Children.Count > 0)
+                return; // Already built
+
+            if (pawn.mindState?.mentalBreaker == null)
+                return;
+
+            var breaker = pawn.mindState.mentalBreaker;
+
+            float minor = breaker.BreakThresholdMinor * 100f;
+            float major = breaker.BreakThresholdMajor * 100f;
+            float extreme = breaker.BreakThresholdExtreme * 100f;
+
+            var minorItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = $"Minor: {minor:F0}%",
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            AddChild(parentItem, minorItem);
+
+            var majorItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = $"Major: {major:F0}%",
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            AddChild(parentItem, majorItem);
+
+            var extremeItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.DetailText,
+                Label = $"Extreme: {extreme:F0}%",
+                IndentLevel = parentItem.IndentLevel + 1,
+                IsExpandable = false
+            };
+            AddChild(parentItem, extremeItem);
         }
 
         /// <summary>
@@ -1451,11 +1947,8 @@ namespace RimWorldAccess
             // Split into lines and create a detail item for each
             var lines = info.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var line in lines)
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
                 var detailItem = new InspectionTreeItem
                 {
                     Type = InspectionTreeItem.ItemType.DetailText,
@@ -1636,6 +2129,121 @@ namespace RimWorldAccess
                 }
 
                 AddChild(parentItem, logItem);
+            }
+        }
+
+        /// <summary>
+        /// Builds children for Pen Food category showing nutrition info.
+        /// </summary>
+        private static void BuildPenFoodChildren(InspectionTreeItem parentItem, Building building)
+        {
+            var penMarker = building.TryGetComp<CompAnimalPenMarker>();
+            if (penMarker == null)
+                return;
+
+            int indent = parentItem.IndentLevel + 1;
+            var calculator = penMarker.PenFoodCalculator;
+
+            // Summary item
+            float growth = calculator.NutritionPerDayToday;
+            float consumption = calculator.SumNutritionConsumptionPerDay;
+            float balance = growth - consumption;
+            string balanceStr = balance >= 0 ? $"+{balance:F1}" : $"{balance:F1}";
+            string summaryText = $"Balance: {balanceStr} nutrition/day (growth: {growth:F1}, consumption: {consumption:F1})";
+
+            var summaryItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.Item,
+                Label = summaryText,
+                IndentLevel = indent,
+                IsExpandable = false
+            };
+            AddChild(parentItem, summaryItem);
+
+            // Stockpiled food
+            if (calculator.sumStockpiledNutritionAvailableNow > 0)
+            {
+                var stockpileItem = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Item,
+                    Label = $"Stockpiled: {calculator.sumStockpiledNutritionAvailableNow:F1} nutrition",
+                    IndentLevel = indent,
+                    IsExpandable = false
+                };
+                AddChild(parentItem, stockpileItem);
+            }
+
+            // Animals category
+            var animalInfos = calculator.ActualAnimalInfos;
+            if (animalInfos != null && animalInfos.Count > 0)
+            {
+                var animalsCategory = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = $"Animals ({animalInfos.Count} types)",
+                    IndentLevel = indent,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                animalsCategory.OnActivate = () =>
+                {
+                    if (animalsCategory.Children.Count == 0)
+                    {
+                        foreach (var info in animalInfos)
+                        {
+                            string animalLabel = info.animalDef?.label?.CapitalizeFirst() ?? "Unknown";
+                            float animalConsumption = info.nutritionConsumptionPerDay;
+                            int count = info.count;
+                            string animalText = $"{animalLabel} ({count}): -{animalConsumption:F2}/day";
+
+                            var animalItem = new InspectionTreeItem
+                            {
+                                Type = InspectionTreeItem.ItemType.Item,
+                                Label = animalText,
+                                IndentLevel = indent + 1,
+                                IsExpandable = false
+                            };
+                            AddChild(animalsCategory, animalItem);
+                        }
+                    }
+                };
+                AddChild(parentItem, animalsCategory);
+            }
+
+            // Stockpiled items breakdown
+            var stockpileInfos = calculator.AllStockpiledInfos;
+            if (stockpileInfos != null && stockpileInfos.Count > 0)
+            {
+                var foodCategory = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.SubCategory,
+                    Label = $"Stockpiled Items ({stockpileInfos.Count} types)",
+                    IndentLevel = indent,
+                    IsExpandable = true,
+                    IsExpanded = false
+                };
+                foodCategory.OnActivate = () =>
+                {
+                    if (foodCategory.Children.Count == 0)
+                    {
+                        foreach (var info in stockpileInfos)
+                        {
+                            string foodLabel = info.itemDef?.label?.CapitalizeFirst() ?? "Unknown";
+                            float nutrition = info.totalNutritionAvailable;
+                            string foodText = $"{foodLabel}: {nutrition:F1} nutrition";
+
+                            var foodItem = new InspectionTreeItem
+                            {
+                                Type = InspectionTreeItem.ItemType.Item,
+                                Label = foodText,
+                                IndentLevel = indent + 1,
+                                IsExpandable = false
+                            };
+                            AddChild(foodCategory, foodItem);
+                        }
+                    }
+                };
+                AddChild(parentItem, foodCategory);
             }
         }
     }

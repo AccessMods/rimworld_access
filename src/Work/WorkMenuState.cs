@@ -52,32 +52,6 @@ namespace RimWorldAccess
         // Track if changes were made to current pawn
         private static bool hasUnsavedChanges = false;
 
-        // Skill level descriptors (game's 21 levels)
-        private static readonly string[] SkillDescriptors = new string[]
-        {
-            "Barely heard of it",
-            "Utter beginner",
-            "Beginner",
-            "Basic familiarity",
-            "Some familiarity",
-            "Significant familiarity",
-            "Capable amateur",
-            "Weak professional",
-            "Employable professional",
-            "Solid professional",
-            "Skilled professional",
-            "Very skilled professional",
-            "Expert",
-            "Strong expert",
-            "Master",
-            "Strong master",
-            "Region-known master",
-            "Region-leading master",
-            "Planet-known master",
-            "Planet-leading master",
-            "Legendary master"
-        };
-
         public static bool IsActive => isActive;
         public static Pawn CurrentPawn => currentPawn;
         public static int CurrentPawnIndex => currentPawnIndex;
@@ -580,8 +554,9 @@ namespace RimWorldAccess
         {
             if (allPawns.Count == 0) return;
 
-            int newIndex = (currentPawnIndex + 1) % allPawns.Count;
-            SaveAndSwitchPawn(newIndex);
+            int newIndex = MenuHelper.SelectNext(currentPawnIndex, allPawns.Count);
+            if (newIndex != currentPawnIndex)
+                SaveAndSwitchPawn(newIndex);
         }
 
         /// <summary>
@@ -591,8 +566,9 @@ namespace RimWorldAccess
         {
             if (allPawns.Count == 0) return;
 
-            int newIndex = (currentPawnIndex - 1 + allPawns.Count) % allPawns.Count;
-            SaveAndSwitchPawn(newIndex);
+            int newIndex = MenuHelper.SelectPrevious(currentPawnIndex, allPawns.Count);
+            if (newIndex != currentPawnIndex)
+                SaveAndSwitchPawn(newIndex);
         }
 
         #endregion
@@ -1047,7 +1023,7 @@ namespace RimWorldAccess
             // Get skill level (average of relevant skills)
             float avgSkill = currentPawn.skills.AverageOfRelevantSkillsFor(workType);
             int skillLevel = Math.Min(20, Math.Max(0, (int)Math.Round(avgSkill)));
-            string descriptor = SkillDescriptors[skillLevel];
+            string descriptor = $"Skill{skillLevel}".Translate();
 
             sb.Append($". Skill level: {skillLevel}, {descriptor}");
 

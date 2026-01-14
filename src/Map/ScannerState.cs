@@ -57,6 +57,19 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Invalidates the scanner cache, forcing a refresh on next access.
+        /// Call this when switching maps or when map contents have significantly changed.
+        /// </summary>
+        public static void Invalidate()
+        {
+            categories.Clear();
+            currentCategoryIndex = 0;
+            currentSubcategoryIndex = 0;
+            currentItemIndex = 0;
+            currentBulkIndex = 0;
+        }
+
+        /// <summary>
         /// Refreshes the scanner item list based on current cursor position.
         /// Called automatically by navigation methods.
         /// </summary>
@@ -389,6 +402,16 @@ namespace RimWorldAccess
                 {
                     targetPosition = currentItem.Position;
                 }
+            }
+            else if (currentItem.IsZone)
+            {
+                // For zones, use the calculated center position
+                targetPosition = currentItem.Position;
+            }
+            else if (currentItem.IsRoom)
+            {
+                // For rooms, use the calculated center position
+                targetPosition = currentItem.Position;
             }
             else
             {

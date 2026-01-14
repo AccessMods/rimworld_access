@@ -53,14 +53,227 @@ namespace RimWorldAccess
 
             if (obj is Zone zone)
             {
-                return $"Zone: {zone.label}";
+                // Include zone type for clarity
+                string zoneType = GetZoneTypeName(zone);
+                return $"{zone.label} ({zoneType})";
             }
 
             return obj.ToString();
         }
 
         /// <summary>
+        /// Gets dynamic categories for an object by discovering tabs from RimWorld's inspect system.
+        /// This is the new dynamic approach that reads tabs from the game.
+        /// </summary>
+        public static List<TabCategoryInfo> GetDynamicCategories(object obj)
+        {
+            var categories = new List<TabCategoryInfo>();
+
+            // Always add Overview first (synthetic category, not a real tab)
+            categories.Add(new TabCategoryInfo
+            {
+                Name = "Overview",
+                Tab = null,
+                Handler = TabHandlerType.RichNavigation,
+                IsKnown = true,
+                OriginalCategoryName = "Overview"
+            });
+
+            // For Things (pawns, buildings, items), get tabs dynamically
+            if (obj is Thing thing)
+            {
+                var tabCategories = TabRegistry.GetTabCategories(thing);
+                categories.AddRange(tabCategories);
+
+                // Add synthetic categories that aren't tabs but provide useful info
+                if (obj is Pawn pawn)
+                {
+                    // Add Mood category (not a separate tab in RimWorld, but we show it)
+                    if (pawn.needs?.mood != null && !categories.Any(c => c.Name == "Mood"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Mood",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Mood"
+                        });
+                    }
+
+                    // Add Skills category for humanlike pawns (part of Character tab in game)
+                    if (pawn.RaceProps.Humanlike && pawn.skills?.skills != null && !categories.Any(c => c.Name == "Skills"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Skills",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Skills"
+                        });
+                    }
+
+                    // Add Work Priorities for humanlike pawns
+                    if (pawn.RaceProps.Humanlike && !categories.Any(c => c.Name == "Work Priorities"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Work Priorities",
+                            Tab = null,
+                            Handler = TabHandlerType.BasicInspectString,
+                            IsKnown = true,
+                            OriginalCategoryName = "Work Priorities"
+                        });
+                    }
+
+                    // Add Job Queue if there are queued jobs
+                    if (pawn.jobs?.jobQueue?.Count > 0 && !categories.Any(c => c.Name == "Job Queue"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Job Queue",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Job Queue"
+                        });
+                    }
+                }
+
+                // Add building-specific synthetic categories
+                if (obj is Building building)
+                {
+                    // Temperature control (not a tab, but a component)
+                    var tempControl = building.TryGetComp<CompTempControl>();
+                    if (tempControl != null && !categories.Any(c => c.Name == "Temperature"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Temperature",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Temperature"
+                        });
+                    }
+
+                    // Bed Assignment (not a tab)
+                    if (building is Building_Bed && !categories.Any(c => c.Name == "Bed Assignment"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Bed Assignment",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Bed Assignment"
+                        });
+                    }
+
+                    // Plant Selection for plant growers
+                    if (building is IPlantToGrowSettable && !categories.Any(c => c.Name == "Plant Selection"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Plant Selection",
+                            Tab = null,
+                            Handler = TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = "Plant Selection"
+                        });
+                    }
+
+                    // Power info
+                    var powerComp = building.TryGetComp<CompPowerTrader>();
+                    if (powerComp != null && !categories.Any(c => c.Name == "Power"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Power",
+                            Tab = null,
+                            Handler = TabHandlerType.BasicInspectString,
+                            IsKnown = true,
+                            OriginalCategoryName = "Power"
+                        });
+                    }
+
+                    // Dynamically discovered components
+                    var discoveredComponents = BuildingComponentsHelper.GetDiscoverableComponents(building);
+                    foreach (var component in discoveredComponents.Where(cmp => !categories.Any(c => c.Name == cmp.CategoryName)))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = component.CategoryName,
+                            Tab = null,
+                            Handler = component.IsReadOnly ? TabHandlerType.BasicInspectString : TabHandlerType.Action,
+                            IsKnown = true,
+                            OriginalCategoryName = component.CategoryName
+                        });
+                    }
+
+                }
+
+                // Add growth info for plants
+                if (obj is Plant)
+                {
+                    if (!categories.Any(c => c.Name == "Growth Info"))
+                    {
+                        categories.Add(new TabCategoryInfo
+                        {
+                            Name = "Growth Info",
+                            Tab = null,
+                            Handler = TabHandlerType.RichNavigation,
+                            IsKnown = true,
+                            OriginalCategoryName = "Growth Info"
+                        });
+                    }
+                }
+
+            }
+
+            // Zone-specific categories
+            if (obj is Zone zone)
+            {
+                // Add tabs dynamically discovered from zone's GetInspectTabs()
+                // This includes ITab_Storage for Zone_Stockpile
+                var zoneTabCategories = TabRegistry.GetZoneTabCategories(zone);
+                categories.AddRange(zoneTabCategories);
+
+                // Rename is a gizmo action, not a tab - add as synthetic category
+                if (!categories.Any(c => c.OriginalCategoryName == "Rename"))
+                {
+                    categories.Add(new TabCategoryInfo
+                    {
+                        Name = "Rename".Translate().ToString(),
+                        Tab = null,
+                        Handler = TabHandlerType.Action,
+                        IsKnown = true,
+                        OriginalCategoryName = "Rename"
+                    });
+                }
+
+                // Plant Info is a synthetic category for growing zones (not a real tab)
+                if (zone is Zone_Growing && !categories.Any(c => c.OriginalCategoryName == "Plant Info"))
+                {
+                    categories.Add(new TabCategoryInfo
+                    {
+                        Name = "Plant Info",
+                        Tab = null,
+                        Handler = TabHandlerType.RichNavigation,
+                        IsKnown = true,
+                        OriginalCategoryName = "Plant Info"
+                    });
+                }
+            }
+
+            return categories;
+        }
+
+        /// <summary>
         /// Gets the list of available information categories for an object.
+        /// This is the legacy method that returns simple string categories.
+        /// Preserved for backward compatibility with existing code.
         /// </summary>
         public static List<string> GetAvailableCategories(object obj)
         {
@@ -122,6 +335,10 @@ namespace RimWorldAccess
                 if (building is IStoreSettingsParent || building is Building_Storage)
                     categories.Add("Storage");
 
+                // Check for turrets with changeable projectiles (mortars)
+                if (building is Building_TurretGun turretGun && turretGun.gun?.TryGetComp<CompChangeableProjectile>() != null)
+                    categories.Add("Shells");
+
                 // Check for plant grower (hydroponics basin, growing zones, etc.)
                 if (building is IPlantToGrowSettable)
                     categories.Add("Plant Selection");
@@ -133,28 +350,33 @@ namespace RimWorldAccess
 
                 // Dynamically discover and add component categories
                 var discoveredComponents = BuildingComponentsHelper.GetDiscoverableComponents(building);
-                foreach (var component in discoveredComponents)
+                foreach (var component in discoveredComponents.Where(cmp => !categories.Contains(cmp.CategoryName)))
                 {
-                    // Only add if not already covered by specialized menus above
-                    if (!categories.Contains(component.CategoryName))
-                    {
-                        categories.Add(component.CategoryName);
-                    }
+                    categories.Add(component.CategoryName);
                 }
 
-                // Add stats category for all buildings
-                categories.Add("Stats");
             }
             else if (obj is Plant plant)
             {
                 categories.Add("Overview");
                 categories.Add("Growth Info");
-                categories.Add("Stats");
+            }
+            else if (obj is Zone zone)
+            {
+                categories.Add("Overview");
+                categories.Add("Rename".Translate().ToString());
+
+                // Zone_Stockpile implements IStoreSettingsParent, so add Storage category
+                if (zone is IStoreSettingsParent)
+                    categories.Add("Storage");
+
+                // Zone_Growing has plant settings
+                if (zone is Zone_Growing)
+                    categories.Add("Plant Info");
             }
             else if (obj is Thing)
             {
                 categories.Add("Overview");
-                categories.Add("Quality & Stats");
             }
 
             return categories;
@@ -169,6 +391,12 @@ namespace RimWorldAccess
 
             try
             {
+                // Extract inner pawn from corpse
+                if (obj is Corpse corpse)
+                {
+                    obj = corpse.InnerPawn;
+                }
+
                 if (obj is Pawn pawn)
                 {
                     return GetPawnCategoryInfo(pawn, category);
@@ -180,6 +408,10 @@ namespace RimWorldAccess
                 else if (obj is Plant plant)
                 {
                     return GetPlantCategoryInfo(plant, category);
+                }
+                else if (obj is Zone zone)
+                {
+                    return GetZoneCategoryInfo(zone, category);
                 }
                 else if (obj is Thing thing)
                 {
@@ -268,8 +500,42 @@ namespace RimWorldAccess
                     return "Not a prisoner or slave.";
 
                 default:
-                    return "Category not found.";
+                    // Try to get info from dynamic tab using GetInspectString as fallback
+                    return GetDynamicTabInfo(pawn, category);
             }
+        }
+
+        /// <summary>
+        /// Gets fallback information for a dynamic tab using GetInspectString().
+        /// </summary>
+        private static string GetDynamicTabInfo(Thing thing, string category)
+        {
+            if (thing == null)
+                return "No information available.";
+
+            // Try to find the matching tab
+            var tabs = thing.GetInspectTabs();
+            if (tabs != null)
+            {
+                foreach (var tab in tabs)
+                {
+                    if (tab == null || !tab.IsVisible)
+                        continue;
+
+                    string tabLabel = TabRegistry.GetCategoryNameForTab(tab);
+                    if (tabLabel == category)
+                    {
+                        return TabRegistry.GetFallbackInfo(thing, tab);
+                    }
+                }
+            }
+
+            // If no matching tab found, use general inspect string
+            string inspectString = thing.GetInspectString();
+            if (!string.IsNullOrEmpty(inspectString))
+                return inspectString;
+
+            return $"No information available for '{category}'.";
         }
 
         /// <summary>
@@ -433,11 +699,9 @@ namespace RimWorldAccess
                 case "Power":
                     return GetBuildingPowerInfo(building);
 
-                case "Stats":
-                    return GetBuildingStatsInfo(building);
-
                 default:
-                    return "Category not found.";
+                    // Try to get info from dynamic tab using GetInspectString as fallback
+                    return GetDynamicTabInfo(building, category);
             }
         }
 
@@ -583,32 +847,6 @@ namespace RimWorldAccess
             return "This building does not use power.";
         }
 
-
-        /// <summary>
-        /// Gets all stats information for a building using RimWorld's native stat system.
-        /// </summary>
-        private static string GetBuildingStatsInfo(Building building)
-        {
-            var sb = new StringBuilder();
-
-            // Get all stats using RimWorld's native stat system
-            List<StatDrawEntry> stats = StatsHelper.GetAllStats(building);
-
-            if (stats != null && stats.Count > 0)
-            {
-                // Format stats grouped by category
-                string formattedStats = StatsHelper.FormatStatsForScreenReader(stats);
-                sb.Append(formattedStats);
-            }
-            else
-            {
-                // Fallback: if no stats found, show basic info
-                sb.AppendLine("No stats available for this building.");
-            }
-
-            return sb.ToString();
-        }
-
         /// <summary>
         /// Gets bed assignment information for a bed.
         /// </summary>
@@ -692,9 +930,6 @@ namespace RimWorldAccess
                 case "Growth Info":
                     return GetPlantGrowthInfo(plant);
 
-                case "Stats":
-                    return GetPlantStatsInfo(plant);
-
                 default:
                     return "Category not found.";
             }
@@ -751,29 +986,93 @@ namespace RimWorldAccess
             return sb.ToString();
         }
 
-
+        /// <summary>
+        /// Gets a user-friendly zone type name.
+        /// </summary>
+        private static string GetZoneTypeName(Zone zone)
+        {
+            if (zone is Zone_Stockpile)
+                return "Stockpile";
+            if (zone is Zone_Growing)
+                return "Growing Zone";
+            // Could add Zone_Fishing for Odyssey DLC if needed
+            return "Zone";
+        }
 
         /// <summary>
-        /// Gets all stats information for a plant using RimWorld's native stat system.
+        /// Gets category information for a zone.
         /// </summary>
-        private static string GetPlantStatsInfo(Plant plant)
+        private static string GetZoneCategoryInfo(Zone zone, string category)
+        {
+            switch (category)
+            {
+                case "Overview":
+                    return GetZoneOverview(zone);
+
+                case "Plant Info":
+                    if (zone is Zone_Growing growing)
+                        return GetGrowingZonePlantInfo(growing);
+                    return "No plant information available.";
+
+                default:
+                    return "Category not found.";
+            }
+        }
+
+        /// <summary>
+        /// Gets overview information for a zone using RimWorld's localized GetInspectString.
+        /// </summary>
+        private static string GetZoneOverview(Zone zone)
         {
             var sb = new StringBuilder();
 
-            // Get all stats using RimWorld's native stat system
-            List<StatDrawEntry> stats = StatsHelper.GetAllStats(plant);
+            // Zone name and type
+            sb.AppendLine(zone.label);
 
-            if (stats != null && stats.Count > 0)
+            // Get the inspect string from RimWorld (already localized)
+            string inspectString = zone.GetInspectString();
+            if (!string.IsNullOrWhiteSpace(inspectString))
             {
-                // Format stats grouped by category
-                string formattedStats = StatsHelper.FormatStatsForScreenReader(stats);
-                sb.Append(formattedStats);
+                sb.AppendLine(inspectString);
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets plant information for a growing zone.
+        /// </summary>
+        private static string GetGrowingZonePlantInfo(Zone_Growing zone)
+        {
+            var sb = new StringBuilder();
+
+            // Current plant type
+            var plantDef = zone.GetPlantDefToGrow();
+            if (plantDef != null)
+            {
+                sb.AppendLine($"Plant: {plantDef.LabelCap}");
+
+                // Growth time
+                if (plantDef.plant != null)
+                {
+                    float growDays = plantDef.plant.growDays;
+                    sb.AppendLine($"Growth time: {growDays:F1} days");
+
+                    // Harvest yield if applicable
+                    if (plantDef.plant.harvestedThingDef != null)
+                    {
+                        sb.AppendLine($"Harvest: {plantDef.plant.harvestedThingDef.LabelCap}");
+                    }
+                }
             }
             else
             {
-                // Fallback: if no stats found, show basic info
-                sb.AppendLine("No stats available for this plant.");
+                sb.AppendLine("No plant selected");
             }
+
+            // Sow and cut toggles
+            sb.AppendLine($"Allow sow: {(zone.allowSow ? "Yes" : "No")}");
+            sb.AppendLine($"Allow cut: {(zone.allowCut ? "Yes" : "No")}");
 
             return sb.ToString();
         }
@@ -787,9 +1086,6 @@ namespace RimWorldAccess
             {
                 case "Overview":
                     return GetThingOverview(thing);
-
-                case "Quality & Stats":
-                    return GetThingQualityInfo(thing);
 
                 default:
                     return "Category not found.";
@@ -825,48 +1121,6 @@ namespace RimWorldAccess
                 // Clean up whitespace
                 description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ");
                 sb.AppendLine(description);
-            }
-
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Gets quality and stats information for a thing.
-        /// Uses RimWorld's native stat system to display all relevant stats.
-        /// </summary>
-        private static string GetThingQualityInfo(Thing thing)
-        {
-            var sb = new StringBuilder();
-
-            // Quality (display at top if applicable)
-            var qualityComp = thing.TryGetComp<CompQuality>();
-            if (qualityComp != null)
-            {
-                sb.AppendLine($"Quality: {qualityComp.Quality}");
-                sb.AppendLine();
-            }
-
-            // Material (display before stats if applicable)
-            if (thing.Stuff != null)
-            {
-                sb.AppendLine($"Material: {thing.Stuff.LabelCap.ToString().StripTags()}");
-                sb.AppendLine();
-            }
-
-            // Get all stats using RimWorld's native stat system
-            List<StatDrawEntry> stats = StatsHelper.GetAllStats(thing);
-
-            if (stats != null && stats.Count > 0)
-            {
-                // Format stats grouped by category
-                string formattedStats = StatsHelper.FormatStatsForScreenReader(stats);
-                sb.Append(formattedStats);
-            }
-            else
-            {
-                // Fallback: if no stats found, show basic info
-                sb.AppendLine($"Market Value: {thing.MarketValue:F0} silver");
-                sb.AppendLine($"Mass: {thing.GetStatValue(StatDefOf.Mass):F2} kg");
             }
 
             return sb.ToString();

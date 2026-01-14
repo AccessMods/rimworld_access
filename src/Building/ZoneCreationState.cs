@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
+using UnityEngine;
 
 namespace RimWorldAccess
 {
@@ -17,27 +20,31 @@ namespace RimWorldAccess
     }
 
     /// <summary>
-    /// Defines the zone creation modes.
+    /// Defines the selection mode for zone creation.
     /// </summary>
-    public enum ZoneCreationMode
+    public enum ZoneSelectionMode
     {
-        Manual,
-        Borders,
-        Corners
+        BoxSelection,    // Space sets corners for rectangle selection
+        SingleTile       // Space toggles individual tiles
     }
 
     /// <summary>
     /// Maintains state for zone creation mode.
     /// Tracks which cells have been selected and what type of zone to create.
+    /// Uses RimWorld's native APIs for rectangle selection feedback.
     /// </summary>
     public static class ZoneCreationState
     {
         private static bool isInCreationMode = false;
         private static ZoneType selectedZoneType = ZoneType.Stockpile;
-        private static ZoneCreationMode currentMode = ZoneCreationMode.Manual;
         private static List<IntVec3> selectedCells = new List<IntVec3>();
         private static Zone expandingZone = null; // Track zone being expanded
+        private static bool isShrinking = false; // true = shrink mode (selected cells will be removed)
         private static string pendingAllowedAreaName = null; // Store name for allowed area creation
+        private static ZoneSelectionMode selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
+
+        // Rectangle selection helper (shared logic for rectangle-based selection)
+        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
 
         /// <summary>
         /// Whether zone creation mode is currently active.
@@ -58,18 +65,78 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// The current creation mode (Manual, Borders, or Corners).
+        /// Whether a rectangle start corner has been set.
         /// </summary>
-        public static ZoneCreationMode CurrentMode
-        {
-            get => currentMode;
-            private set => currentMode = value;
-        }
+        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
+
+        /// <summary>
+        /// Whether we are actively previewing a rectangle (start and end set).
+        /// </summary>
+        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
+
+        /// <summary>
+        /// The start corner of the rectangle being selected.
+        /// </summary>
+        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
+
+        /// <summary>
+        /// The end corner of the rectangle being selected.
+        /// </summary>
+        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
+
+        /// <summary>
+        /// Cells in the current rectangle preview.
+        /// </summary>
+        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
 
         /// <summary>
         /// List of cells that have been selected for the zone.
         /// </summary>
         public static List<IntVec3> SelectedCells => selectedCells;
+
+        /// <summary>
+        /// Whether we're in shrink mode (selected cells will be removed from zone).
+        /// </summary>
+        public static bool IsShrinking => isShrinking;
+
+        /// <summary>
+        /// Gets the current selection mode (BoxSelection or SingleTile).
+        /// </summary>
+        public static ZoneSelectionMode SelectionMode => selectionMode;
+
+        /// <summary>
+        /// Toggles between box selection and single tile selection modes.
+        /// </summary>
+        public static void ToggleSelectionMode()
+        {
+            selectionMode = (selectionMode == ZoneSelectionMode.BoxSelection)
+                ? ZoneSelectionMode.SingleTile
+                : ZoneSelectionMode.BoxSelection;
+
+            string modeName = (selectionMode == ZoneSelectionMode.BoxSelection)
+                ? "Box selection mode"
+                : "Single tile selection mode";
+            TolkHelper.Speak(modeName);
+            Log.Message($"Zone creation: Switched to {modeName}");
+        }
+
+        /// <summary>
+        /// Toggles selection of a single cell (adds if not selected, removes if selected).
+        /// Used in single tile selection mode.
+        /// </summary>
+        public static void ToggleCell(IntVec3 cell)
+        {
+            if (selectedCells.Contains(cell))
+            {
+                selectedCells.Remove(cell);
+                TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
+            }
+            else
+            {
+                selectedCells.Add(cell);
+                TolkHelper.Speak($"Selected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
+            }
+        }
 
         /// <summary>
         /// Sets the pending name for an allowed area that will be created.
@@ -81,42 +148,77 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Enters zone creation mode with the specified zone type and mode.
+        /// Enters zone creation mode with the specified zone type.
+        /// Uses rectangle selection by default: Space sets corners, arrows preview, Space confirms rectangle.
+        /// Press Tab to switch to single tile selection mode.
         /// </summary>
-        public static void EnterCreationMode(ZoneType zoneType, ZoneCreationMode mode)
+        public static void EnterCreationMode(ZoneType zoneType)
         {
             isInCreationMode = true;
             selectedZoneType = zoneType;
-            currentMode = mode;
             selectedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
             string zoneName = GetZoneTypeName(zoneType);
-            string modeName = GetModeName(mode);
+            string instructions = "Box selection mode: Space to set corners. Tab to switch modes. Enter to create, Escape to cancel.";
 
-            string instructions = mode == ZoneCreationMode.Manual
-                ? "Press Space to select tiles, Enter to confirm, Escape to cancel. Use Shift+arrows to auto-select to wall"
-                : mode == ZoneCreationMode.Borders
-                    ? "Select border tiles with Space, then press Enter to auto-fill interior"
-                    : "Select 4 corner tiles with Space, then press Enter to fill rectangle";
-
-            TolkHelper.Speak($"Creating {zoneName} in {modeName} mode. {instructions}");
-            Log.Message($"Entered zone creation mode: {zoneName}, mode: {modeName}");
+            TolkHelper.Speak($"Creating {zoneName}. {instructions}");
+            Log.Message($"Entered zone creation mode: {zoneName}");
         }
 
         /// <summary>
         /// Adds a cell to the selection if not already selected.
+        /// Used for individual cell selection (toggle mode during expansion).
         /// </summary>
         public static void AddCell(IntVec3 cell)
         {
-            if (!selectedCells.Contains(cell))
-            {
-                selectedCells.Add(cell);
-                TolkHelper.Speak($"Selected, {cell.x}, {cell.z}");
-            }
-            else
+            if (selectedCells.Contains(cell))
             {
                 TolkHelper.Speak($"Already selected, {cell.x}, {cell.z}");
+                return;
             }
+
+            selectedCells.Add(cell);
+            TolkHelper.Speak($"Selected, {cell.x}, {cell.z}");
+        }
+
+        /// <summary>
+        /// Sets the start corner for rectangle selection.
+        /// </summary>
+        public static void SetRectangleStart(IntVec3 cell)
+        {
+            rectangleHelper.SetStart(cell);
+        }
+
+        /// <summary>
+        /// Updates the rectangle preview as the cursor moves.
+        /// Plays native sound feedback when cell count changes.
+        /// </summary>
+        public static void UpdatePreview(IntVec3 endCell)
+        {
+            rectangleHelper.UpdatePreview(endCell);
+        }
+
+        /// <summary>
+        /// Confirms the current rectangle preview, adding all cells to selection.
+        /// Allows starting a new rectangle immediately.
+        /// </summary>
+        public static void ConfirmRectangle()
+        {
+            rectangleHelper.ConfirmRectangle(selectedCells, out var newCells);
+            foreach (var cell in newCells)
+            {
+                selectedCells.Add(cell);
+            }
+        }
+
+        /// <summary>
+        /// Cancels the current rectangle selection without adding cells.
+        /// </summary>
+        public static void CancelRectangle()
+        {
+            rectangleHelper.Cancel();
         }
 
         /// <summary>
@@ -153,8 +255,9 @@ namespace RimWorldAccess
 
             isInCreationMode = true;
             expandingZone = zone;
-            currentMode = ZoneCreationMode.Manual;
+            isShrinking = false;
             selectedCells.Clear();
+            rectangleHelper.Reset();
 
             // Pre-select all existing zone tiles
             foreach (IntVec3 cell in zone.Cells)
@@ -180,14 +283,39 @@ namespace RimWorldAccess
                 selectedZoneType = ZoneType.GrowingZone;
             }
 
-            string instructions = "Press Space to toggle tiles, Enter to confirm, Escape to cancel. Use Shift+arrows to auto-select to wall";
+            string instructions = "Press Space to set corners, Enter to confirm, Escape to cancel.";
             TolkHelper.Speak($"Expanding {zone.label}. {selectedCells.Count} tiles currently selected. {instructions}");
             Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles");
         }
 
         /// <summary>
+        /// Enters shrink mode for an existing zone.
+        /// Selected cells will be removed from the zone on confirm.
+        /// </summary>
+        public static void EnterShrinkMode(Zone zone)
+        {
+            if (zone == null)
+            {
+                TolkHelper.Speak("Cannot shrink: no zone provided", SpeechPriority.High);
+                Log.Error("EnterShrinkMode called with null zone");
+                return;
+            }
+
+            isInCreationMode = true;
+            expandingZone = zone;
+            isShrinking = true;
+            selectedCells.Clear(); // Start with empty selection - selected cells will be removed
+            rectangleHelper.Reset();
+
+            string instructions = "Press Space to set corners, Enter to confirm, Escape to cancel.";
+            TolkHelper.Speak($"Shrinking {zone.label}. Select cells to remove. {instructions}");
+            Log.Message($"Entered shrink mode for zone: {zone.label}");
+        }
+
+        /// <summary>
         /// Creates the zone with all selected cells and exits creation mode.
         /// If in expansion mode, adds cells to existing zone instead.
+        /// If in shrink mode, removes selected cells from zone.
         /// </summary>
         public static void CreateZone(Map map)
         {
@@ -330,18 +458,28 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Updates the expanding zone based on selected cells (adds new cells, removes deselected cells).
+        /// Updates the expanding zone based on selected cells.
+        /// In expand mode: adds new cells, removes deselected cells.
+        /// In shrink mode: removes selected cells.
         /// </summary>
         private static void ExpandZone(Map map)
         {
             if (expandingZone == null)
             {
-                TolkHelper.Speak("Error: No zone to expand", SpeechPriority.High);
+                TolkHelper.Speak("Error: No zone to modify", SpeechPriority.High);
                 Log.Error("ExpandZone called but expandingZone is null");
                 Reset();
                 return;
             }
 
+            // Handle shrink mode - selected cells are removed from zone
+            if (isShrinking)
+            {
+                ShrinkZone(map);
+                return;
+            }
+
+            // Expand mode - zone is updated to match selection
             if (selectedCells.Count == 0)
             {
                 TolkHelper.Speak("All cells removed. Zone deleted.");
@@ -384,6 +522,9 @@ namespace RimWorldAccess
                     }
                 }
 
+                // Check for disconnected fragments AFTER all modifications (matches standard RimWorld behavior)
+                expandingZone.CheckContiguous();
+
                 // Build feedback message
                 string message = $"Updated {expandingZone.label}: ";
                 if (addedCount > 0 && removedCount > 0)
@@ -418,6 +559,58 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Removes selected cells from the zone (shrink mode).
+        /// </summary>
+        private static void ShrinkZone(Map map)
+        {
+            if (selectedCells.Count == 0)
+            {
+                TolkHelper.Speak("No cells selected. Zone unchanged.");
+                Reset();
+                return;
+            }
+
+            try
+            {
+                int removedCount = 0;
+
+                // Remove selected cells from the zone
+                foreach (IntVec3 cell in selectedCells)
+                {
+                    if (expandingZone.ContainsCell(cell))
+                    {
+                        expandingZone.RemoveCell(cell);
+                        removedCount++;
+                    }
+                }
+
+                // Check if zone is now empty
+                if (expandingZone.Cells.Count() == 0)
+                {
+                    TolkHelper.Speak($"All cells removed. {expandingZone.label} deleted.");
+                    expandingZone.Delete();
+                }
+                else
+                {
+                    // Check for disconnected fragments
+                    expandingZone.CheckContiguous();
+                    TolkHelper.Speak($"Removed {removedCount} cells from {expandingZone.label}. {expandingZone.Cells.Count()} cells remaining.");
+                }
+
+                Log.Message($"Shrunk zone {expandingZone?.label}: removed {removedCount} cells");
+            }
+            catch (System.Exception ex)
+            {
+                TolkHelper.Speak($"Error shrinking zone: {ex.Message}", SpeechPriority.High);
+                Log.Error($"Error shrinking zone: {ex}");
+            }
+            finally
+            {
+                Reset();
+            }
+        }
+
+        /// <summary>
         /// Cancels zone creation and exits creation mode.
         /// </summary>
         public static void Cancel()
@@ -425,165 +618,6 @@ namespace RimWorldAccess
             TolkHelper.Speak("Zone creation cancelled");
             Log.Message("Zone creation cancelled");
             Reset();
-        }
-
-        /// <summary>
-        /// Auto-fills the interior of a zone from border cells using flood fill.
-        /// Switches to Manual mode after completion.
-        /// </summary>
-        public static void BordersModeAutoFill(Map map)
-        {
-            if (selectedCells.Count == 0)
-            {
-                TolkHelper.Speak("No border cells selected. Select border tiles first", SpeechPriority.High);
-                return;
-            }
-
-            try
-            {
-                // Find the center point of the selected border cells
-                int sumX = 0, sumZ = 0;
-                foreach (IntVec3 cell in selectedCells)
-                {
-                    sumX += cell.x;
-                    sumZ += cell.z;
-                }
-                IntVec3 centerPoint = new IntVec3(sumX / selectedCells.Count, 0, sumZ / selectedCells.Count);
-
-                // Ensure center point is valid and not in the border
-                if (!centerPoint.InBounds(map))
-                {
-                    TolkHelper.Speak("Invalid border selection. Cannot find interior point", SpeechPriority.High);
-                    return;
-                }
-
-                // If center is in the border, try to find a nearby non-border cell
-                if (selectedCells.Contains(centerPoint))
-                {
-                    // Try adjacent cells
-                    bool foundStart = false;
-                    foreach (IntVec3 adjacent in GenAdj.CardinalDirections)
-                    {
-                        IntVec3 testCell = centerPoint + adjacent;
-                        if (testCell.InBounds(map) && !selectedCells.Contains(testCell) && !testCell.Impassable(map))
-                        {
-                            centerPoint = testCell;
-                            foundStart = true;
-                            break;
-                        }
-                    }
-
-                    if (!foundStart)
-                    {
-                        TolkHelper.Speak("Cannot find interior starting point. Border may be invalid", SpeechPriority.High);
-                        return;
-                    }
-                }
-
-                // Use flood fill to find all interior cells
-                List<IntVec3> interiorCells = new List<IntVec3>();
-                HashSet<IntVec3> borderSet = new HashSet<IntVec3>(selectedCells);
-
-                map.floodFiller.FloodFill(centerPoint, (IntVec3 c) =>
-                {
-                    // Can traverse if: in bounds, not a border, not impassable
-                    return c.InBounds(map) && !borderSet.Contains(c) && !c.Impassable(map);
-                }, (IntVec3 c) =>
-                {
-                    // Add to interior cells
-                    if (!borderSet.Contains(c))
-                    {
-                        interiorCells.Add(c);
-                    }
-                });
-
-                // Add all interior cells to selection
-                int addedCount = 0;
-                foreach (IntVec3 cell in interiorCells)
-                {
-                    if (!selectedCells.Contains(cell))
-                    {
-                        selectedCells.Add(cell);
-                        addedCount++;
-                    }
-                }
-
-                // Switch to manual mode
-                currentMode = ZoneCreationMode.Manual;
-
-                TolkHelper.Speak($"Filled interior with {addedCount} cells. Total: {selectedCells.Count} cells. Now in manual mode");
-                Log.Message($"Borders mode auto-fill: added {addedCount} interior cells, total {selectedCells.Count}");
-            }
-            catch (System.Exception ex)
-            {
-                TolkHelper.Speak($"Error filling interior: {ex.Message}", SpeechPriority.High);
-                Log.Error($"BordersModeAutoFill error: {ex}");
-            }
-        }
-
-        /// <summary>
-        /// Auto-fills a rectangular zone from 4 corner cells.
-        /// Switches to Manual mode after completion.
-        /// </summary>
-        public static void CornersModeAutoFill(Map map)
-        {
-            if (selectedCells.Count != 4)
-            {
-                TolkHelper.Speak($"Must select exactly 4 corners. Currently selected: {selectedCells.Count}", SpeechPriority.High);
-                return;
-            }
-
-            try
-            {
-                // Find min and max X and Z coordinates
-                int minX = int.MaxValue, maxX = int.MinValue;
-                int minZ = int.MaxValue, maxZ = int.MinValue;
-
-                foreach (IntVec3 corner in selectedCells)
-                {
-                    if (corner.x < minX) minX = corner.x;
-                    if (corner.x > maxX) maxX = corner.x;
-                    if (corner.z < minZ) minZ = corner.z;
-                    if (corner.z > maxZ) maxZ = corner.z;
-                }
-
-                // Validate rectangle size
-                if (minX >= maxX || minZ >= maxZ)
-                {
-                    TolkHelper.Speak("Invalid corner selection. Corners must form a rectangle", SpeechPriority.High);
-                    return;
-                }
-
-                // Fill all cells in the bounding rectangle
-                List<IntVec3> rectangleCells = new List<IntVec3>();
-                for (int x = minX; x <= maxX; x++)
-                {
-                    for (int z = minZ; z <= maxZ; z++)
-                    {
-                        IntVec3 cell = new IntVec3(x, 0, z);
-                        if (cell.InBounds(map) && !selectedCells.Contains(cell))
-                        {
-                            rectangleCells.Add(cell);
-                        }
-                    }
-                }
-
-                // Add all rectangle cells to selection
-                selectedCells.AddRange(rectangleCells);
-
-                // Switch to manual mode
-                currentMode = ZoneCreationMode.Manual;
-
-                int width = maxX - minX + 1;
-                int height = maxZ - minZ + 1;
-                TolkHelper.Speak($"Filled {width} by {height} rectangle. Total: {selectedCells.Count} cells. Now in manual mode");
-                Log.Message($"Corners mode auto-fill: {width}x{height} rectangle, total {selectedCells.Count} cells");
-            }
-            catch (System.Exception ex)
-            {
-                TolkHelper.Speak($"Error filling rectangle: {ex.Message}", SpeechPriority.High);
-                Log.Error($"CornersModeAutoFill error: {ex}");
-            }
         }
 
         /// <summary>
@@ -634,6 +668,9 @@ namespace RimWorldAccess
             isInCreationMode = false;
             selectedCells.Clear();
             expandingZone = null;
+            isShrinking = false;
+            rectangleHelper.Reset();
+            selectionMode = ZoneSelectionMode.BoxSelection; // Reset to default mode
         }
 
         /// <summary>
@@ -658,22 +695,5 @@ namespace RimWorldAccess
             }
         }
 
-        /// <summary>
-        /// Gets a human-readable name for a zone creation mode.
-        /// </summary>
-        private static string GetModeName(ZoneCreationMode mode)
-        {
-            switch (mode)
-            {
-                case ZoneCreationMode.Manual:
-                    return "manual";
-                case ZoneCreationMode.Borders:
-                    return "borders";
-                case ZoneCreationMode.Corners:
-                    return "corners";
-                default:
-                    return "unknown";
-            }
-        }
     }
 }

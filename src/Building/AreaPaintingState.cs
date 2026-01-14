@@ -1,12 +1,25 @@
 using System.Collections.Generic;
+using System.Linq;
 using Verse;
+using Verse.Sound;
 using RimWorld;
+using UnityEngine;
 
 namespace RimWorldAccess
 {
     /// <summary>
+    /// Defines the selection mode for area painting.
+    /// </summary>
+    public enum AreaSelectionMode
+    {
+        BoxSelection,    // Space sets corners for rectangle selection
+        SingleTile       // Space toggles individual tiles
+    }
+
+    /// <summary>
     /// Maintains state for area painting mode (expanding/shrinking areas with keyboard).
-    /// Allows keyboard navigation and cell-by-cell painting of areas.
+    /// Allows keyboard navigation and rectangle-based painting of areas.
+    /// Uses RimWorld's native APIs for feedback.
     /// </summary>
     public static class AreaPaintingState
     {
@@ -14,6 +27,10 @@ namespace RimWorldAccess
         private static Area targetArea = null;
         private static bool isExpanding = true; // true = expand, false = shrink
         private static List<IntVec3> stagedCells = new List<IntVec3>(); // Cells staged for addition/removal
+        private static AreaSelectionMode selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
+
+        // Rectangle selection helper (shared logic for rectangle-based selection)
+        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
 
         /// <summary>
         /// Whether area painting mode is currently active.
@@ -36,6 +53,52 @@ namespace RimWorldAccess
         public static List<IntVec3> StagedCells => stagedCells;
 
         /// <summary>
+        /// Whether a rectangle start corner has been set.
+        /// </summary>
+        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
+
+        /// <summary>
+        /// Whether we are actively previewing a rectangle (start and end set).
+        /// </summary>
+        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
+
+        /// <summary>
+        /// The start corner of the rectangle being selected.
+        /// </summary>
+        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
+
+        /// <summary>
+        /// The end corner of the rectangle being selected.
+        /// </summary>
+        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
+
+        /// <summary>
+        /// Cells in the current rectangle preview.
+        /// </summary>
+        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
+
+        /// <summary>
+        /// Gets the current selection mode (BoxSelection or SingleTile).
+        /// </summary>
+        public static AreaSelectionMode SelectionMode => selectionMode;
+
+        /// <summary>
+        /// Toggles between box selection and single tile selection modes.
+        /// </summary>
+        public static void ToggleSelectionMode()
+        {
+            selectionMode = (selectionMode == AreaSelectionMode.BoxSelection)
+                ? AreaSelectionMode.SingleTile
+                : AreaSelectionMode.BoxSelection;
+
+            string modeName = (selectionMode == AreaSelectionMode.BoxSelection)
+                ? "Box selection mode"
+                : "Single tile selection mode";
+            TolkHelper.Speak(modeName);
+            Log.Message($"Area painting: Switched to {modeName}");
+        }
+
+        /// <summary>
         /// Enters area painting mode for expanding an area.
         /// </summary>
         public static void EnterExpandMode(Area area)
@@ -46,6 +109,8 @@ namespace RimWorldAccess
             targetArea = area;
             isExpanding = true;
             stagedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
 
             Log.Message($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
 
@@ -56,7 +121,7 @@ namespace RimWorldAccess
                 Log.Message("RimWorld Access: Initialized map navigation");
             }
 
-            TolkHelper.Speak($"Expanding area: {area.Label}. Press Space to select cells, Enter to confirm, Escape to cancel.");
+            TolkHelper.Speak($"Expanding area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
             Log.Message("RimWorld Access: Area painting mode entered");
         }
 
@@ -69,6 +134,8 @@ namespace RimWorldAccess
             targetArea = area;
             isExpanding = false;
             stagedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
 
             // Ensure map navigation is initialized
             if (!MapNavigationState.IsInitialized && area.Map != null)
@@ -76,7 +143,44 @@ namespace RimWorldAccess
                 MapNavigationState.Initialize(area.Map);
             }
 
-            TolkHelper.Speak($"Shrinking area: {area.Label}. Press Space to select cells, Enter to confirm, Escape to cancel.");
+            TolkHelper.Speak($"Shrinking area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
+        }
+
+        /// <summary>
+        /// Sets the start corner for rectangle selection.
+        /// </summary>
+        public static void SetRectangleStart(IntVec3 cell)
+        {
+            rectangleHelper.SetStart(cell);
+        }
+
+        /// <summary>
+        /// Updates the rectangle preview as the cursor moves.
+        /// Plays native sound feedback when cell count changes.
+        /// </summary>
+        public static void UpdatePreview(IntVec3 endCell)
+        {
+            rectangleHelper.UpdatePreview(endCell);
+        }
+
+        /// <summary>
+        /// Confirms the current rectangle preview, adding all cells to staged list.
+        /// </summary>
+        public static void ConfirmRectangle()
+        {
+            rectangleHelper.ConfirmRectangle(stagedCells, out var newCells);
+            foreach (var cell in newCells)
+            {
+                stagedCells.Add(cell);
+            }
+        }
+
+        /// <summary>
+        /// Cancels the current rectangle selection without adding cells.
+        /// </summary>
+        public static void CancelRectangle()
+        {
+            rectangleHelper.Cancel();
         }
 
         /// <summary>
@@ -161,6 +265,8 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
         }
 
         /// <summary>
@@ -178,6 +284,8 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
 
             Log.Message("RimWorld Access: Area painting cancelled");
         }
@@ -192,6 +300,8 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
+            rectangleHelper.Reset();
+            selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
 
             Log.Message("RimWorld Access: Area painting mode exited");
         }

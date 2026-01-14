@@ -51,26 +51,47 @@ namespace RimWorldAccess
             return fixedColumnsBeforeTraining + GetAllTrainables().Count + fixedColumnsAfterTraining;
         }
 
-        // Get column name by index
+        // Get column name by index (using RimWorld's localized strings)
         public static string GetColumnName(int columnIndex)
         {
             if (columnIndex < fixedColumnsBeforeTraining)
             {
-                // Fixed columns before training
-                return ((ColumnType)columnIndex).ToString();
+                // Fixed columns before training - use localized strings
+                ColumnType type = (ColumnType)columnIndex;
+                switch (type)
+                {
+                    case ColumnType.Name: return "Name";
+                    case ColumnType.Bond: return "BondInfo".Translate().Resolve();
+                    case ColumnType.Master: return "Master".Translate().Resolve();
+                    case ColumnType.Slaughter: return "DesignatorSlaughter".Translate().Resolve();
+                    case ColumnType.Gender: return "Sex".Translate().Resolve();
+                    case ColumnType.LifeStage: return "LifeStage".Translate().Resolve();
+                    case ColumnType.Age: return "Age";
+                    case ColumnType.Pregnant: return HediffDefOf.Pregnant.LabelCap.Resolve();
+                    default: return type.ToString();
+                }
             }
             else if (columnIndex < fixedColumnsBeforeTraining + GetAllTrainables().Count)
             {
-                // Training columns
+                // Training columns - already localized via LabelCap
                 int trainableIndex = columnIndex - fixedColumnsBeforeTraining;
                 return GetAllTrainables()[trainableIndex].LabelCap;
             }
             else
             {
-                // Fixed columns after training
+                // Fixed columns after training - use localized strings
                 int fixedIndex = columnIndex - fixedColumnsBeforeTraining - GetAllTrainables().Count;
                 ColumnType type = (ColumnType)(fixedColumnsBeforeTraining + fixedIndex);
-                return type.ToString().Replace("_", " ");
+                switch (type)
+                {
+                    case ColumnType.FollowDrafted: return "CreatureFollowDrafted".Translate().Resolve();
+                    case ColumnType.FollowFieldwork: return "CreatureFollowFieldwork".Translate().Resolve();
+                    case ColumnType.AllowedArea: return "AllowedArea".Translate().Resolve();
+                    case ColumnType.MedicalCare: return "MedicalCare".Translate().Resolve();
+                    case ColumnType.FoodRestriction: return "FoodRestriction".Translate().Resolve();
+                    case ColumnType.ReleaseToWild: return "DesignatorReleaseAnimalToWild".Translate().Resolve();
+                    default: return type.ToString().Replace("_", " ");
+                }
             }
         }
 
@@ -166,21 +187,21 @@ namespace RimWorldAccess
 
         public static string GetBondStatus(Pawn pawn)
         {
-            if (pawn.relations == null) return "No bond";
+            if (pawn.relations == null) return "NotBonded".Translate().Resolve();
 
             Pawn bondedPawn = pawn.relations.GetFirstDirectRelationPawn(PawnRelationDefOf.Bond);
             if (bondedPawn != null)
             {
-                return $"Bonded to {bondedPawn.Name.ToStringShort}";
+                return "BondedTo".Translate(bondedPawn.Named("PAWN")).Resolve();
             }
-            return "No bond";
+            return "NotBonded".Translate().Resolve();
         }
 
         public static string GetMasterName(Pawn pawn)
         {
             if (pawn.playerSettings == null || pawn.playerSettings.Master == null)
             {
-                return "None";
+                return "None".Translate().Resolve();
             }
             return pawn.playerSettings.Master.Name.ToStringShort;
         }
@@ -190,12 +211,15 @@ namespace RimWorldAccess
             if (pawn.Map == null) return "N/A";
 
             Designation designation = pawn.Map.designationManager.DesignationOn(pawn, DesignationDefOf.Slaughter);
-            return designation != null ? "Marked for slaughter" : "Not marked";
+            string markedLabel = DesignationDefOf.Slaughter.label.CapitalizeFirst();
+            string notMarkedLabel = "None".Translate().Resolve();
+            return designation != null ? markedLabel : notMarkedLabel;
         }
 
         public static string GetGender(Pawn pawn)
         {
-            return pawn.gender.ToString();
+            // Use RimWorld's localized gender labels
+            return pawn.gender.GetLabel(animal: true).CapitalizeFirst();
         }
 
         public static string GetLifeStage(Pawn pawn)
@@ -207,21 +231,22 @@ namespace RimWorldAccess
         public static string GetAge(Pawn pawn)
         {
             if (pawn.ageTracker == null) return "Unknown";
-            return pawn.ageTracker.AgeBiologicalYearsFloat.ToString("F1") + " years";
+            // Use RimWorld's localized age string
+            return pawn.ageTracker.AgeNumberString;
         }
 
         public static string GetPregnancyStatus(Pawn pawn)
         {
             if (pawn.gender != Gender.Female) return "N/A";
-            if (pawn.health?.hediffSet == null) return "Not pregnant";
+            if (pawn.health?.hediffSet == null) return "None".Translate().Resolve();
 
             Hediff_Pregnant pregnancy = (Hediff_Pregnant)pawn.health.hediffSet.GetFirstHediffOfDef(HediffDefOf.Pregnant);
             if (pregnancy != null)
             {
-                int daysLeft = (int)((pregnancy.GestationProgress - pregnancy.GestationProgress) * pawn.RaceProps.gestationPeriodDays);
-                return $"Pregnant ({pregnancy.GestationProgress.ToStringPercent()} complete)";
+                // Use hediff's localized label and progress
+                return $"{pregnancy.LabelCap} ({pregnancy.GestationProgress.ToStringPercent()})";
             }
-            return "Not pregnant";
+            return "None".Translate().Resolve();
         }
 
         // === Training Column Accessors ===
@@ -236,8 +261,8 @@ namespace RimWorldAccess
 
             if (!canTrain.Accepted)
             {
-                statusText = "Cannot train";
-                // Add the reason why they can't train
+                statusText = "CannotTrain".Translate().Resolve();
+                // Add the reason why they can't train (already localized by RimWorld)
                 if (!string.IsNullOrEmpty(canTrain.Reason))
                 {
                     statusText += " - " + canTrain.Reason;
@@ -248,11 +273,11 @@ namespace RimWorldAccess
                 bool wanted = pawn.training.GetWanted(trainable);
                 if (!wanted)
                 {
-                    statusText = "Disabled";
+                    statusText = "Disabled".Translate().Resolve();
                 }
                 else if (pawn.training.HasLearned(trainable))
                 {
-                    statusText = "Trained";
+                    statusText = "Trained".Translate().Resolve();
                 }
                 else
                 {
@@ -264,16 +289,16 @@ namespace RimWorldAccess
                         int steps = (int)getStepsMethod.Invoke(pawn.training, new object[] { trainable });
                         if (steps > 0)
                         {
-                            statusText = $"Learning ({steps}/{trainable.steps})";
+                            statusText = "TrainingInProgress".Translate().Resolve() + $" ({steps}/{trainable.steps})";
                         }
                         else
                         {
-                            statusText = "Not started";
+                            statusText = "NotStarted".Translate().Resolve();
                         }
                     }
                     else
                     {
-                        statusText = "Not started";
+                        statusText = "NotStarted".Translate().Resolve();
                     }
                 }
 
@@ -284,14 +309,14 @@ namespace RimWorldAccess
                     {
                         if (!pawn.training.HasLearned(prereq))
                         {
-                            statusText += $" - Needs {prereq.LabelCap} first";
+                            statusText += " - " + "TrainingNeedsPrerequisite".Translate(prereq.LabelCap).Resolve();
                             break; // Only show first missing prerequisite to keep it concise
                         }
                     }
                 }
             }
 
-            // Add training description
+            // Add training description (already localized)
             if (!string.IsNullOrEmpty(trainable.description))
             {
                 statusText += " - " + trainable.description;
@@ -318,20 +343,14 @@ namespace RimWorldAccess
         {
             if (pawn.playerSettings == null) return "N/A";
 
-            string status = pawn.playerSettings.followDrafted ? "Yes" : "No";
-            string description = "Follow master while the master is drafted.";
-
-            return $"{status} - {description}";
+            return pawn.playerSettings.followDrafted ? "Yes".Translate().Resolve() : "No".Translate().Resolve();
         }
 
         public static string GetFollowFieldwork(Pawn pawn)
         {
             if (pawn.playerSettings == null) return "N/A";
 
-            string status = pawn.playerSettings.followFieldwork ? "Yes" : "No";
-            string description = "Follow master while the master is doing field work (hunting or taming animals).";
-
-            return $"{status} - {description}";
+            return pawn.playerSettings.followFieldwork ? "Yes".Translate().Resolve() : "No".Translate().Resolve();
         }
 
         // === Area Restriction ===
@@ -343,7 +362,7 @@ namespace RimWorldAccess
             Area area = pawn.playerSettings.AreaRestrictionInPawnCurrentMap;
             if (area == null)
             {
-                return "Unrestricted";
+                return "Unrestricted".Translate().Resolve();
             }
             return area.Label;
         }
@@ -380,7 +399,7 @@ namespace RimWorldAccess
         {
             if (pawn.foodRestriction == null || pawn.foodRestriction.CurrentFoodPolicy == null)
             {
-                return "Unrestricted";
+                return "Unrestricted".Translate().Resolve();
             }
             return pawn.foodRestriction.CurrentFoodPolicy.label;
         }
@@ -399,7 +418,9 @@ namespace RimWorldAccess
             if (pawn.Map == null) return "N/A";
 
             Designation designation = pawn.Map.designationManager.DesignationOn(pawn, DesignationDefOf.ReleaseAnimalToWild);
-            return designation != null ? "Marked for release" : "Not marked";
+            string markedLabel = DesignationDefOf.ReleaseAnimalToWild.label.CapitalizeFirst();
+            string notMarkedLabel = "None".Translate().Resolve();
+            return designation != null ? markedLabel : notMarkedLabel;
         }
 
         // === Master Assignment ===

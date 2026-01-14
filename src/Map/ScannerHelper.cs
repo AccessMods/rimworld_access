@@ -18,6 +18,10 @@ namespace RimWorldAccess
         public IntVec3 Position { get; set; }
         public bool IsTerrain { get; set; } // True if this represents terrain instead of a Thing
         public bool IsDesignation => Designation != null; // True if this represents a designation
+        public Zone Zone { get; set; } // For zone items
+        public bool IsZone => Zone != null; // True if this represents a zone
+        public Room Room { get; set; } // For room items
+        public bool IsRoom => Room != null; // True if this represents a room
         public int BulkCount => BulkThings?.Count ?? (BulkTerrainPositions?.Count ?? (BulkDesignations?.Count ?? 1));
         public bool IsBulkGroup => (BulkThings != null && BulkThings.Count > 1) ||
                                    (BulkTerrainPositions != null && BulkTerrainPositions.Count > 1) ||
@@ -147,6 +151,69 @@ namespace RimWorldAccess
             Label = ScannerHelper.GetLocalizedDesignationLabel(Designation.def);
         }
 
+        // Constructor for zone items
+        public ScannerItem(Zone zone, IntVec3 cursorPosition)
+        {
+            Zone = zone;
+            IsTerrain = false;
+
+            // Calculate center position of zone, ensuring it's within the zone for irregular shapes
+            if (zone.cells != null && zone.cells.Count > 0)
+            {
+                int avgX = (int)zone.cells.Average(c => c.x);
+                int avgZ = (int)zone.cells.Average(c => c.z);
+                var centerCandidate = new IntVec3(avgX, 0, avgZ);
+                // Use center if it's in the zone; otherwise use the cell closest to the center
+                Position = zone.cells.Contains(centerCandidate)
+                    ? centerCandidate
+                    : zone.cells
+                        .OrderBy(c => (c - centerCandidate).LengthHorizontal)
+                        .First();
+            }
+            else
+            {
+                Position = zone.Position; // Fallback to first cell
+            }
+
+            Distance = (Position - cursorPosition).LengthHorizontal;
+
+            // Build label with zone info (using ternary for clarity)
+            Label = zone is Zone_Growing growZone && growZone.PlantDefToGrow != null
+                ? $"{zone.label} ({growZone.PlantDefToGrow.label})"
+                : zone.label;
+        }
+
+        // Constructor for room items
+        public ScannerItem(Room room, IntVec3 cursorPosition)
+        {
+            Room = room;
+            IsTerrain = false;
+
+            // Calculate center position of room, ensuring it's within the room for irregular shapes
+            var cells = room.Cells.ToList();
+            if (cells.Count > 0)
+            {
+                int avgX = (int)cells.Average(c => c.x);
+                int avgZ = (int)cells.Average(c => c.z);
+                var centerCandidate = new IntVec3(avgX, 0, avgZ);
+                // Use center if it's in the room; otherwise use the cell closest to the center
+                Position = cells.Contains(centerCandidate)
+                    ? centerCandidate
+                    : cells
+                        .OrderBy(c => (c - centerCandidate).LengthHorizontal)
+                        .First();
+            }
+            else
+            {
+                Position = IntVec3.Zero;
+            }
+
+            Distance = (Position - cursorPosition).LengthHorizontal;
+
+            // Build label with role
+            Label = room.GetRoomRoleLabel();
+        }
+
         public string GetDirectionFrom(IntVec3 fromPosition)
         {
             IntVec3 offset = Position - fromPosition;
@@ -246,6 +313,7 @@ namespace RimWorldAccess
             var recreationSubcat = new ScannerSubcategory("Buildings-Recreation");
             var shipSubcat = new ScannerSubcategory("Buildings-Ship");
             var temperatureSubcat = new ScannerSubcategory("Buildings-Temperature");
+            var travelingSubcat = new ScannerSubcategory("Buildings-Traveling");
             buildingsCategory.Subcategories.Add(structureSubcat);
             buildingsCategory.Subcategories.Add(productionSubcat);
             buildingsCategory.Subcategories.Add(furnitureSubcat);
@@ -255,6 +323,7 @@ namespace RimWorldAccess
             buildingsCategory.Subcategories.Add(recreationSubcat);
             buildingsCategory.Subcategories.Add(shipSubcat);
             buildingsCategory.Subcategories.Add(temperatureSubcat);
+            buildingsCategory.Subcategories.Add(travelingSubcat);
 
             // Trees category
             var treesCategory = new ScannerCategory("Trees");
@@ -323,6 +392,22 @@ namespace RimWorldAccess
             ordersCategory.Subcategories.Add(ordersTameSubcat);
             ordersCategory.Subcategories.Add(ordersSlaughterSubcat);
             ordersCategory.Subcategories.Add(ordersOtherSubcat);
+
+            // Zones category
+            var zonesCategory = new ScannerCategory("Zones");
+            var zonesGrowingSubcat = new ScannerSubcategory("Zones-Growing");
+            var zonesStockpileSubcat = new ScannerSubcategory("Zones-Stockpile");
+            var zonesFishingSubcat = new ScannerSubcategory("Zones-Fishing");
+            var zonesOtherSubcat = new ScannerSubcategory("Zones-Other");
+            zonesCategory.Subcategories.Add(zonesGrowingSubcat);
+            zonesCategory.Subcategories.Add(zonesStockpileSubcat);
+            zonesCategory.Subcategories.Add(zonesFishingSubcat);
+            zonesCategory.Subcategories.Add(zonesOtherSubcat);
+
+            // Rooms category
+            var roomsCategory = new ScannerCategory("Rooms");
+            var roomsAllSubcat = new ScannerSubcategory("Rooms-All");
+            roomsCategory.Subcategories.Add(roomsAllSubcat);
 
             // Collect all things from the map
             var allThings = map.listerThings.AllThings;
@@ -439,49 +524,57 @@ namespace RimWorldAccess
                     if (building.def.building != null && building.def.building.isNaturalRock)
                         continue;
 
-                    // Categorize buildings by designation category
-                    var designationCategory = building.def.designationCategory;
-                    if (designationCategory != null)
+                    // Check for travel-related buildings first (before designation category)
+                    if (IsTravelingBuilding(building))
                     {
-                        switch (designationCategory.defName)
-                        {
-                            case "Structure":
-                                structureSubcat.Items.Add(item);
-                                break;
-                            case "Production":
-                                productionSubcat.Items.Add(item);
-                                break;
-                            case "Furniture":
-                                furnitureSubcat.Items.Add(item);
-                                break;
-                            case "Power":
-                                powerSubcat.Items.Add(item);
-                                break;
-                            case "Security":
-                                securitySubcat.Items.Add(item);
-                                break;
-                            case "Misc":
-                                miscBuildingsSubcat.Items.Add(item);
-                                break;
-                            case "Joy":
-                                recreationSubcat.Items.Add(item);
-                                break;
-                            case "Ship":
-                                shipSubcat.Items.Add(item);
-                                break;
-                            case "Temperature":
-                                temperatureSubcat.Items.Add(item);
-                                break;
-                            default:
-                                // If no specific category, put in structure
-                                structureSubcat.Items.Add(item);
-                                break;
-                        }
+                        travelingSubcat.Items.Add(item);
                     }
                     else
                     {
-                        // No designation category - default to structure
-                        structureSubcat.Items.Add(item);
+                        // Categorize buildings by designation category
+                        var designationCategory = building.def.designationCategory;
+                        if (designationCategory != null)
+                        {
+                            switch (designationCategory.defName)
+                            {
+                                case "Structure":
+                                    structureSubcat.Items.Add(item);
+                                    break;
+                                case "Production":
+                                    productionSubcat.Items.Add(item);
+                                    break;
+                                case "Furniture":
+                                    furnitureSubcat.Items.Add(item);
+                                    break;
+                                case "Power":
+                                    powerSubcat.Items.Add(item);
+                                    break;
+                                case "Security":
+                                    securitySubcat.Items.Add(item);
+                                    break;
+                                case "Misc":
+                                    miscBuildingsSubcat.Items.Add(item);
+                                    break;
+                                case "Joy":
+                                    recreationSubcat.Items.Add(item);
+                                    break;
+                                case "Ship":
+                                    shipSubcat.Items.Add(item);
+                                    break;
+                                case "Temperature":
+                                    temperatureSubcat.Items.Add(item);
+                                    break;
+                                default:
+                                    // If no specific category, put in structure
+                                    structureSubcat.Items.Add(item);
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            // No designation category - default to structure
+                            structureSubcat.Items.Add(item);
+                        }
                     }
                 }
                 else if (IsStoneChunk(thing))
@@ -641,10 +734,46 @@ namespace RimWorldAccess
                 }
             }
 
+            // Collect all zones - filter to non-empty zones
+            var validZones = map.zoneManager.AllZones.Where(zone =>
+                zone != null && zone.cells != null && zone.cells.Count > 0);
+
+            foreach (var zone in validZones)
+            {
+                var item = new ScannerItem(zone, cursorPosition);
+
+                if (zone is Zone_Growing)
+                {
+                    zonesGrowingSubcat.Items.Add(item);
+                }
+                else if (zone is Zone_Stockpile)
+                {
+                    zonesStockpileSubcat.Items.Add(item);
+                }
+                else if (zone.GetType().Name == "Zone_Fishing")
+                {
+                    zonesFishingSubcat.Items.Add(item);
+                }
+                else
+                {
+                    zonesOtherSubcat.Items.Add(item);
+                }
+            }
+
+            // Collect all rooms - filter to indoor, proper rooms with at least one visible cell
+            var visibleIndoorRooms = map.regionGrid.AllRooms.Where(room =>
+                !room.PsychologicallyOutdoors &&
+                room.ProperRoom &&
+                room.Cells.Any(cell => !fogGrid.IsFogged(cell)));
+
+            roomsAllSubcat.Items.AddRange(
+                visibleIndoorRooms.Select(room => new ScannerItem(room, cursorPosition)));
+
             // Group identical items and sort all subcategories by distance
             foreach (var category in new[] { pawnsCategory, tameAnimalsCategory, wildAnimalsCategory,
                                              hazardsCategory, buildingsCategory, treesCategory, plantsCategory,
-                                             itemsCategory, terrainCategory, mineableCategory, ordersCategory })
+                                             itemsCategory, terrainCategory, mineableCategory, ordersCategory,
+                                             zonesCategory, roomsCategory })
             {
                 foreach (var subcat in category.Subcategories)
                 {
@@ -668,6 +797,8 @@ namespace RimWorldAccess
             categories.Add(terrainCategory);
             categories.Add(mineableCategory);
             categories.Add(ordersCategory);
+            categories.Add(zonesCategory);
+            categories.Add(roomsCategory);
 
             // Remove empty categories
             categories.RemoveAll(c => c.IsEmpty);
@@ -688,6 +819,59 @@ namespace RimWorldAccess
                 .FirstOrDefault();
 
             return storageBuilding != null;
+        }
+
+        /// <summary>
+        /// Checks if a building is travel-related (transport pods, launchers, hitching spots, shuttles).
+        /// Fueling ports are only included if they don't have a pod connected (to avoid redundancy).
+        /// </summary>
+        private static bool IsTravelingBuilding(Building building)
+        {
+            if (building == null)
+                return false;
+
+            string defName = building.def.defName;
+
+            // Transport pods and launchers
+            if (defName.Contains("TransportPod") || defName.Contains("DropPod"))
+                return true;
+
+            // Pod launcher / fueling port - only if no pod is connected
+            if (building.def.building != null && building.def.building.hasFuelingPort)
+            {
+                // Check if this fueling port has a connected transport pod
+                // If it does, skip it (the pod will be listed instead)
+                IntVec3 fuelingCell = FuelingPortUtility.GetFuelingPortCell(building);
+                if (fuelingCell.IsValid && building.Map != null)
+                {
+                    // Check if there's a launchable (transport pod) at the fueling cell
+                    CompLaunchable launchable = FuelingPortUtility.LaunchableAt(fuelingCell, building.Map);
+                    if (launchable != null)
+                    {
+                        // Pod is connected - don't list the fueling port separately
+                        return false;
+                    }
+                }
+                // No pod connected - list the empty fueling port
+                return true;
+            }
+
+            // Caravan hitching/packing spot
+            if (defName.Contains("CaravanPackingSpot") || defName.Contains("HitchingSpot"))
+                return true;
+
+            // Shuttles (Royalty DLC)
+            if (defName.Contains("Shuttle"))
+                return true;
+
+            // Check for CompTransporter or CompLaunchable components (catches modded variants)
+            if (building is ThingWithComps twc2)
+            {
+                if (twc2.GetComp<CompTransporter>() != null || twc2.GetComp<CompLaunchable>() != null)
+                    return true;
+            }
+
+            return false;
         }
 
         private static bool IsUninstalledFurniture(Thing thing)
@@ -827,6 +1011,20 @@ namespace RimWorldAccess
                     {
                         grouped.Add(item);
                     }
+                    continue;
+                }
+
+                // Zones are never grouped - each zone is unique
+                if (item.IsZone)
+                {
+                    grouped.Add(item);
+                    continue;
+                }
+
+                // Rooms are never grouped - each room is unique
+                if (item.IsRoom)
+                {
+                    grouped.Add(item);
                     continue;
                 }
 

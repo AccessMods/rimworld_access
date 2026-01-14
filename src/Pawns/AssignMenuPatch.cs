@@ -1,4 +1,7 @@
 using HarmonyLib;
+using RimWorld;
+using RimWorld.Planet;
+using System.Linq;
 using UnityEngine;
 using Verse;
 
@@ -196,6 +199,72 @@ namespace RimWorldAccess
             // Reset text anchor
             Text.Anchor = TextAnchor.UpperLeft;
             Text.Font = GameFont.Small;
+        }
+    }
+
+    /// <summary>
+    /// Harmony patch to intercept the Assign tab opening and replace it with our accessible version.
+    /// Since MainTabWindow_Assign doesn't override DoWindowContents, we patch the base class
+    /// MainTabWindow_PawnTable.DoWindowContents and check the instance type.
+    /// </summary>
+    [HarmonyPatch(typeof(MainTabWindow_PawnTable), nameof(MainTabWindow_PawnTable.DoWindowContents))]
+    public static class AssignWindowInterceptPatch
+    {
+        private static bool hasIntercepted = false;
+
+        [HarmonyPrefix]
+        public static bool Prefix(MainTabWindow_PawnTable __instance)
+        {
+            // Only intercept Assign windows, not other PawnTable windows
+            if (!(__instance is MainTabWindow_Assign))
+            {
+                return true; // Let other windows proceed normally
+            }
+
+            // Only intercept once per window opening
+            if (!hasIntercepted)
+            {
+                hasIntercepted = true;
+
+                // If on the world map, switch to colony map first
+                if (Find.World?.renderer?.wantedMode == WorldRenderMode.Planet)
+                {
+                    CameraJumper.TryHideWorld();
+                    MapNavigationState.RestoreCursorForCurrentMap();
+                }
+
+                // Get a pawn to open the assign menu with
+                Pawn targetPawn = null;
+
+                // Try to get selected pawn first
+                if (Find.Selector?.SelectedPawns?.Count > 0)
+                {
+                    targetPawn = Find.Selector.SelectedPawns.FirstOrDefault(p => p.IsColonist);
+                }
+
+                // Fall back to first colonist
+                if (targetPawn == null && Find.CurrentMap != null)
+                {
+                    targetPawn = Find.CurrentMap.mapPawns.FreeColonists.FirstOrDefault();
+                }
+
+                if (targetPawn != null)
+                {
+                    // Open our windowless version instead
+                    AssignMenuState.Open(targetPawn);
+
+                    // Close the window that was just opened
+                    Find.WindowStack.TryRemove(typeof(MainTabWindow_Assign), doCloseSound: false);
+                }
+
+                // Reset flag to allow for future opens
+                hasIntercepted = false;
+
+                // Return false to prevent the original DoWindowContents from executing
+                return false;
+            }
+
+            return true;
         }
     }
 }

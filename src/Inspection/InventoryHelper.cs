@@ -18,12 +18,16 @@ namespace RimWorldAccess
             public ThingDef Def { get; set; }
             public int TotalQuantity { get; set; }
             public List<IntVec3> StorageLocations { get; set; }
+            public List<Thing> Things { get; set; } // Actual thing references for actions like Install
+            public bool IsMinifiedThing { get; set; } // True if these are uninstalled furniture
 
             public InventoryItem(ThingDef def)
             {
                 Def = def;
                 TotalQuantity = 0;
                 StorageLocations = new List<IntVec3>();
+                Things = new List<Thing>();
+                IsMinifiedThing = false;
             }
 
             public string GetDisplayLabel()
@@ -61,7 +65,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Collects all items from stockpiles and storage buildings across the colony
+        /// Collects all items from stockpiles and storage buildings across the colony.
+        /// Uses a HashSet to prevent duplicate counting.
         /// </summary>
         public static List<Thing> GetAllStoredItems()
         {
@@ -72,7 +77,8 @@ namespace RimWorldAccess
                 return new List<Thing>();
             }
 
-            List<Thing> allItems = new List<Thing>();
+            // Use HashSet to prevent duplicates (items on shelves in stockpiles could be counted twice)
+            HashSet<Thing> uniqueItems = new HashSet<Thing>();
 
             // Get items from stockpiles
             if (map.zoneManager?.AllZones != null)
@@ -86,7 +92,7 @@ namespace RimWorldAccess
                         {
                             foreach (Thing item in slotGroup.HeldThings)
                             {
-                                allItems.Add(item);
+                                uniqueItems.Add(item);
                             }
                         }
                     }
@@ -103,17 +109,18 @@ namespace RimWorldAccess
                     {
                         foreach (Thing item in slotGroup.HeldThings)
                         {
-                            allItems.Add(item);
+                            uniqueItems.Add(item);
                         }
                     }
                 }
             }
 
-            return allItems;
+            return uniqueItems.ToList();
         }
 
         /// <summary>
-        /// Aggregates items by ThingDef, summing quantities and tracking locations
+        /// Aggregates items by ThingDef, summing quantities and tracking locations.
+        /// For MinifiedThings (uninstalled furniture), uses the inner thing's def.
         /// </summary>
         public static Dictionary<ThingDef, InventoryItem> AggregateStacks(List<Thing> items)
         {
@@ -123,16 +130,34 @@ namespace RimWorldAccess
             {
                 if (item?.def == null) continue;
 
-                if (!aggregated.ContainsKey(item.def))
+                // For MinifiedThings, use the inner thing's def for categorization
+                ThingDef defToUse = item.def;
+                bool isMinified = item is MinifiedThing;
+                if (isMinified)
                 {
-                    aggregated[item.def] = new InventoryItem(item.def);
+                    Thing innerThing = item.GetInnerIfMinified();
+                    if (innerThing?.def != null)
+                    {
+                        defToUse = innerThing.def;
+                    }
                 }
 
-                InventoryItem invItem = aggregated[item.def];
+                if (!aggregated.ContainsKey(defToUse))
+                {
+                    aggregated[defToUse] = new InventoryItem(defToUse);
+                    aggregated[defToUse].IsMinifiedThing = isMinified;
+                }
+
+                InventoryItem invItem = aggregated[defToUse];
                 invItem.TotalQuantity += item.stackCount;
 
+                // Store reference to actual thing (for Install action)
+                if (invItem.Things.Count < 10)
+                {
+                    invItem.Things.Add(item);
+                }
+
                 // Store the location of this item (for jump-to functionality)
-                // Only store if we don't have too many locations already (performance)
                 if (invItem.StorageLocations.Count < 10)
                 {
                     IntVec3 position = item.Position;

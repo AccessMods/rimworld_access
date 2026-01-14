@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Verse;
 using RimWorld;
+using RimWorld.Planet;
 using UnityEngine;
 
 namespace RimWorldAccess
@@ -62,17 +64,24 @@ namespace RimWorldAccess
 
             // Collect gizmos from all selected objects
             availableGizmos.Clear();
+            gizmoOwners.Clear();
+            lastAnnouncedOwner = null;
+
             foreach (object obj in Find.Selector.SelectedObjects)
             {
                 if (obj is ISelectable selectable)
                 {
-                    availableGizmos.AddRange(selectable.GetGizmos());
+                    var gizmos = selectable.GetGizmos().ToList();
+                    foreach (var gizmo in gizmos.Where(g => g != null && g.Visible && !ShouldSkipGizmo(g)))
+                    {
+                        availableGizmos.Add(gizmo);
+                        gizmoOwners[gizmo] = selectable;
+                    }
                 }
             }
 
             // Sort by Order property (lower values appear first)
             availableGizmos = availableGizmos
-                .Where(g => g != null && g.Visible)
                 .OrderBy(g => g.Order)
                 .ToList();
 
@@ -106,54 +115,63 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Get all things at the cursor position
             availableGizmos.Clear();
-            List<Thing> thingsAtPosition = cursorPosition.GetThingList(map);
-
-            if (thingsAtPosition == null || thingsAtPosition.Count == 0)
-            {
-                TolkHelper.Speak("No objects at cursor position");
-                return;
-            }
-
-            // Collect gizmos from all things at this position
-            // Important: Temporarily select each thing before getting its gizmos,
-            // because some gizmos (like Designator_Install) check if the thing is selected
-            // to determine their Visible property
             gizmoOwners.Clear();
 
             // Store the current selection to restore it later
             var previousSelection = Find.Selector.SelectedObjects.ToList();
 
-            foreach (Thing thing in thingsAtPosition)
+            try
             {
-                if (thing is ISelectable selectable)
+                // Check for zone at cursor position and collect its gizmos
+                Zone zone = cursorPosition.GetZone(map);
+                if (zone != null)
                 {
-                    // Temporarily select this thing so its gizmos' Visible property works correctly
+                    // Temporarily select the zone so its gizmos' Visible property works correctly
                     Find.Selector.ClearSelection();
-                    Find.Selector.Select(thing, playSound: false, forceDesignatorDeselect: false);
+                    Find.Selector.Select(zone, playSound: false, forceDesignatorDeselect: false);
 
-                    var gizmos = selectable.GetGizmos().ToList();
-                    foreach (Gizmo gizmo in gizmos)
+                    var zoneGizmos = zone.GetGizmos().ToList();
+                    foreach (Gizmo gizmo in zoneGizmos.Where(g => g != null && g.Visible && !ShouldSkipGizmo(g)))
                     {
-                        // Check Visible NOW while thing is still selected
-                        // (some gizmos like Designator_Install check selection state)
-                        if (gizmo != null && gizmo.Visible)
+                        availableGizmos.Add(gizmo);
+                        gizmoOwners[gizmo] = zone;
+                    }
+                }
+
+                // Get all things at the cursor position
+                List<Thing> thingsAtPosition = cursorPosition.GetThingList(map);
+
+                // Collect gizmos from all things at this position
+                // Important: Temporarily select each thing before getting its gizmos,
+                // because some gizmos (like Designator_Install) check if the thing is selected
+                // to determine their Visible property
+                if (thingsAtPosition != null)
+                {
+                    foreach (ISelectable selectable in thingsAtPosition.OfType<ISelectable>())
+                    {
+                        // Temporarily select this thing so its gizmos' Visible property works correctly
+                        Find.Selector.ClearSelection();
+                        Find.Selector.Select(selectable, playSound: false, forceDesignatorDeselect: false);
+
+                        var gizmos = selectable.GetGizmos().ToList();
+                        foreach (Gizmo gizmo in gizmos.Where(g => g != null && g.Visible && !ShouldSkipGizmo(g)))
                         {
+                            // Check Visible NOW while thing is still selected
+                            // (some gizmos like Designator_Install check selection state)
                             availableGizmos.Add(gizmo);
                             gizmoOwners[gizmo] = selectable;
                         }
                     }
                 }
             }
-
-            // Restore previous selection (or clear if nothing was selected)
-            Find.Selector.ClearSelection();
-            foreach (var obj in previousSelection)
+            finally
             {
-                if (obj is ISelectable selectableObj)
+                // Restore previous selection (or clear if nothing was selected)
+                Find.Selector.ClearSelection();
+                foreach (var obj in previousSelection.OfType<ISelectable>())
                 {
-                    Find.Selector.Select(selectableObj, playSound: false, forceDesignatorDeselect: false);
+                    Find.Selector.Select(obj, playSound: false, forceDesignatorDeselect: false);
                 }
             }
 
@@ -164,7 +182,147 @@ namespace RimWorldAccess
 
             if (availableGizmos.Count == 0)
             {
-                TolkHelper.Speak("No commands available for objects at cursor");
+                TolkHelper.Speak("No commands available at cursor position");
+                return;
+            }
+
+            // Start at the first gizmo
+            selectedGizmoIndex = 0;
+            isActive = true;
+            typeahead.ClearSearch();
+            lastAnnouncedOwner = null;
+
+            // Announce the first gizmo (will include object name as prefix)
+            AnnounceCurrentGizmo();
+        }
+
+        /// <summary>
+        /// Opens the gizmo navigation menu by collecting gizmos from selected world objects (caravans, settlements, etc.).
+        /// Used when pressing G on the world map.
+        /// </summary>
+        public static void OpenFromWorldObjects()
+        {
+            List<WorldObject> objectsToUse = new List<WorldObject>();
+            int cursorTile = -1;
+
+            // First priority: Check for world objects at our WorldNavigationState cursor position
+            if (WorldNavigationState.IsActive && WorldNavigationState.CurrentSelectedTile.Valid)
+            {
+                cursorTile = WorldNavigationState.CurrentSelectedTile;
+                var objectsAtTile = Find.WorldObjects?.ObjectsAt(cursorTile);
+                if (objectsAtTile != null)
+                {
+                    objectsToUse.AddRange(objectsAtTile);
+                }
+            }
+
+            // Second priority: Fall back to game's selection if we didn't find anything at cursor
+            if (objectsToUse.Count == 0 && Find.WorldSelector != null)
+            {
+                var selectedObjects = Find.WorldSelector.SelectedObjects;
+                if (selectedObjects != null)
+                {
+                    objectsToUse.AddRange(selectedObjects);
+                }
+            }
+
+            if (objectsToUse.Count == 0)
+            {
+                TolkHelper.Speak("No world object at this tile");
+                return;
+            }
+
+            // Check multi-selection - only use it if ALL multi-selected caravans are on the cursor tile
+            // This allows merge when caravans are together, but shows single caravan gizmos when apart
+            var multiSelected = WorldNavigationState.GetMultiSelectedCaravans();
+            bool allOnSameTile = multiSelected.Count > 1 &&
+                multiSelected.All(c => c != null && !c.Destroyed && c.Tile == cursorTile);
+
+            if (allOnSameTile && Find.WorldSelector != null)
+            {
+                // All multi-selected caravans are on cursor tile - sync selection for merge gizmo
+                Find.WorldSelector.ClearSelection();
+                foreach (var caravan in multiSelected)
+                {
+                    Find.WorldSelector.Select(caravan, playSound: false);
+                }
+
+                // IMPORTANT: When we have multi-selected caravans, only collect gizmos from THOSE caravans
+                // not from other objects at the tile. This prevents the merge gizmo from being associated
+                // with an unselected caravan (which would cause all caravans at tile to merge).
+                objectsToUse.Clear();
+                objectsToUse.AddRange(multiSelected.Cast<WorldObject>());
+            }
+
+            availableGizmos.Clear();
+            gizmoOwners.Clear();
+
+            // When we have multi-selected caravans all on the same tile, keep them selected
+            // so that gizmos like "Merge Selected Caravans" work correctly
+            bool hasMultiSelection = allOnSameTile;
+
+            // Collect gizmos from world objects (either all at tile, or just multi-selected)
+            foreach (WorldObject worldObj in objectsToUse)
+            {
+                if (worldObj == null)
+                    continue;
+
+                // For multi-selection, don't clear - we need all caravans to stay selected
+                // For single selection, temporarily select to get gizmos
+                if (!hasMultiSelection && Find.WorldSelector != null)
+                {
+                    bool needsSelection = Find.WorldSelector.SingleSelectedObject != worldObj;
+                    if (needsSelection)
+                    {
+                        Find.WorldSelector.ClearSelection();
+                        Find.WorldSelector.Select(worldObj);
+                    }
+                }
+
+                var gizmos = worldObj.GetGizmos();
+                if (gizmos != null)
+                {
+                    foreach (Gizmo gizmo in gizmos.Where(g => g != null && g.Visible && !ShouldSkipGizmo(g)))
+                    {
+                        // Skip Gizmo_CaravanInfo - it's display-only with no click action
+                        if (gizmo.GetType().Name == "Gizmo_CaravanInfo")
+                            continue;
+
+                        // Only skip true duplicate gizmos - ones that affect all selected objects together
+                        // like "Merge Selected Caravans". Most gizmos (Settle, Split, etc.) are per-object
+                        // and should be shown for each caravan even if they have the same label.
+                        string gizmoLabel = (gizmo as Command)?.Label ?? gizmo.GetType().Name;
+                        bool isMergeCommand = gizmoLabel.ToLower().Contains("merge");
+
+                        bool isDuplicate = false;
+                        if (isMergeCommand)
+                        {
+                            // Merge commands are truly shared - only show once
+                            isDuplicate = availableGizmos.Any(g =>
+                            {
+                                string existingLabel = (g as Command)?.Label ?? g.GetType().Name;
+                                return existingLabel.ToLower().Contains("merge");
+                            });
+                        }
+
+                        if (!isDuplicate)
+                        {
+                            availableGizmos.Add(gizmo);
+                            gizmoOwners[gizmo] = worldObj;
+                        }
+                    }
+                }
+            }
+
+            // Sort by Order property (lower values appear first)
+            availableGizmos = availableGizmos
+                .OrderBy(g => g.Order)
+                .ToList();
+
+            if (availableGizmos.Count == 0)
+            {
+                string objName = objectsToUse.FirstOrDefault()?.LabelCap ?? "world object";
+                TolkHelper.Speak($"No commands available for {objName}");
                 return;
             }
 
@@ -235,7 +393,18 @@ namespace RimWorldAccess
                 string reason = selectedGizmo.disabledReason;
                 if (string.IsNullOrEmpty(reason))
                     reason = "Command not available";
-                TolkHelper.Speak($"Disabled: {reason}");
+
+                string announcement = $"Disabled: {reason}";
+
+                // Add helpful context for specific disabled scenarios (e.g., transport pod mass)
+                ISelectable gizmoOwner = null;
+                if (gizmoOwners.Count > 0)
+                    gizmoOwners.TryGetValue(selectedGizmo, out gizmoOwner);
+                string context = GetDisabledGizmoContext(selectedGizmo, gizmoOwner);
+                if (!string.IsNullOrEmpty(context))
+                    announcement += $". {context}";
+
+                TolkHelper.Speak(announcement);
                 return;
             }
 
@@ -254,15 +423,47 @@ namespace RimWorldAccess
                 // 1. Designator (like Reinstall, Copy) - enters placement mode
                 if (selectedGizmo is Designator designator)
                 {
+                    // Check for zone expand/shrink designators - use accessible expansion mode
+                    string designatorTypeName = designator.GetType().Name;
+
+                    // Zone expand designators (Designator_ZoneAdd*_Expand)
+                    if (designatorTypeName.Contains("_Expand")
+                        && designatorTypeName.Contains("ZoneAdd")
+                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable expandOwner)
+                        && expandOwner is Zone expandZone)
+                    {
+                        Close();
+                        ZoneCreationState.EnterExpansionMode(expandZone);
+                        return;
+                    }
+
+                    // Zone shrink designator - enter shrink mode (selected cells will be removed)
+                    if (designatorTypeName == "Designator_ZoneDelete_Shrink"
+                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable shrinkOwner)
+                        && shrinkOwner is Zone shrinkZone)
+                    {
+                        Close();
+                        ZoneCreationState.EnterShrinkMode(shrinkZone);
+                        return;
+                    }
+
                     // For Designators opened via cursor objects (not selected pawns),
                     // we need to ensure the correct object is selected
                     // so the Designator has proper context (e.g., Designator_Install needs to know what to reinstall)
-                    if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo) && Find.Selector != null)
+                    if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo))
                     {
-                        // Select ONLY the specific thing that owns this gizmo
                         ISelectable owner = gizmoOwners[selectedGizmo];
-                        Find.Selector.ClearSelection();
-                        Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                        // Use WorldSelector for WorldObjects, Selector for map Things
+                        if (owner is WorldObject worldObj && Find.WorldSelector != null)
+                        {
+                            Find.WorldSelector.ClearSelection();
+                            Find.WorldSelector.Select(worldObj, playSound: false);
+                        }
+                        else if (Find.Selector != null)
+                        {
+                            Find.Selector.ClearSelection();
+                            Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                        }
                     }
 
                     try
@@ -274,8 +475,13 @@ namespace RimWorldAccess
                         // Validate that the designator was actually selected
                         if (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null)
                         {
-                            // Announce placement mode
-                            TolkHelper.Speak($"{gizmoLabel} - Use arrow keys to position, R to rotate, Space to place, Escape to cancel");
+                            // Close the gizmo menu BEFORE entering placement mode
+                            Close();
+
+                            // Enter our accessible placement mode for consistent behavior
+                            // (Space places blueprint, Enter confirms, allows repositioning)
+                            ArchitectState.EnterPlacementMode(designator);
+                            return;
                         }
                         else
                         {
@@ -288,21 +494,64 @@ namespace RimWorldAccess
                         TolkHelper.Speak($"Error executing {gizmoLabel}: {ex.Message}", SpeechPriority.High);
                     }
 
-                    // Close the gizmo menu AFTER announcing
+                    // Close the gizmo menu AFTER announcing (only reached on error)
                     Close();
                     return;
                 }
 
                 // For non-Designator gizmos, also select the owner so FloatMenu actions work correctly
-                // (some actions check Find.Selector.SelectedObjects)
-                if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo) && Find.Selector != null)
+                // (some actions check Find.Selector.SelectedObjects or Find.WorldSelector.SelectedObjects)
+                if (!PawnJustSelected && gizmoOwners.ContainsKey(selectedGizmo))
                 {
                     ISelectable owner = gizmoOwners[selectedGizmo];
-                    Find.Selector.ClearSelection();
-                    Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                    // Use WorldSelector for WorldObjects, Selector for map Things
+                    if (owner is WorldObject worldObj && Find.WorldSelector != null)
+                    {
+                        Find.WorldSelector.ClearSelection();
+
+                        // For caravans, check if we have multi-selected caravans that need to be selected
+                        // (e.g., for "Merge Selected Caravans" gizmo)
+                        var multiSelected = WorldNavigationState.GetMultiSelectedCaravans();
+                        if (multiSelected.Count > 0 && owner is Caravan ownerCaravan)
+                        {
+                            // IMPORTANT: Select the gizmo's owner caravan FIRST!
+                            // RimWorld's merge command checks Find.WorldSelector.FirstSelectedObject == caravan
+                            // where 'caravan' is the specific caravan that generated the gizmo.
+                            // FirstSelectedObject is the first one added to the selection.
+                            Find.WorldSelector.Select(ownerCaravan, playSound: false);
+
+                            // Then select the other caravans
+                            foreach (var caravan in multiSelected)
+                            {
+                                if (caravan != ownerCaravan)
+                                {
+                                    Find.WorldSelector.Select(caravan, playSound: false);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Find.WorldSelector.Select(worldObj, playSound: false);
+                        }
+                    }
+                    else if (Find.Selector != null)
+                    {
+                        Find.Selector.ClearSelection();
+                        Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                    }
                 }
 
-                // 2. Command_Toggle - toggle and announce state
+                // 2. Command_SetPlantToGrow - open accessible plant selection menu
+                if (selectedGizmo is Command_SetPlantToGrow
+                    && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable plantOwner)
+                    && plantOwner is IPlantToGrowSettable plantSettable)
+                {
+                    Close();
+                    PlantSelectionMenuState.Open(plantSettable);
+                    return;
+                }
+
+                // 3. Command_Toggle - toggle and announce state
                 if (selectedGizmo is Command_Toggle toggle)
                 {
                     try
@@ -373,6 +622,10 @@ namespace RimWorldAccess
                         }
                     }
                 }
+
+                // Clear multi-selection after gizmo execution - operations like merge/split
+                // change the world object list, so selection context is no longer valid
+                WorldNavigationState.ClearMultiSelection();
 
                 // Always close after executing (per user requirement)
                 Close();
@@ -637,7 +890,15 @@ namespace RimWorldAccess
                     string reason = gizmo.disabledReason;
                     if (string.IsNullOrEmpty(reason))
                         reason = "Not available";
-                    announcement += $" [DISABLED: {reason}]";
+                    announcement += $" Disabled: {reason}";
+
+                    // Add helpful context for specific disabled scenarios (e.g., transport pod mass)
+                    ISelectable gizmoOwner = null;
+                    if (gizmoOwners.Count > 0)
+                        gizmoOwners.TryGetValue(gizmo, out gizmoOwner);
+                    string context = GetDisabledGizmoContext(gizmo, gizmoOwner);
+                    if (!string.IsNullOrEmpty(context))
+                        announcement += $". {context}";
                 }
 
                 TolkHelper.Speak(announcement);
@@ -676,16 +937,25 @@ namespace RimWorldAccess
                     lastAnnouncedOwner = owner;
                     if (owner is Thing thing)
                         ownerPrefix = thing.LabelCap.StripTags() + ": ";
+                    else if (owner is WorldObject worldObj)
+                        ownerPrefix = worldObj.LabelCap.StripTags() + ": ";
                 }
             }
 
             string announcement = ownerPrefix + label;
 
+            // For Command_Toggle, include current ON/OFF state (sighted players see a checkbox)
+            if (gizmo is Command_Toggle toggle)
+            {
+                bool isOn = toggle.isActive?.Invoke() ?? false;
+                announcement += isOn ? ": ON" : ": OFF";
+            }
+
             // Add status value for non-Command gizmos (progress bars, etc.)
             if (!string.IsNullOrEmpty(statusValue))
                 announcement += $" - {statusValue}";
 
-            if (!string.IsNullOrEmpty(description))
+            if (!string.IsNullOrEmpty(description) && !(gizmo is Command_Toggle))
                 announcement += $": {description}";
 
             if (!string.IsNullOrEmpty(hotkey))
@@ -697,7 +967,15 @@ namespace RimWorldAccess
                 string reason = gizmo.disabledReason;
                 if (string.IsNullOrEmpty(reason))
                     reason = "Not available";
-                announcement += $" [DISABLED: {reason}]";
+                announcement += $" Disabled: {reason}";
+
+                // Add helpful context for specific disabled scenarios (e.g., transport pod mass)
+                ISelectable gizmoOwner = null;
+                if (gizmoOwners.Count > 0)
+                    gizmoOwners.TryGetValue(gizmo, out gizmoOwner);
+                string context = GetDisabledGizmoContext(gizmo, gizmoOwner);
+                if (!string.IsNullOrEmpty(context))
+                    announcement += $". {context}";
             }
 
             TolkHelper.Speak(announcement);
@@ -871,6 +1149,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the label for a room stats gizmo by accessing the building and room.
+        /// Uses shared TileInfoHelper.GetRoomStatsInfo() for consistent formatting.
         /// </summary>
         private static string GetRoomStatsLabel(Gizmo gizmo)
         {
@@ -882,11 +1161,10 @@ namespace RimWorldAccess
                 if (buildingField != null)
                 {
                     var building = buildingField.GetValue(gizmo) as Building;
-                    if (building?.GetRoom() != null)
+                    Room room = Gizmo_RoomStats.GetRoomToShowStatsFor(building);
+                    if (room != null)
                     {
-                        var room = building.GetRoom();
-                        string roleName = room.Role?.label ?? "room";
-                        return $"Room Stats: {roleName.CapitalizeFirst()}";
+                        return TileInfoHelper.GetRoomStatsInfo(room);
                     }
                 }
             }
@@ -1290,6 +1568,113 @@ namespace RimWorldAccess
                 }
             }
             return "";
+        }
+
+        /// <summary>
+        /// Gets additional context for disabled gizmos, particularly for transport pod mass issues.
+        /// Returns helpful information like group mass stats when a Launch gizmo is disabled due to
+        /// individual pod overload but the group as a whole might be fine.
+        /// </summary>
+        private static string GetDisabledGizmoContext(Gizmo gizmo, ISelectable owner)
+        {
+            // Only handle disabled gizmos
+            if (!gizmo.Disabled || string.IsNullOrEmpty(gizmo.disabledReason))
+                return null;
+
+            // Check if this is a Launch gizmo disabled due to mass capacity
+            // The game's translation key is "CommandLaunchGroupFailOverMassCapacity"
+            if (!gizmo.disabledReason.Contains("mass capacity") &&
+                !gizmo.disabledReason.ToLower().Contains("mass"))
+                return null;
+
+            // Get the CompTransporter from the owner
+            CompTransporter transporter = null;
+            if (owner is Thing thing)
+            {
+                transporter = thing.TryGetComp<CompTransporter>();
+            }
+
+            if (transporter == null || transporter.parent?.Map == null)
+                return null;
+
+            // Get all transporters in the group
+            var transportersInGroup = transporter.TransportersInGroup(transporter.parent.Map);
+            if (transportersInGroup == null || transportersInGroup.Count <= 1)
+                return null;
+
+            // Calculate group totals
+            float groupMassUsage = 0f;
+            float groupMassCapacity = 0f;
+            int overloadedCount = 0;
+            int canLaunchCount = 0;
+
+            foreach (var t in transportersInGroup)
+            {
+                groupMassUsage += t.MassUsage;
+                groupMassCapacity += t.MassCapacity;
+
+                if (t.OverMassCapacity)
+                    overloadedCount++;
+
+                // Check if this transporter's Launch gizmo is enabled
+                var launchable = t.Launchable;
+                if (launchable != null)
+                {
+                    var canLaunch = launchable.CanLaunch();
+                    if (canLaunch.Accepted)
+                        canLaunchCount++;
+                }
+            }
+
+            // Build helpful context message
+            var context = new StringBuilder();
+
+            // Show group mass stats
+            context.Append($"Group total: {groupMassUsage:F0} / {groupMassCapacity:F0} kg");
+
+            // If group isn't overloaded but this pod is, explain the workaround
+            if (groupMassUsage <= groupMassCapacity && overloadedCount > 0 && canLaunchCount > 0)
+            {
+                context.Append($". {canLaunchCount} of {transportersInGroup.Count} pods can launch the group.");
+                context.Append(" Select another pod to launch.");
+            }
+            else if (groupMassUsage > groupMassCapacity)
+            {
+                float overBy = groupMassUsage - groupMassCapacity;
+                context.Append($". Group is over capacity by {overBy:F0} kg.");
+            }
+
+            return context.ToString();
+        }
+
+        /// <summary>
+        /// Determines if a gizmo should be skipped (not shown in our menu).
+        /// Some gizmos don't integrate well with our cursor-based accessibility system.
+        /// </summary>
+        private static bool ShouldSkipGizmo(Gizmo gizmo)
+        {
+            if (!(gizmo is Command cmd))
+                return false;
+
+            string label = cmd.Label?.ToLower() ?? cmd.defaultLabel?.ToLower() ?? "";
+
+            // Skip transporter/launch group navigation gizmos - they use CameraJumper.TryJumpAndSelect
+            // which doesn't integrate with our cursor-based navigation system
+            // Labels vary based on pod state:
+            // - Before loading: "Select previous transporter", "Select next transporter", "Select all transporters"
+            // - During/after loading: "Select previous in launch group", "Select next in launch group",
+            //   "Select all in launch group", "Select launch group"
+            if (label.Contains("transporter") || label.Contains("launch group"))
+            {
+                if (label.Contains("previous") || label.Contains("next") ||
+                    (label.Contains("select") && label.Contains("all")) ||
+                    label == "select launch group")
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

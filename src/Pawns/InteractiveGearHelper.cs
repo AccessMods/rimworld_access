@@ -168,6 +168,10 @@ namespace RimWorldAccess
             if (!pawn.IsColonistPlayerControlled && !pawn.IsSlaveOfColony)
                 return false;
 
+            // Dead pawns cannot drop items (corpse inspection)
+            if (pawn.Dead)
+                return false;
+
             // Check for quest locks (quest lodgers can't drop quest-related gear)
             if (item.Thing.def.destroyOnDrop)
                 return false;
@@ -194,6 +198,10 @@ namespace RimWorldAccess
         public static bool CanConsumeItem(GearItem item, Pawn pawn)
         {
             if (item == null || item.Thing == null || pawn == null)
+                return false;
+
+            // Dead pawns cannot consume items
+            if (pawn.Dead)
                 return false;
 
             // Only inventory items can be consumed

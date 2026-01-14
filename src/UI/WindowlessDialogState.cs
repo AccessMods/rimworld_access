@@ -52,15 +52,27 @@ namespace RimWorldAccess
             ShouldForcePause = dialog.forcePause;
 
             elements = DialogElementExtractor.ExtractElements(dialog);
-            selectedIndex = 0;
+
+            // Insert dialog description as first element so users can re-read it
+            string title = DialogElementExtractor.GetDialogTitle(dialog)?.StripTags() ?? "";
+            string message = DialogElementExtractor.GetDialogMessage(dialog)?.StripTags() ?? "";
+            string descriptionText = BuildDescriptionText(title, message);
+
+            if (!string.IsNullOrEmpty(descriptionText))
+            {
+                elements.Insert(0, new DialogDescriptionElement { Title = title, Message = message });
+            }
+
+            // Start on the first action (element 1), not the description (element 0)
+            selectedIndex = elements.Count > 1 ? 1 : 0;
             editingElement = null;
 
-            // Announce dialog opened
-            string announcement = BuildDialogAnnouncement();
+            // Announce dialog opened with full description
+            string announcement = BuildDialogAnnouncement(title, message);
             TolkHelper.Speak(announcement, SpeechPriority.High);
 
-            // Announce first element
-            if (elements.Count > 0)
+            // Announce the focused element (first action, not the description)
+            if (elements.Count > 1)
             {
                 AnnounceCurrentElement();
             }
@@ -153,6 +165,13 @@ namespace RimWorldAccess
                 if (cancelButton != null)
                 {
                     cancelButton.Execute();
+
+                    // If cancelling a confirmation dialog over caravan formation, reset the send attempted flag
+                    // so that a subsequent Escape will properly announce "Caravan formation cancelled"
+                    if (CaravanFormationState.IsActive)
+                    {
+                        CaravanFormationState.ResetSendAttempted();
+                    }
                 }
                 Close();
                 evt.Use();
@@ -239,7 +258,12 @@ namespace RimWorldAccess
 
             DialogElement element = elements[selectedIndex];
 
-            if (element is ButtonElement button)
+            if (element is DialogDescriptionElement descElement)
+            {
+                // Re-read the description
+                TolkHelper.Speak(descElement.GetAnnouncement());
+            }
+            else if (element is ButtonElement button)
             {
                 button.Execute();
 
@@ -263,15 +287,45 @@ namespace RimWorldAccess
                 return;
 
             DialogElement element = elements[selectedIndex];
-            string announcement = $"{MenuHelper.FormatPosition(selectedIndex, elements.Count)}. {element.GetAnnouncement()}";
+
+            // Description element doesn't show position
+            if (element is DialogDescriptionElement)
+            {
+                TolkHelper.Speak(element.GetAnnouncement());
+                return;
+            }
+
+            // For action elements, show position relative to action count (excluding description)
+            // Description is always at index 0 if present, so actions start at index 1
+            bool hasDescription = elements.Count > 0 && elements[0] is DialogDescriptionElement;
+            int actionIndex = hasDescription ? selectedIndex - 1 : selectedIndex;
+            int actionCount = hasDescription ? elements.Count - 1 : elements.Count;
+
+            string position = MenuHelper.FormatPosition(actionIndex, actionCount);
+            string announcement = string.IsNullOrEmpty(position)
+                ? element.GetAnnouncement()
+                : $"{element.GetAnnouncement()}. {position}";
             TolkHelper.Speak(announcement);
         }
 
-        private static string BuildDialogAnnouncement()
+        private static string BuildDescriptionText(string title, string message)
         {
-            string title = DialogElementExtractor.GetDialogTitle(currentDialog)?.StripTags() ?? "";
-            string message = DialogElementExtractor.GetDialogMessage(currentDialog)?.StripTags() ?? "";
+            string text = "";
+            if (!string.IsNullOrEmpty(title))
+            {
+                text += title;
+            }
+            if (!string.IsNullOrEmpty(message))
+            {
+                if (!string.IsNullOrEmpty(text))
+                    text += ". ";
+                text += message;
+            }
+            return text;
+        }
 
+        private static string BuildDialogAnnouncement(string title, string message)
+        {
             string announcement = "Dialog opened. ";
 
             if (!string.IsNullOrEmpty(title))
@@ -284,7 +338,9 @@ namespace RimWorldAccess
                 announcement += message + ". ";
             }
 
-            announcement += $"{elements.Count} elements. Use arrow keys to navigate, Enter to activate, Escape to cancel.";
+            // Subtract 1 from count since element 0 is the description, not an action
+            int actionCount = elements.Count > 0 ? elements.Count - 1 : 0;
+            announcement += $"{actionCount} elements. Use arrow keys to navigate, Enter to activate, Escape to cancel.";
 
             return announcement;
         }
@@ -319,7 +375,7 @@ namespace RimWorldAccess
 
         public override string GetAnnouncement()
         {
-            string announcement = $"Button: {Label}";
+            string announcement = $"{Label} button";
 
             if (Disabled && !string.IsNullOrEmpty(DisabledReason))
             {
@@ -386,6 +442,32 @@ namespace RimWorldAccess
         public override string GetAnnouncement()
         {
             return $"Label: {Text}";
+        }
+    }
+
+    /// <summary>
+    /// Represents the dialog description (title + message) as a navigable element.
+    /// Allows users to re-read the dialog text by navigating to this element.
+    /// </summary>
+    public class DialogDescriptionElement : DialogElement
+    {
+        public string Title { get; set; }
+        public string Message { get; set; }
+
+        public override string GetAnnouncement()
+        {
+            string text = "Dialog description: ";
+            if (!string.IsNullOrEmpty(Title))
+            {
+                text += Title;
+            }
+            if (!string.IsNullOrEmpty(Message))
+            {
+                if (!string.IsNullOrEmpty(Title))
+                    text += ". ";
+                text += Message;
+            }
+            return text;
         }
     }
 }

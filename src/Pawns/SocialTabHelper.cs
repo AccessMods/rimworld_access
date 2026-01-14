@@ -50,19 +50,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Represents a social interaction log entry.
-        /// </summary>
-        public class SocialInteractionInfo
-        {
-            public string InteractionType { get; set; }
-            public string InteractionLabel { get; set; }
-            public string Description { get; set; }
-            public string Timestamp { get; set; }
-            public int AgeTicks { get; set; }
-            public bool IsFaded { get; set; }
-        }
-
-        /// <summary>
         /// Pregnancy approach options.
         /// </summary>
         public enum PregnancyApproach
@@ -412,82 +399,6 @@ namespace RimWorldAccess
                 SoundDefOf.ClickReject.PlayOneShotOnCamera();
                 return false;
             }
-        }
-
-        #endregion
-
-        #region Social Interactions
-
-        /// <summary>
-        /// Gets recent social interactions for a pawn.
-        /// Follows RimWorld's display logic: shows up to 12 interactions from the play log.
-        /// </summary>
-        public static List<SocialInteractionInfo> GetSocialInteractions(Pawn pawn)
-        {
-            var interactions = new List<SocialInteractionInfo>();
-
-            if (pawn == null)
-                return interactions;
-
-            // Get interactions from play log
-            var playLog = Find.PlayLog;
-            if (playLog == null)
-                return interactions;
-
-            const int maxEntries = 12; // Match the game's default
-            const int fadeAgeTicks = 7500; // Ticks after which entries appear faded (~2 hours)
-
-            // Iterate through all play log entries
-            foreach (var entry in playLog.AllEntries)
-            {
-                // Check if this entry concerns the pawn (is the pawn involved in this entry?)
-                if (!entry.Concerns(pawn))
-                    continue;
-
-                // Get the description from this pawn's point of view
-                string description = entry.ToGameStringFromPOV(pawn);
-
-                // Get additional details
-                string interactionType = "Event";
-                string interactionLabel = "";
-
-                // Check if this is a PlayLogEntry_Interaction to get the interaction type
-                if (entry is PlayLogEntry_Interaction interactionEntry)
-                {
-                    // Use reflection to access the protected intDef field
-                    var intDefField = typeof(PlayLogEntry_Interaction).GetField("intDef",
-                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-                    if (intDefField != null)
-                    {
-                        var intDef = intDefField.GetValue(interactionEntry) as InteractionDef;
-                        if (intDef != null)
-                        {
-                            interactionType = intDef.label;
-                            interactionLabel = intDef.LabelCap;
-                        }
-                    }
-                }
-
-                // Get timestamp
-                int ageTicks = entry.Age;
-                string timestamp = ageTicks.ToStringTicksToPeriod();
-
-                interactions.Add(new SocialInteractionInfo
-                {
-                    InteractionType = interactionType,
-                    InteractionLabel = interactionLabel,
-                    Description = !string.IsNullOrEmpty(description) ? description.StripTags() : "[No description]",
-                    Timestamp = timestamp,
-                    AgeTicks = ageTicks,
-                    IsFaded = ageTicks > fadeAgeTicks
-                });
-
-                if (interactions.Count >= maxEntries)
-                    break;
-            }
-
-            return interactions;
         }
 
         #endregion
