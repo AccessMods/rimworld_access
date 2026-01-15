@@ -62,13 +62,10 @@ namespace RimWorldAccess
             }
 
             // Build combat log information
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"{pawn.LabelShort}'s Combat Log.");
+            // First, collect all entries with their timestamps and battle names
+            var allEntries = new List<(int ageTicks, string battleName, string entryText)>();
 
-            int entryCount = 0;
-            string currentBattleName = null;
-
-            // Iterate through all battles
+            // Iterate through all battles to collect entries
             foreach (Battle battle in Find.BattleLog.Battles)
             {
                 // Skip battles that don't involve this pawn
@@ -76,7 +73,7 @@ namespace RimWorldAccess
                     continue;
 
                 // Get battle name for grouping
-                string battleName = battle.GetName();
+                string battleName = battle.GetName().StripTags();
 
                 // Iterate through entries in this battle
                 foreach (LogEntry entry in battle.Entries)
@@ -85,31 +82,54 @@ namespace RimWorldAccess
                     if (!entry.Concerns(pawn))
                         continue;
 
+                    // Get the entry text from this pawn's point of view and strip color tags
+                    string entryText = entry.ToGameStringFromPOV(pawn).StripTags();
+                    allEntries.Add((entry.Age, battleName, entryText));
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"{pawn.LabelShort}'s Combat Log.");
+
+            if (allEntries.Count == 0)
+            {
+                sb.AppendLine("No combat entries found.");
+            }
+            else
+            {
+                // Sort by age (oldest to newest) and take the last 10
+                var recentEntries = allEntries
+                    .OrderBy(e => e.ageTicks)
+                    .TakeLast(10)
+                    .ToList();
+
+                string currentBattleName = null;
+
+                // Build output for the last 10 entries
+                foreach (var (ageTicks, battleName, entryText) in recentEntries)
+                {
                     // Add battle header if it changed
                     if (battleName != currentBattleName)
                     {
                         if (currentBattleName != null)
                             sb.AppendLine(); // Add spacing between battles
 
-                        sb.AppendLine($"-- {battleName.StripTags()} --");
+                        sb.AppendLine($"-- {battleName} --");
                         currentBattleName = battleName;
                     }
 
-                    // Get the entry text from this pawn's point of view and strip color tags
-                    string entryText = entry.ToGameStringFromPOV(pawn).StripTags();
                     sb.AppendLine(entryText);
-                    entryCount++;
                 }
-            }
 
-            if (entryCount == 0)
-            {
-                sb.AppendLine("No combat entries found.");
-            }
-            else
-            {
                 sb.AppendLine();
-                sb.AppendLine($"Total: {entryCount} entries.");
+                if (allEntries.Count > 10)
+                {
+                    sb.AppendLine($"Showing last 10 of {allEntries.Count} entries.");
+                }
+                else
+                {
+                    sb.AppendLine($"Total: {allEntries.Count} entries.");
+                }
             }
 
             TolkHelper.Speak(sb.ToString().TrimEnd());
