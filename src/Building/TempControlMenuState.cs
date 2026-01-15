@@ -121,7 +121,7 @@ namespace RimWorldAccess
             if (tempControl == null || building == null)
                 return;
 
-            string targetTemp = tempControl.TargetTemperature.ToStringTemperature("F0");
+            string targetTemp = MenuHelper.FormatTemperature(tempControl.TargetTemperature, "F0");
 
             // Get power mode if available
             string powerMode = "";

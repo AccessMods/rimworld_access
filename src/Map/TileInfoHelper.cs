@@ -371,9 +371,9 @@ namespace RimWorldAccess
             // Additional info
             sb.AppendLine("\n--- Environmental Info ---");
 
-            // Temperature
+            // Temperature (respects user's temperature mode preference)
             float temperature = position.GetTemperature(map);
-            sb.AppendLine($"Temperature: {temperature:F1}°C");
+            sb.AppendLine($"Temperature: {MenuHelper.FormatTemperature(temperature, "F1")}");
 
             // Roof
             RoofDef roof = position.GetRoof(map);
@@ -586,9 +586,9 @@ namespace RimWorldAccess
             }
             sb.Append(lightDescription);
 
-            // Get temperature
+            // Get temperature (respects user's temperature mode preference)
             float temperature = position.GetTemperature(map);
-            sb.Append($", {temperature:F1}°C");
+            sb.Append($", {MenuHelper.FormatTemperature(temperature, "F1")}");
 
             // Check if indoors/outdoors
             RoofDef roof = position.GetRoof(map);
@@ -800,7 +800,7 @@ namespace RimWorldAccess
 
             // Add target temperature
             float targetTemp = tempControl.TargetTemperature;
-            string tempString = targetTemp.ToStringTemperature("F0");
+            string tempString = MenuHelper.FormatTemperature(targetTemp, "F0");
 
             return $"{directionInfo}, target {tempString}";
         }

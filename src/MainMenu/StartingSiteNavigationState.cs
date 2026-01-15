@@ -735,8 +735,8 @@ namespace RimWorldAccess
             // Biome
             sb.Append($"Biome: {tileData.PrimaryBiome.LabelCap}");
 
-            // Temperature
-            sb.Append($" | Avg Temp: {tileData.temperature:F0}°C");
+            // Temperature (respects user's temperature mode preference)
+            sb.Append($" | Avg Temp: {MenuHelper.FormatTemperature(tileData.temperature, "F0")}");
 
             // Rainfall
             sb.Append($" | Rainfall: {tileData.rainfall:F0}mm");

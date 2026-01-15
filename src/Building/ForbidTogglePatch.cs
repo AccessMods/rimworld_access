@@ -33,31 +33,9 @@ namespace RimWorldAccess
             if (Find.WindowStack != null && Find.WindowStack.WindowsPreventCameraMotion)
                 return;
 
-            // Don't process if windowless orders menu is active
-            if (WindowlessFloatMenuState.IsActive)
-                return;
-
-            // Don't process if zone rename is active (need to capture text input)
-            if (ZoneRenameState.IsActive)
-                return;
-
-            // Don't process if any menu with typeahead search is active
-            // These menus use letter keys for search, so F would conflict
-            if (WindowlessInventoryState.IsActive ||
-                WindowlessInspectionState.IsActive ||
-                WindowlessResearchMenuState.IsActive ||
-                NotificationMenuState.IsActive ||
-                QuestMenuState.IsActive ||
-                GizmoNavigationState.IsActive ||
-                SettlementBrowserState.IsActive ||
-                CaravanFormationState.IsActive ||
-                StorageSettingsMenuState.IsActive ||
-                PlantSelectionMenuState.IsActive ||
-                WorkMenuState.IsActive ||
-                ModListState.IsActive ||
-                ArchitectTreeState.IsActive ||
-                AnimalsMenuState.IsActive ||
-                WildlifeMenuState.IsActive)
+            // Don't process if any accessibility menu is active
+            // These menus use letter keys for navigation/search, so F would conflict
+            if (KeyboardHelper.IsAnyAccessibilityMenuActive())
                 return;
 
             // Check for F key press (but not Alt+F, which is handled by UnifiedKeyboardPatch)

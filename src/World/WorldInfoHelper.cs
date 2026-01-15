@@ -67,9 +67,8 @@ namespace RimWorldAccess
                 summary.Append($", {tile.hilliness.GetLabelCap()}");
             }
 
-            // Add temperature (average)
-            float temp = tile.temperature;
-            summary.Append($", {temp:F0}°C");
+            // Add temperature (average, respects user's temperature mode preference)
+            summary.Append($", {MenuHelper.FormatTemperature(tile.temperature, "F0")}");
 
             // Check for world objects at this tile (excluding route planner waypoints - we handle those separately above)
             if (Find.WorldObjects != null)
@@ -285,8 +284,8 @@ namespace RimWorldAccess
             // Elevation
             info.AppendLine($"Elevation: {tile.elevation:F0}m");
 
-            // Temperature
-            info.AppendLine($"Temperature: Average {tile.temperature:F0}°C");
+            // Temperature (respects user's temperature mode preference)
+            info.AppendLine($"Temperature: Average {MenuHelper.FormatTemperature(tile.temperature, "F0")}");
 
             // Pollution (if Biotech active)
             if (ModsConfig.BiotechActive && tile.pollution > 0)

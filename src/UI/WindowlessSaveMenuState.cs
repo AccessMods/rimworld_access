@@ -279,7 +279,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex - 1]; // Adjust for "Create New Save" at index 0
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}");
+                    TolkHelper.Speak($"Overwrite: {fileName} - {FormatDateTime(file.LastWriteTime)}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}");
                 }
                 else
                 {
@@ -292,7 +292,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    TolkHelper.Speak($"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}");
+                    TolkHelper.Speak($"Load: {fileName} - {FormatDateTime(file.LastWriteTime)}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}");
                 }
                 else
                 {
@@ -507,7 +507,7 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex - 1];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    return $"Overwrite: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}";
+                    return $"Overwrite: {fileName} - {FormatDateTime(file.LastWriteTime)}. {MenuHelper.FormatPosition(selectedIndex, totalCount)}";
                 }
                 else
                 {
@@ -520,12 +520,27 @@ namespace RimWorldAccess
                 {
                     SaveFileInfo file = saveFiles[selectedIndex];
                     string fileName = Path.GetFileNameWithoutExtension(file.FileName);
-                    return $"Load: {fileName} - {file.LastWriteTime:yyyy-MM-dd HH:mm}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}";
+                    return $"Load: {fileName} - {FormatDateTime(file.LastWriteTime)}. {MenuHelper.FormatPosition(selectedIndex, saveFiles.Count)}";
                 }
                 else
                 {
                     return "No save files available";
                 }
+            }
+        }
+
+        /// <summary>
+        /// Formats a DateTime for display, respecting the user's 12/24 hour clock preference.
+        /// </summary>
+        private static string FormatDateTime(DateTime dateTime)
+        {
+            if (Prefs.TwelveHourClockMode)
+            {
+                return dateTime.ToString("yyyy-MM-dd h:mm tt");
+            }
+            else
+            {
+                return dateTime.ToString("yyyy-MM-dd HH:mm");
             }
         }
     }

@@ -899,7 +899,7 @@ namespace RimWorldAccess
             {
                 var sb = new StringBuilder();
 
-                sb.AppendLine($"Target Temperature: {tempControl.targetTemperature}°C");
+                sb.AppendLine($"Target Temperature: {MenuHelper.FormatTemperature(tempControl.targetTemperature, "F0")}");
 
                 // Check if it's powered
                 var powerComp = building.TryGetComp<CompPowerTrader>();

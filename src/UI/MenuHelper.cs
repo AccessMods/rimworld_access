@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Verse;
 
 namespace RimWorldAccess
 {
@@ -248,6 +249,26 @@ namespace RimWorldAccess
             }
 
             return lastSibling;
+        }
+
+        // ===== FORMATTING =====
+
+        /// <summary>
+        /// Formats a temperature with the degree symbol.
+        /// RimWorld's ToStringTemperature returns "21.5C" but we want "21.5°C" for clarity.
+        /// </summary>
+        /// <param name="celsiusTemp">Temperature in Celsius</param>
+        /// <param name="format">Format string (e.g., "F0" for no decimals, "F1" for one decimal)</param>
+        /// <returns>Formatted temperature like "21.5°C", "70.2°F", or "294.6°K"</returns>
+        public static string FormatTemperature(float celsiusTemp, string format = "F1")
+        {
+            string temp = celsiusTemp.ToStringTemperature(format);
+            // Insert degree symbol before the unit letter (C, F, or K)
+            if (temp.Length > 1)
+            {
+                return temp.Insert(temp.Length - 1, "°");
+            }
+            return temp;
         }
     }
 }
