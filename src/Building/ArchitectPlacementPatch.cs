@@ -36,12 +36,29 @@ namespace RimWorldAccess
             bool hasActiveDesignator = Find.DesignatorManager != null &&
                                       Find.DesignatorManager.SelectedDesignator != null;
 
-            // Check if local map targeting is active (e.g., transport pod landing)
-            bool inTargetingMode = Find.Targeter != null && Find.Targeter.IsTargeting;
+            // Check if local map targeting is active for transport pod landing specifically
+            // We need to differentiate between transport pod landing and weapon/ability targeting
+            bool inTransportPodTargeting = false;
+            if (Find.Targeter != null && Find.Targeter.IsTargeting)
+            {
+                // Check if the mouseAttachment matches the transport pod cursor
+                // This ensures we only handle transport pod landing, not weapon targeting
+                var mouseAttachmentField = AccessTools.Field(typeof(Targeter), "mouseAttachment");
+                if (mouseAttachmentField != null)
+                {
+                    Texture2D mouseAttachment = mouseAttachmentField.GetValue(Find.Targeter) as Texture2D;
+                    if (mouseAttachment != null &&
+                        CompLaunchable.TargeterMouseAttachment != null &&
+                        mouseAttachment == CompLaunchable.TargeterMouseAttachment)
+                    {
+                        inTransportPodTargeting = true;
+                    }
+                }
+            }
 
             // Only active when in architect placement mode OR when a designator is selected (e.g., from gizmos)
-            // OR when local map targeting is active (transport pod landing)
-            if (!inArchitectMode && !hasActiveDesignator && !inTargetingMode)
+            // OR when transport pod landing targeting is active
+            if (!inArchitectMode && !hasActiveDesignator && !inTransportPodTargeting)
                 return;
 
             // Only process keyboard events
@@ -63,7 +80,7 @@ namespace RimWorldAccess
             bool shiftHeld = Event.current.shift;
 
             // Handle local map targeting mode (transport pod landing) first
-            if (inTargetingMode)
+            if (inTransportPodTargeting)
             {
                 handled = HandleTargetingModeInput(key, shiftHeld);
                 if (handled)
