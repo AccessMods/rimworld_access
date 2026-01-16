@@ -30,6 +30,8 @@ namespace RimWorldAccess
                 WorldNavigationState.IsActive ||
                 WindowlessDialogState.IsActive ||
                 WindowlessFloatMenuState.IsActive ||
+                ShapeSelectionMenuState.IsActive ||
+                // Note: ViewingModeState is NOT included - it allows arrow navigation for moving around
                 ArchitectTreeState.IsActive ||
                 CaravanFormationState.IsActive ||
                 WindowlessPauseMenuState.IsActive ||
@@ -282,11 +284,8 @@ namespace RimWorldAccess
                         AreaPaintingState.UpdatePreview(newPosition);
                     }
 
-                    // Update rectangle preview if in architect placement mode with a zone designator
-                    if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator() && ArchitectState.HasRectangleStart)
-                    {
-                        ArchitectState.UpdatePreview(newPosition);
-                    }
+                    // Note: Shape preview update for architect placement is now handled by
+                    // ShapePlacementState.UpdatePreview() in ArchitectPlacementAnnouncementPatch
 
                     // Move camera to center on new cursor position
                     __instance.JumpToCurrentMapLoc(newPosition);
@@ -322,12 +321,22 @@ namespace RimWorldAccess
                             tileInfo = "Selected, " + tileInfo;
                         }
                     }
-                    // If in architect mode zone placement, prepend selection/preview state
-                    else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
+                    // If in architect mode, prepend selection/preview state
+                    // Shape preview is handled via ShapePlacementState
+                    else if (ArchitectState.IsInPlacementMode)
                     {
-                        if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(newPosition))
+                        if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells.Contains(newPosition))
                         {
-                            tileInfo = "Preview, " + tileInfo;
+                            // Only label corners, not intermediate tiles
+                            if (ShapePlacementState.FirstCorner.HasValue && newPosition == ShapePlacementState.FirstCorner.Value)
+                            {
+                                tileInfo = "First corner, " + tileInfo;
+                            }
+                            else if (ShapePlacementState.SecondCorner.HasValue && newPosition == ShapePlacementState.SecondCorner.Value)
+                            {
+                                tileInfo = "Second corner, " + tileInfo;
+                            }
+                            // No else - intermediate tiles in preview don't get a prefix
                         }
                         else if (ArchitectState.SelectedCells.Contains(newPosition))
                         {

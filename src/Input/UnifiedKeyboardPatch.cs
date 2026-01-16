@@ -237,6 +237,34 @@ namespace RimWorldAccess
                 // Let arrow keys pass through for world navigation
             }
 
+            // ===== PRIORITY 0.17: Shape Selection Menu =====
+            if (ShapeSelectionMenuState.IsActive)
+            {
+                if (ShapeSelectionMenuState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.18: Viewing Mode (post-placement review) =====
+            if (ViewingModeState.IsActive)
+            {
+                if (ViewingModeState.HandleInput(key, Event.current.shift))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.19: Shape Placement (two-point selection) =====
+            // Input handled in ArchitectPlacementPatch, but state needs priority registration
+            if (ShapePlacementState.IsActive)
+            {
+                // Let ArchitectPlacementPatch handle the input
+                // This ensures proper priority ordering
+            }
+
             // ===== PRIORITY 0.22: Handle inspection menu EARLY if opened from caravan/split/inspect/transport pod dialogs =====
             // This ensures Escape in inspection doesn't get caught by other handlers
             // Note: Window.OnCancelKeyPressed is patched in CaravanFormationPatch and TransportPodPatch to block RimWorld's Cancel handling
@@ -2788,6 +2816,9 @@ namespace RimWorldAccess
             {
                 // Don't intercept if any menu is active (keys 1-5 are used for tile info)
                 bool anyMenuActive = WorkMenuState.IsActive ||
+                                    ShapeSelectionMenuState.IsActive ||
+                                    ViewingModeState.IsActive ||
+                                    ShapePlacementState.IsActive ||
                                     ArchitectState.IsActive ||
                                     ZoneCreationState.IsInCreationMode ||
                                     NotificationMenuState.IsActive ||

@@ -125,12 +125,17 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets a label for a designator including cost and description.
-        /// Format: "Name: cost (description)" for build designators.
-        /// Format: "Name (description)" for order designators.
+        /// Format: "Name: cost. description" for build designators.
+        /// Format: "Name. description" for order designators.
+        /// If the designator has right-click options, adds "(right bracket for more options)" hint after the name.
         /// </summary>
         private static string GetDesignatorLabel(Designator designator)
         {
             string label = designator.LabelCap;
+
+            // Check if designator has right-click options and add hint
+            bool hasRightClickOptions = designator.RightClickFloatMenuOptions.Any();
+            string rightClickHint = hasRightClickOptions ? " (right bracket for more options)" : "";
 
             // Add cost and description for build designators
             if (designator is Designator_Build buildDesignator)
@@ -141,10 +146,12 @@ namespace RimWorldAccess
                     string costInfo = ArchitectHelper.GetBriefCostInfo(buildable);
                     string description = ArchitectHelper.GetDescription(buildable);
 
-                    // Format: "Name: cost (description)"
+                    // Format: "Name (right bracket hint): cost. description"
+                    // Note: Descriptions from RimWorld typically include their own terminal punctuation
+                    label += rightClickHint;
                     if (!string.IsNullOrEmpty(costInfo) && !string.IsNullOrEmpty(description))
                     {
-                        label += $": {costInfo} ({description})";
+                        label += $": {costInfo}. {description}";
                     }
                     else if (!string.IsNullOrEmpty(costInfo))
                     {
@@ -152,17 +159,22 @@ namespace RimWorldAccess
                     }
                     else if (!string.IsNullOrEmpty(description))
                     {
-                        label += $" ({description})";
+                        label += $". {description}";
                     }
+                }
+                else
+                {
+                    label += rightClickHint;
                 }
             }
             else
             {
-                // For non-build designators (orders), add description if available
+                // For non-build designators (orders), add hint and description if available
+                label += rightClickHint;
                 string description = ArchitectHelper.GetDesignatorDescriptionText(designator);
                 if (!string.IsNullOrEmpty(description))
                 {
-                    label += $" ({description})";
+                    label += $". {description}";
                 }
             }
 
@@ -452,18 +464,37 @@ namespace RimWorldAccess
             MenuItem item = menuItems[selectedIndex];
             var (position, total) = GetSiblingPosition(item);
             string positionPart = MenuHelper.FormatPosition(position - 1, total);
-            string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
 
             string announcement = "";
 
             if (item.type == MenuItemType.Category)
             {
+                // Categories: "Label, expanded/collapsed. position."
+                // Category labels don't typically end with punctuation
                 string expandState = item.isExpanded ? "expanded" : "collapsed";
+                string positionSection = string.IsNullOrEmpty(positionPart) ? "." : $". {positionPart}.";
                 announcement = $"{item.label}, {expandState}{positionSection}";
             }
             else
             {
-                // Designator
+                // Designator: "Label. position." or "Label position." if label ends with punctuation
+                // Designator labels often include descriptions that end with periods
+                string labelText = item.label;
+                bool labelEndsWithPunctuation = !string.IsNullOrEmpty(labelText) &&
+                    (labelText.EndsWith(".") || labelText.EndsWith("!") || labelText.EndsWith("?"));
+
+                string positionSection;
+                if (string.IsNullOrEmpty(positionPart))
+                {
+                    // No position info - just ensure we end with a period
+                    positionSection = labelEndsWithPunctuation ? "" : ".";
+                }
+                else
+                {
+                    // Has position info - add separator only if label doesn't end with punctuation
+                    positionSection = labelEndsWithPunctuation ? $" {positionPart}." : $". {positionPart}.";
+                }
+
                 announcement = $"{item.label}{positionSection}";
             }
 
@@ -503,6 +534,22 @@ namespace RimWorldAccess
         {
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
+        }
+
+        /// <summary>
+        /// Gets the currently selected designator, or null if a category is selected.
+        /// </summary>
+        public static Designator GetSelectedDesignator()
+        {
+            if (menuItems == null || selectedIndex < 0 || selectedIndex >= menuItems.Count)
+                return null;
+
+            MenuItem item = menuItems[selectedIndex];
+            if (item.type == MenuItemType.Designator)
+            {
+                return item.data as Designator;
+            }
+            return null;
         }
 
         // Typeahead search support

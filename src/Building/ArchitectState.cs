@@ -45,9 +45,6 @@ namespace RimWorldAccess
         private static Rot4 currentRotation = Rot4.North;
         private static ArchitectSelectionMode selectionMode = ArchitectSelectionMode.BoxSelection; // Default to box selection
 
-        // Rectangle selection helper (shared logic for rectangle-based selection)
-        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
-
         // Reflection field info for accessing protected placingRot field
         private static FieldInfo placingRotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
 
@@ -99,31 +96,6 @@ namespace RimWorldAccess
         /// Whether we're currently in placement mode on the map.
         /// </summary>
         public static bool IsInPlacementMode => currentMode == ArchitectMode.PlacementMode;
-
-        /// <summary>
-        /// Whether a rectangle start corner has been set.
-        /// </summary>
-        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
-
-        /// <summary>
-        /// Whether we are actively previewing a rectangle (start and end set).
-        /// </summary>
-        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
-
-        /// <summary>
-        /// The start corner of the rectangle being selected.
-        /// </summary>
-        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
-
-        /// <summary>
-        /// The end corner of the rectangle being selected.
-        /// </summary>
-        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
-
-        /// <summary>
-        /// Cells in the current rectangle preview.
-        /// </summary>
-        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
 
         /// <summary>
         /// Gets the current selection mode (BoxSelection or SingleTile).
@@ -235,6 +207,19 @@ namespace RimWorldAccess
             string announcement = GetPlacementAnnouncement(designator);
             TolkHelper.Speak(announcement);
             Log.Message($"Entered placement mode with designator: {toolName}");
+
+            // Auto-enter shape placement mode if the designator supports shapes
+            if (designator is Designator_Build)
+            {
+                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
+                if (availableShapes.Count > 0)
+                {
+                    // Use the game's default shape (first in the list)
+                    ShapeType defaultShape = availableShapes[0];
+                    ShapePlacementState.Enter(designator, defaultShape);
+                    Log.Message($"Auto-entered shape placement with default shape: {defaultShape}");
+                }
+            }
         }
 
         /// <summary>
@@ -263,13 +248,21 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the initial placement announcement including size and rotation info.
-        /// Works with both Designator_Build (new construction) and Designator_Install (reinstall/install).
+        /// Works with all designator types: Build, Orders, Zones, etc.
         /// </summary>
         private static string GetPlacementAnnouncement(Designator designator)
         {
             // Handle Designator_Place (parent of both Designator_Build and Designator_Install)
             if (!(designator is Designator_Place placeDesignator))
             {
+                // For non-Place designators (Orders, Zones, Cells), check if shapes are available
+                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
+                bool hasShapes = availableShapes.Count > 0;
+
+                if (hasShapes)
+                {
+                    return $"{designator.Label} selected. Press Space to designate, Tab for shapes, Enter to confirm, Escape to cancel";
+                }
                 return $"{designator.Label} selected. Press Space to designate tiles, Enter to confirm, Escape to cancel";
             }
 
@@ -496,43 +489,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the start corner for rectangle selection.
-        /// </summary>
-        public static void SetRectangleStart(IntVec3 cell)
-        {
-            rectangleHelper.SetStart(cell);
-        }
-
-        /// <summary>
-        /// Updates the rectangle preview as the cursor moves.
-        /// Plays native sound feedback when cell count changes.
-        /// </summary>
-        public static void UpdatePreview(IntVec3 endCell)
-        {
-            rectangleHelper.UpdatePreview(endCell);
-        }
-
-        /// <summary>
-        /// Confirms the current rectangle preview, adding all cells to selection.
-        /// </summary>
-        public static void ConfirmRectangle()
-        {
-            rectangleHelper.ConfirmRectangle(selectedCells, out var newCells);
-            foreach (var cell in newCells)
-            {
-                selectedCells.Add(cell);
-            }
-        }
-
-        /// <summary>
-        /// Cancels the current rectangle selection without adding cells.
-        /// </summary>
-        public static void CancelRectangle()
-        {
-            rectangleHelper.Cancel();
-        }
-
-        /// <summary>
         /// Executes the placement (designates all selected cells).
         /// </summary>
         public static void ExecutePlacement(Map map)
@@ -610,9 +566,6 @@ namespace RimWorldAccess
             selectedCells.Clear();
             currentRotation = Rot4.North;
             selectionMode = ArchitectSelectionMode.BoxSelection; // Reset to default mode
-
-            // Clear rectangle selection state
-            rectangleHelper.Reset();
 
             // Deselect any active designator in the game
             if (Find.DesignatorManager != null)

@@ -14,6 +14,15 @@ namespace RimWorldAccess
         private static int currentBulkIndex = 0; // Index within a bulk group
         private static bool autoJumpMode = false; // Auto-jump to items when navigating
 
+        // Saved focus state for temporary category operations
+        private static int savedCategoryIndex = -1;
+        private static int savedSubcategoryIndex = -1;
+        private static int savedItemIndex = -1;
+        private static int savedBulkIndex = -1;
+
+        // Temporary category tracking
+        private static ScannerCategory temporaryCategory = null;
+
         /// <summary>
         /// Toggles auto-jump mode on/off (Alt+Home).
         /// When enabled, cursor automatically jumps to items as you navigate.
@@ -23,6 +32,86 @@ namespace RimWorldAccess
             autoJumpMode = !autoJumpMode;
             string status = autoJumpMode ? "enabled" : "disabled";
             TolkHelper.Speak($"Auto-jump mode {status}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Saves the current scanner focus state for later restoration.
+        /// Used when temporarily switching to a different category (e.g., viewing obstacles).
+        /// </summary>
+        public static void SaveFocus()
+        {
+            savedCategoryIndex = currentCategoryIndex;
+            savedSubcategoryIndex = currentSubcategoryIndex;
+            savedItemIndex = currentItemIndex;
+            savedBulkIndex = currentBulkIndex;
+        }
+
+        /// <summary>
+        /// Restores the previously saved scanner focus state.
+        /// Call this after removing a temporary category to return to the previous position.
+        /// </summary>
+        public static void RestoreFocus()
+        {
+            if (savedCategoryIndex >= 0)
+            {
+                currentCategoryIndex = savedCategoryIndex;
+                currentSubcategoryIndex = savedSubcategoryIndex;
+                currentItemIndex = savedItemIndex;
+                currentBulkIndex = savedBulkIndex;
+
+                // Reset saved state
+                savedCategoryIndex = -1;
+                savedSubcategoryIndex = -1;
+                savedItemIndex = -1;
+                savedBulkIndex = -1;
+
+                // Validate indices in case the category list changed
+                ValidateIndices();
+            }
+        }
+
+        /// <summary>
+        /// Creates a temporary category with the given name and items, and selects it.
+        /// Only one temporary category can exist at a time.
+        /// The temporary category is a proper scanner category that:
+        /// - Appears in the category cycle (Ctrl+PageUp/Down)
+        /// - Is preserved across RefreshItems() calls
+        /// - Is cleared when Invalidate() is called (e.g., map switch)
+        /// </summary>
+        /// <param name="name">The name for the temporary category</param>
+        /// <param name="items">The items to include in the category</param>
+        public static void CreateTemporaryCategory(string name, List<ScannerItem> items)
+        {
+            // Remove any existing temporary category first
+            RemoveTemporaryCategory();
+
+            // Create the new temporary category with a single subcategory
+            temporaryCategory = new ScannerCategory(name);
+            var subcategory = new ScannerSubcategory($"{name}-All");
+            subcategory.Items.AddRange(items);
+            temporaryCategory.Subcategories.Add(subcategory);
+
+            // Add to the categories list
+            categories.Add(temporaryCategory);
+
+            // Select the temporary category
+            currentCategoryIndex = categories.Count - 1;
+            currentSubcategoryIndex = 0;
+            currentItemIndex = 0;
+            currentBulkIndex = 0;
+        }
+
+        /// <summary>
+        /// Removes the temporary category if one exists.
+        /// Call RestoreFocus() after this to return to the previous scanner position.
+        /// </summary>
+        public static void RemoveTemporaryCategory()
+        {
+            if (temporaryCategory != null)
+            {
+                categories.Remove(temporaryCategory);
+                temporaryCategory = null;
+            }
         }
 
         /// <summary>
@@ -59,10 +148,12 @@ namespace RimWorldAccess
         /// <summary>
         /// Invalidates the scanner cache, forcing a refresh on next access.
         /// Call this when switching maps or when map contents have significantly changed.
+        /// Also clears any temporary category since it's no longer valid.
         /// </summary>
         public static void Invalidate()
         {
             categories.Clear();
+            temporaryCategory = null;
             currentCategoryIndex = 0;
             currentSubcategoryIndex = 0;
             currentItemIndex = 0;
@@ -72,6 +163,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Refreshes the scanner item list based on current cursor position.
         /// Called automatically by navigation methods.
+        /// Preserves any temporary category that may be active.
         /// </summary>
         private static void RefreshItems()
         {
@@ -88,9 +180,19 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Save temporary category before refresh
+            var savedTemporaryCategory = temporaryCategory;
+
             // Collect items
             var cursorPos = MapNavigationState.CurrentCursorPosition;
             categories = ScannerHelper.CollectMapItems(map, cursorPos);
+
+            // Re-add temporary category if it existed
+            if (savedTemporaryCategory != null)
+            {
+                temporaryCategory = savedTemporaryCategory;
+                categories.Add(temporaryCategory);
+            }
 
             if (categories.Count == 0)
             {
@@ -448,6 +550,28 @@ namespace RimWorldAccess
                 // Manual jump (Home key) - just announce the jump
                 TolkHelper.Speak($"Jumped to {currentItem.Label}", SpeechPriority.Normal);
             }
+        }
+
+        /// <summary>
+        /// Gets the position of the currently selected item in the scanner.
+        /// Used by visual preview patches to highlight the current item.
+        /// Returns IntVec3.Invalid if no item is selected.
+        /// </summary>
+        public static IntVec3 GetCurrentItemPosition()
+        {
+            var currentItem = GetCurrentItem();
+            if (currentItem == null)
+                return IntVec3.Invalid;
+
+            return currentItem.Position;
+        }
+
+        /// <summary>
+        /// Checks if the scanner is currently focused on a temporary category.
+        /// </summary>
+        public static bool IsInTemporaryCategory()
+        {
+            return temporaryCategory != null && GetCurrentCategory() == temporaryCategory;
         }
 
         public static void ReadDistanceAndDirection()

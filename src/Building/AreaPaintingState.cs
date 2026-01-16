@@ -1,9 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
-using Verse.Sound;
 using RimWorld;
-using UnityEngine;
 
 namespace RimWorldAccess
 {
@@ -12,13 +10,14 @@ namespace RimWorldAccess
     /// </summary>
     public enum AreaSelectionMode
     {
-        BoxSelection,    // Space sets corners for rectangle selection
+        BoxSelection,    // Space sets corners for shape selection
         SingleTile       // Space toggles individual tiles
     }
 
     /// <summary>
     /// Maintains state for area painting mode (expanding/shrinking areas with keyboard).
-    /// Allows keyboard navigation and rectangle-based painting of areas.
+    /// Allows keyboard navigation and shape-based painting of areas.
+    /// Supports all shape types: rectangles, ovals, lines via ShapeHelper.
     /// Uses RimWorld's native APIs for feedback.
     /// </summary>
     public static class AreaPaintingState
@@ -28,9 +27,13 @@ namespace RimWorldAccess
         private static bool isExpanding = true; // true = expand, false = shrink
         private static List<IntVec3> stagedCells = new List<IntVec3>(); // Cells staged for addition/removal
         private static AreaSelectionMode selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
+        private static Designator currentDesignator = null; // The designator that initiated area painting (if any)
 
-        // Rectangle selection helper (shared logic for rectangle-based selection)
-        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
+        // Shape preview helper for centralized shape selection logic
+        private static readonly ShapePreviewHelper previewHelper = new ShapePreviewHelper();
+
+        // Local shape tracking - synced with previewHelper
+        private static ShapeType currentShape = ShapeType.FilledRectangle;
 
         /// <summary>
         /// Whether area painting mode is currently active.
@@ -53,34 +56,55 @@ namespace RimWorldAccess
         public static List<IntVec3> StagedCells => stagedCells;
 
         /// <summary>
-        /// Whether a rectangle start corner has been set.
+        /// The currently selected shape type for selection.
         /// </summary>
-        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
+        public static ShapeType CurrentShape => currentShape;
 
         /// <summary>
-        /// Whether we are actively previewing a rectangle (start and end set).
+        /// Whether a first corner has been set (shape start).
         /// </summary>
-        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
+        public static bool HasFirstCorner => previewHelper.HasFirstCorner;
 
         /// <summary>
-        /// The start corner of the rectangle being selected.
+        /// Whether we are actively previewing a shape (first and second corners set).
         /// </summary>
-        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
+        public static bool IsInPreviewMode => previewHelper.IsInPreviewMode;
 
         /// <summary>
-        /// The end corner of the rectangle being selected.
+        /// The first corner of the shape being selected.
         /// </summary>
-        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
+        public static IntVec3? FirstCorner => previewHelper.FirstCorner;
 
         /// <summary>
-        /// Cells in the current rectangle preview.
+        /// The second corner of the shape being selected.
         /// </summary>
-        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
+        public static IntVec3? SecondCorner => previewHelper.SecondCorner;
+
+        /// <summary>
+        /// Cells in the current shape preview.
+        /// </summary>
+        public static IReadOnlyList<IntVec3> PreviewCells => previewHelper.PreviewCells;
 
         /// <summary>
         /// Gets the current selection mode (BoxSelection or SingleTile).
         /// </summary>
         public static AreaSelectionMode SelectionMode => selectionMode;
+
+        // Backwards compatibility properties (map to previewHelper)
+        /// <summary>
+        /// Whether a rectangle start corner has been set (backwards compatibility).
+        /// </summary>
+        public static bool HasRectangleStart => previewHelper.HasFirstCorner;
+
+        /// <summary>
+        /// The start corner of the rectangle being selected (backwards compatibility).
+        /// </summary>
+        public static IntVec3? RectangleStart => previewHelper.FirstCorner;
+
+        /// <summary>
+        /// The end corner of the rectangle being selected (backwards compatibility).
+        /// </summary>
+        public static IntVec3? RectangleEnd => previewHelper.SecondCorner;
 
         /// <summary>
         /// Toggles between box selection and single tile selection modes.
@@ -99,9 +123,48 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Sets the current shape type for selection.
+        /// Called when user selects a shape from the shape selection menu.
+        /// Validates that the shape is allowed for the current context.
+        /// </summary>
+        /// <param name="shape">The shape type to use</param>
+        public static void SetCurrentShape(ShapeType shape)
+        {
+            var allowed = GetAvailableShapes();
+            if (allowed.Contains(shape))
+            {
+                currentShape = shape;
+                previewHelper.SetCurrentShape(shape);
+                string shapeName = ShapeHelper.GetShapeName(shape);
+                TolkHelper.Speak($"Shape: {shapeName}");
+                Log.Message($"Area painting: Shape set to {shapeName}");
+            }
+            else
+            {
+                TolkHelper.Speak("Shape not available for this area type");
+            }
+        }
+
+        /// <summary>
+        /// Gets the available shapes for the current context.
+        /// Uses the designator's DrawStyleCategory if available,
+        /// otherwise falls back to FilledRectangle for direct area painting.
+        /// </summary>
+        /// <returns>List of available shape types</returns>
+        public static List<ShapeType> GetAvailableShapes()
+        {
+            if (currentDesignator != null)
+                return ShapeHelper.GetAvailableShapes(currentDesignator);
+            // Fallback for direct area painting without designator - areas typically support filled rectangle
+            return new List<ShapeType> { ShapeType.FilledRectangle };
+        }
+
+        /// <summary>
         /// Enters area painting mode for expanding an area.
         /// </summary>
-        public static void EnterExpandMode(Area area)
+        /// <param name="area">The area to expand</param>
+        /// <param name="designator">Optional designator that initiated the area painting (for shape validation)</param>
+        public static void EnterExpandMode(Area area, Designator designator = null)
         {
             Log.Message($"RimWorld Access: EnterExpandMode called for area: {area?.Label ?? "null"}");
 
@@ -109,8 +172,13 @@ namespace RimWorldAccess
             targetArea = area;
             isExpanding = true;
             stagedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
+            currentDesignator = designator;
+
+            // Set default shape based on designator (if provided)
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
 
             Log.Message($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
 
@@ -121,21 +189,29 @@ namespace RimWorldAccess
                 Log.Message("RimWorld Access: Initialized map navigation");
             }
 
-            TolkHelper.Speak($"Expanding area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            TolkHelper.Speak($"Expanding area: {area.Label}. {shapeName} mode. Tab to switch mode. Enter to confirm, Escape to cancel.");
             Log.Message("RimWorld Access: Area painting mode entered");
         }
 
         /// <summary>
         /// Enters area painting mode for shrinking an area.
         /// </summary>
-        public static void EnterShrinkMode(Area area)
+        /// <param name="area">The area to shrink</param>
+        /// <param name="designator">Optional designator that initiated the area painting (for shape validation)</param>
+        public static void EnterShrinkMode(Area area, Designator designator = null)
         {
             isActive = true;
             targetArea = area;
             isExpanding = false;
             stagedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Default to box selection
+            currentDesignator = designator;
+
+            // Set default shape based on designator (if provided)
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
 
             // Ensure map navigation is initialized
             if (!MapNavigationState.IsInitialized && area.Map != null)
@@ -143,44 +219,105 @@ namespace RimWorldAccess
                 MapNavigationState.Initialize(area.Map);
             }
 
-            TolkHelper.Speak($"Shrinking area: {area.Label}. Box selection mode. Tab to switch. Enter to confirm, Escape to cancel.");
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            TolkHelper.Speak($"Shrinking area: {area.Label}. {shapeName} mode. Tab to switch mode. Enter to confirm, Escape to cancel.");
         }
 
         /// <summary>
-        /// Sets the start corner for rectangle selection.
+        /// Sets the first corner for shape selection.
+        /// </summary>
+        /// <param name="cell">The cell position for the first corner</param>
+        public static void SetFirstCorner(IntVec3 cell)
+        {
+            previewHelper.SetFirstCorner(cell, "[AreaPaintingState]");
+        }
+
+        /// <summary>
+        /// Sets the start corner for rectangle selection (backwards compatibility).
         /// </summary>
         public static void SetRectangleStart(IntVec3 cell)
         {
-            rectangleHelper.SetStart(cell);
+            SetFirstCorner(cell);
         }
 
         /// <summary>
-        /// Updates the rectangle preview as the cursor moves.
+        /// Sets the second corner of the shape.
+        /// </summary>
+        /// <param name="cell">The cell position for the second corner</param>
+        public static void SetSecondCorner(IntVec3 cell)
+        {
+            previewHelper.SetSecondCorner(cell, "[AreaPaintingState]");
+        }
+
+        /// <summary>
+        /// Updates the shape preview as the cursor moves.
         /// Plays native sound feedback when cell count changes.
         /// </summary>
+        /// <param name="endCell">The current cursor position</param>
         public static void UpdatePreview(IntVec3 endCell)
         {
-            rectangleHelper.UpdatePreview(endCell);
+            previewHelper.UpdatePreview(endCell);
         }
 
         /// <summary>
-        /// Confirms the current rectangle preview, adding all cells to staged list.
+        /// Confirms the current shape preview, adding all cells to staged list.
+        /// </summary>
+        public static void ConfirmShape()
+        {
+            if (!IsInPreviewMode)
+            {
+                TolkHelper.Speak("No shape to confirm");
+                return;
+            }
+
+            // Get dimensions before confirming (previewHelper.ConfirmShape resets state)
+            var (width, height) = ShapeHelper.GetDimensions(previewHelper.FirstCorner.Value, previewHelper.SecondCorner.Value);
+
+            // Get confirmed cells from previewHelper (this resets the helper's state)
+            var confirmedCells = previewHelper.ConfirmShape("[AreaPaintingState]");
+
+            // Find cells that aren't already staged
+            int addedCount = 0;
+            foreach (var cell in confirmedCells.Where(cell => !stagedCells.Contains(cell)))
+            {
+                stagedCells.Add(cell);
+                addedCount++;
+            }
+
+            // Override the previewHelper announcement with our own that includes staged count
+            TolkHelper.Speak($"{width} by {height}, {addedCount} cells added. Total: {stagedCells.Count}");
+
+            Log.Message($"[AreaPaintingState] Shape confirmed: {addedCount} cells added, total staged: {stagedCells.Count}");
+        }
+
+        /// <summary>
+        /// Confirms the current rectangle preview, adding all cells to staged list (backwards compatibility).
         /// </summary>
         public static void ConfirmRectangle()
         {
-            rectangleHelper.ConfirmRectangle(stagedCells, out var newCells);
-            foreach (var cell in newCells)
-            {
-                stagedCells.Add(cell);
-            }
+            ConfirmShape();
         }
 
         /// <summary>
-        /// Cancels the current rectangle selection without adding cells.
+        /// Cancels the current shape selection without adding cells.
+        /// </summary>
+        public static void CancelShape()
+        {
+            if (!previewHelper.HasFirstCorner)
+            {
+                return;
+            }
+
+            previewHelper.Cancel();
+            Log.Message("[AreaPaintingState] Shape cancelled");
+        }
+
+        /// <summary>
+        /// Cancels the current rectangle selection without adding cells (backwards compatibility).
         /// </summary>
         public static void CancelRectangle()
         {
-            rectangleHelper.Cancel();
+            CancelShape();
         }
 
         /// <summary>
@@ -265,8 +402,9 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
+            currentDesignator = null; // Clear designator reference
         }
 
         /// <summary>
@@ -284,8 +422,9 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
+            currentDesignator = null; // Clear designator reference
 
             Log.Message("RimWorld Access: Area painting cancelled");
         }
@@ -300,10 +439,24 @@ namespace RimWorldAccess
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
+            currentDesignator = null; // Clear designator reference
 
             Log.Message("RimWorld Access: Area painting mode exited");
+        }
+
+        /// <summary>
+        /// Gets the dimensions of the current shape preview.
+        /// </summary>
+        /// <returns>Tuple of (width, height) or (0, 0) if no preview</returns>
+        public static (int width, int height) GetCurrentDimensions()
+        {
+            if (!previewHelper.HasFirstCorner || !MapNavigationState.IsInitialized)
+                return (0, 0);
+
+            IntVec3 target = previewHelper.SecondCorner ?? MapNavigationState.CurrentCursorPosition;
+            return ShapeHelper.GetDimensions(previewHelper.FirstCorner.Value, target);
         }
 
     }

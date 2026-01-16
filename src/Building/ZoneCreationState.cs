@@ -1,9 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
-using Verse.Sound;
 using RimWorld;
-using UnityEngine;
 
 namespace RimWorldAccess
 {
@@ -24,14 +22,14 @@ namespace RimWorldAccess
     /// </summary>
     public enum ZoneSelectionMode
     {
-        BoxSelection,    // Space sets corners for rectangle selection
+        BoxSelection,    // Space sets corners for shape selection
         SingleTile       // Space toggles individual tiles
     }
 
     /// <summary>
     /// Maintains state for zone creation mode.
     /// Tracks which cells have been selected and what type of zone to create.
-    /// Uses RimWorld's native APIs for rectangle selection feedback.
+    /// Supports all shapes via ShapeHelper (FilledRectangle, EmptyRectangle, FilledOval, etc.).
     /// </summary>
     public static class ZoneCreationState
     {
@@ -43,8 +41,12 @@ namespace RimWorldAccess
         private static string pendingAllowedAreaName = null; // Store name for allowed area creation
         private static ZoneSelectionMode selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
-        // Rectangle selection helper (shared logic for rectangle-based selection)
-        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
+        // Designator reference for shape validation
+        private static Designator currentDesignator = null;
+
+        // Shape-based selection via ShapePreviewHelper
+        private static readonly ShapePreviewHelper previewHelper = new ShapePreviewHelper();
+        private static ShapeType currentShape = ShapeType.FilledRectangle;
 
         /// <summary>
         /// Whether zone creation mode is currently active.
@@ -65,29 +67,53 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Whether a rectangle start corner has been set.
+        /// The current shape type being used for selection.
         /// </summary>
-        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
+        public static ShapeType CurrentShape => currentShape;
 
         /// <summary>
-        /// Whether we are actively previewing a rectangle (start and end set).
+        /// Whether a first corner has been set (shape origin point).
         /// </summary>
-        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
+        public static bool HasFirstCorner => previewHelper.HasFirstCorner;
+
+        /// <summary>
+        /// Whether we are actively previewing a shape (first and second corner set).
+        /// </summary>
+        public static bool IsInPreviewMode => previewHelper.IsInPreviewMode;
+
+        /// <summary>
+        /// The first corner of the shape being selected (origin point).
+        /// </summary>
+        public static IntVec3? FirstCorner => previewHelper.FirstCorner;
+
+        /// <summary>
+        /// The second corner of the shape being selected (target point).
+        /// </summary>
+        public static IntVec3? SecondCorner => previewHelper.SecondCorner;
+
+        /// <summary>
+        /// Cells in the current shape preview.
+        /// </summary>
+        public static IReadOnlyList<IntVec3> PreviewCells => previewHelper.PreviewCells;
+
+        // Legacy property aliases for backward compatibility
+        /// <summary>
+        /// Whether a rectangle start corner has been set.
+        /// Alias for HasFirstCorner for backward compatibility.
+        /// </summary>
+        public static bool HasRectangleStart => previewHelper.HasFirstCorner;
 
         /// <summary>
         /// The start corner of the rectangle being selected.
+        /// Alias for FirstCorner for backward compatibility.
         /// </summary>
-        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
+        public static IntVec3? RectangleStart => previewHelper.FirstCorner;
 
         /// <summary>
         /// The end corner of the rectangle being selected.
+        /// Alias for SecondCorner for backward compatibility.
         /// </summary>
-        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
-
-        /// <summary>
-        /// Cells in the current rectangle preview.
-        /// </summary>
-        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
+        public static IntVec3? RectangleEnd => previewHelper.SecondCorner;
 
         /// <summary>
         /// List of cells that have been selected for the zone.
@@ -148,23 +174,45 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the available shapes for the current zone creation context.
+        /// Returns shapes based on the designator's DrawStyleCategory if available.
+        /// </summary>
+        /// <returns>List of available shape types for the current context</returns>
+        public static List<ShapeType> GetAvailableShapes()
+        {
+            if (currentDesignator != null)
+                return ShapeHelper.GetAvailableShapes(currentDesignator);
+
+            // Fallback for direct zone creation without designator
+            return new List<ShapeType> { ShapeType.FilledRectangle };
+        }
+
+        /// <summary>
         /// Enters zone creation mode with the specified zone type.
-        /// Uses rectangle selection by default: Space sets corners, arrows preview, Space confirms rectangle.
+        /// Uses shape selection by default: Space sets corners, arrows preview, Space confirms shape.
         /// Press Tab to switch to single tile selection mode.
         /// </summary>
-        public static void EnterCreationMode(ZoneType zoneType)
+        /// <param name="zoneType">The type of zone to create</param>
+        /// <param name="designator">Optional designator to determine available shapes</param>
+        public static void EnterCreationMode(ZoneType zoneType, Designator designator = null)
         {
             isInCreationMode = true;
             selectedZoneType = zoneType;
+            currentDesignator = designator;
             selectedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
             selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
+            // Use designator's default shape if available, otherwise fall back to FilledRectangle
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
+
             string zoneName = GetZoneTypeName(zoneType);
-            string instructions = "Box selection mode: Space to set corners. Tab to switch modes. Enter to create, Escape to cancel.";
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            string instructions = $"{shapeName} mode: Space to set corners. Tab to switch modes. Enter to create, Escape to cancel.";
 
             TolkHelper.Speak($"Creating {zoneName}. {instructions}");
-            Log.Message($"Entered zone creation mode: {zoneName}");
+            Log.Message($"Entered zone creation mode: {zoneName} with shape {currentShape}");
         }
 
         /// <summary>
@@ -184,41 +232,120 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the start corner for rectangle selection.
+        /// Sets the current shape type for zone selection.
+        /// Called when user selects a shape from the shape selection menu.
+        /// Validates that the shape is allowed for the current zone type.
         /// </summary>
-        public static void SetRectangleStart(IntVec3 cell)
+        /// <param name="shape">The shape type to use</param>
+        public static void SetCurrentShape(ShapeType shape)
         {
-            rectangleHelper.SetStart(cell);
-        }
-
-        /// <summary>
-        /// Updates the rectangle preview as the cursor moves.
-        /// Plays native sound feedback when cell count changes.
-        /// </summary>
-        public static void UpdatePreview(IntVec3 endCell)
-        {
-            rectangleHelper.UpdatePreview(endCell);
-        }
-
-        /// <summary>
-        /// Confirms the current rectangle preview, adding all cells to selection.
-        /// Allows starting a new rectangle immediately.
-        /// </summary>
-        public static void ConfirmRectangle()
-        {
-            rectangleHelper.ConfirmRectangle(selectedCells, out var newCells);
-            foreach (var cell in newCells)
+            var allowed = GetAvailableShapes();
+            if (allowed.Contains(shape))
             {
-                selectedCells.Add(cell);
+                currentShape = shape;
+                previewHelper.SetCurrentShape(shape);
+                string shapeName = ShapeHelper.GetShapeName(shape);
+                TolkHelper.Speak($"Shape: {shapeName}");
+                Log.Message($"ZoneCreationState: Set shape to {shape}");
+            }
+            else
+            {
+                TolkHelper.Speak("Shape not available for this zone type");
+                Log.Message($"ZoneCreationState: Shape {shape} not allowed. Available: {string.Join(", ", allowed)}");
             }
         }
 
         /// <summary>
+        /// Sets the first corner (origin point) for shape selection.
+        /// </summary>
+        /// <param name="cell">The cell position for the first corner</param>
+        public static void SetFirstCorner(IntVec3 cell)
+        {
+            previewHelper.SetFirstCorner(cell, "ZoneCreationState");
+        }
+
+        /// <summary>
+        /// Sets the second corner (target point) for shape selection.
+        /// </summary>
+        /// <param name="cell">The cell position for the second corner</param>
+        public static void SetSecondCorner(IntVec3 cell)
+        {
+            previewHelper.SetSecondCorner(cell, "ZoneCreationState");
+        }
+
+        /// <summary>
+        /// Sets the start corner for rectangle selection.
+        /// Alias for SetFirstCorner for backward compatibility.
+        /// </summary>
+        public static void SetRectangleStart(IntVec3 cell)
+        {
+            SetFirstCorner(cell);
+        }
+
+        /// <summary>
+        /// Updates the shape preview as the cursor moves.
+        /// Plays native sound feedback when cell count changes.
+        /// Uses ShapeHelper.CalculateCells() for all shape types.
+        /// </summary>
+        /// <param name="cursor">The current cursor position</param>
+        public static void UpdatePreview(IntVec3 cursor)
+        {
+            previewHelper.UpdatePreview(cursor);
+        }
+
+        /// <summary>
+        /// Confirms the current shape preview, adding all cells to selection.
+        /// Allows starting a new shape immediately.
+        /// </summary>
+        public static void ConfirmShape()
+        {
+            if (!IsInPreviewMode)
+            {
+                TolkHelper.Speak("No shape to confirm");
+                return;
+            }
+
+            // Get confirmed cells from previewHelper (which also resets its state)
+            var confirmedCells = previewHelper.ConfirmShape("ZoneCreationState");
+
+            // Find cells that aren't already in the collection
+            int addedCount = 0;
+            foreach (var cell in confirmedCells)
+            {
+                if (!selectedCells.Contains(cell))
+                {
+                    selectedCells.Add(cell);
+                    addedCount++;
+                }
+            }
+
+            TolkHelper.Speak($"{addedCount} cells added. Total: {selectedCells.Count}");
+        }
+
+        /// <summary>
+        /// Confirms the current rectangle preview, adding all cells to selection.
+        /// Alias for ConfirmShape for backward compatibility.
+        /// </summary>
+        public static void ConfirmRectangle()
+        {
+            ConfirmShape();
+        }
+
+        /// <summary>
+        /// Cancels the current shape selection without adding cells.
+        /// </summary>
+        public static void CancelShape()
+        {
+            previewHelper.Cancel();
+        }
+
+        /// <summary>
         /// Cancels the current rectangle selection without adding cells.
+        /// Alias for CancelShape for backward compatibility.
         /// </summary>
         public static void CancelRectangle()
         {
-            rectangleHelper.Cancel();
+            CancelShape();
         }
 
         /// <summary>
@@ -244,7 +371,9 @@ namespace RimWorldAccess
         /// Enters expansion mode for an existing zone.
         /// Pre-selects all existing zone tiles and allows adding/removing tiles using standard zone creation controls.
         /// </summary>
-        public static void EnterExpansionMode(Zone zone)
+        /// <param name="zone">The zone to expand</param>
+        /// <param name="designator">Optional designator to determine available shapes</param>
+        public static void EnterExpansionMode(Zone zone, Designator designator = null)
         {
             if (zone == null)
             {
@@ -256,8 +385,13 @@ namespace RimWorldAccess
             isInCreationMode = true;
             expandingZone = zone;
             isShrinking = false;
+            currentDesignator = designator;
             selectedCells.Clear();
-            rectangleHelper.Reset();
+            previewHelper.Reset();
+
+            // Use designator's default shape if available, otherwise fall back to FilledRectangle
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
 
             // Pre-select all existing zone tiles
             foreach (IntVec3 cell in zone.Cells)
@@ -283,16 +417,19 @@ namespace RimWorldAccess
                 selectedZoneType = ZoneType.GrowingZone;
             }
 
-            string instructions = "Press Space to set corners, Enter to confirm, Escape to cancel.";
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            string instructions = $"{shapeName} mode: Press Space to set corners, Enter to confirm, Escape to cancel.";
             TolkHelper.Speak($"Expanding {zone.label}. {selectedCells.Count} tiles currently selected. {instructions}");
-            Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles");
+            Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles with shape {currentShape}");
         }
 
         /// <summary>
         /// Enters shrink mode for an existing zone.
         /// Selected cells will be removed from the zone on confirm.
         /// </summary>
-        public static void EnterShrinkMode(Zone zone)
+        /// <param name="zone">The zone to shrink</param>
+        /// <param name="designator">Optional designator to determine available shapes</param>
+        public static void EnterShrinkMode(Zone zone, Designator designator = null)
         {
             if (zone == null)
             {
@@ -304,12 +441,18 @@ namespace RimWorldAccess
             isInCreationMode = true;
             expandingZone = zone;
             isShrinking = true;
+            currentDesignator = designator;
             selectedCells.Clear(); // Start with empty selection - selected cells will be removed
-            rectangleHelper.Reset();
+            previewHelper.Reset();
 
-            string instructions = "Press Space to set corners, Enter to confirm, Escape to cancel.";
+            // Use designator's default shape if available, otherwise fall back to FilledRectangle
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
+
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            string instructions = $"{shapeName} mode: Press Space to set corners, Enter to confirm, Escape to cancel.";
             TolkHelper.Speak($"Shrinking {zone.label}. Select cells to remove. {instructions}");
-            Log.Message($"Entered shrink mode for zone: {zone.label}");
+            Log.Message($"Entered shrink mode for zone: {zone.label} with shape {currentShape}");
         }
 
         /// <summary>
@@ -669,7 +812,8 @@ namespace RimWorldAccess
             selectedCells.Clear();
             expandingZone = null;
             isShrinking = false;
-            rectangleHelper.Reset();
+            currentDesignator = null;
+            previewHelper.Reset();
             selectionMode = ZoneSelectionMode.BoxSelection; // Reset to default mode
         }
 

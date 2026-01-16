@@ -46,13 +46,17 @@ namespace RimWorldAccess
                 string buttonAText = __instance.buttonAText ?? "";
                 string buttonBText = __instance.buttonBText ?? "";
 
+                // Add separator only if message doesn't end with punctuation
+                bool needsSeparator = !announcement.EndsWith(".") && !announcement.EndsWith("!") && !announcement.EndsWith("?");
+                string separator = needsSeparator ? ". " : " ";
+
                 if (!buttonAText.NullOrEmpty() && !buttonBText.NullOrEmpty())
                 {
-                    announcement += $". Press Enter for {buttonAText}, Escape for {buttonBText}.";
+                    announcement += $"{separator}Press Enter for {buttonAText}, Escape for {buttonBText}.";
                 }
                 else if (!buttonAText.NullOrEmpty())
                 {
-                    announcement += $". Press Enter for {buttonAText}.";
+                    announcement += $"{separator}Press Enter for {buttonAText}.";
                 }
 
                 // Announce with high priority to interrupt navigation
