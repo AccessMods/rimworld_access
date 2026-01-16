@@ -1396,6 +1396,33 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Check if trader has enough silver before executing
+            if (TradeSession.deal.DoesTraderHaveEnoughSilver())
+            {
+                ExecuteTradeAction();
+            }
+            else
+            {
+                // Trader doesn't have enough funds - warn and ask for confirmation
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                TolkHelper.Speak("Warning: Trader does not have enough silver. Confirm to proceed anyway.", SpeechPriority.High);
+                Find.WindowStack.Add(Dialog_MessageBox.CreateConfirmation(
+                    "ConfirmTraderShortFunds".Translate(),
+                    ExecuteTradeAction));
+            }
+        }
+
+        /// <summary>
+        /// Actually executes the trade. Called directly or as confirmation callback.
+        /// </summary>
+        private static void ExecuteTradeAction()
+        {
+            TradeDeal deal = CurrentDeal;
+            if (deal == null)
+            {
+                return;
+            }
+
             // Try to execute the trade - game shows error dialogs if needed
             bool actuallyTraded = false;
             AcceptanceReport result = deal.TryExecute(out actuallyTraded);
@@ -1517,13 +1544,40 @@ namespace RimWorldAccess
         /// <summary>
         /// Announces the current category switch.
         /// Trade Summary shows item count plus balance entry.
+        /// Inventory tabs announce the relevant party's currency balance.
         /// </summary>
         private static void AnnounceCategorySwitch()
         {
             string categoryName = GetCategoryName();
             List<Tradeable> list = GetCurrentList();
 
-            TolkHelper.Speak(categoryName);
+            // Build announcement with currency info for inventory tabs
+            string announcement = categoryName;
+
+            // Add currency announcement for inventory tabs
+            TradeDeal deal = TradeSession.deal ?? cachedDeal;
+            Tradeable currency = deal?.CurrencyTradeable;
+
+            if (currency != null)
+            {
+                bool isFavorTrade = cachedTrader?.TradeCurrency == TradeCurrency.Favor;
+                if (currentCategory == TradeCategory.TraderItems)
+                {
+                    // Their Items tab - announce trader's currency (projected balance after pending trade)
+                    int traderCurrency = currency.CountPostDealFor(Transactor.Trader);
+                    string currencyStr = isFavorTrade ? $"{traderCurrency} favor" : ((float)traderCurrency).ToStringMoney();
+                    announcement += $". Trader has {currencyStr}";
+                }
+                else if (currentCategory == TradeCategory.ColonyItems)
+                {
+                    // Your Items tab - announce player's currency (projected balance after pending trade)
+                    int playerCurrency = currency.CountPostDealFor(Transactor.Colony);
+                    string currencyStr = isFavorTrade ? $"{playerCurrency} favor" : ((float)playerCurrency).ToStringMoney();
+                    announcement += $". You have {currencyStr}";
+                }
+            }
+
+            TolkHelper.Speak(announcement);
 
             if (list.Count > 0)
             {
@@ -2126,7 +2180,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the current trade balance including player's available currency.
+        /// Announces both player's and trader's current currency holdings.
+        /// Format: "You have $250. Trader has $500."
         /// </summary>
         public static void AnnounceTradeBalance()
         {
@@ -2139,43 +2194,22 @@ namespace RimWorldAccess
             deal.UpdateCurrencyCount();
 
             Tradeable currency = deal.CurrencyTradeable;
-            string currencyName = cachedTrader?.TradeCurrency == TradeCurrency.Favor ? "favor" : "silver";
-
-            // Get player's available currency
-            int playerCurrency = 0;
-            if (currency != null)
+            if (currency == null)
             {
-                playerCurrency = currency.CountHeldBy(Transactor.Colony);
+                // Gift mode or no currency tradeable
+                TolkHelper.Speak("No currency available");
+                return;
             }
 
-            // Calculate trade balance
-            // In RimWorld's currency tradeable:
-            // - Negative CountToTransfer = you're giving silver away (spending/buying goods)
-            // - Positive CountToTransfer = you're receiving silver (earning/selling goods)
-            int transfer = currency?.CountToTransfer ?? 0;
+            int playerCurrency = currency.CountPostDealFor(Transactor.Colony);
+            int traderCurrency = currency.CountPostDealFor(Transactor.Trader);
 
-            var parts = new List<string>();
+            bool isFavorTrade = cachedTrader?.TradeCurrency == TradeCurrency.Favor;
+            string playerStr = isFavorTrade ? $"{playerCurrency} favor" : ((float)playerCurrency).ToStringMoney();
+            string traderStr = isFavorTrade ? $"{traderCurrency} favor" : ((float)traderCurrency).ToStringMoney();
 
-            // Always announce player's available currency
-            parts.Add($"You have {playerCurrency} {currencyName}");
-
-            // Announce trade balance
-            if (transfer < 0)
-            {
-                // Negative = player spending silver (buying goods)
-                parts.Add($"Spending {-transfer} {currencyName}");
-            }
-            else if (transfer > 0)
-            {
-                // Positive = player receiving silver (selling goods)
-                parts.Add($"Receiving {transfer} {currencyName}");
-            }
-            else
-            {
-                parts.Add("Balanced trade");
-            }
-
-            TolkHelper.Speak(string.Join(". ", parts));
+            string announcement = $"You have {playerStr}. Trader has {traderStr}";
+            TolkHelper.Speak(announcement);
         }
 
         #region Typeahead Search Methods

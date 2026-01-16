@@ -37,7 +37,7 @@ The Trade Summary tab provides a quick view of all pending trades:
 - **Home / Shift+Home** - Max action (context-aware: max sell if selling, max buy if buying/shared, max gift if gifting)
 - **End / Shift+End** - Opposite or reset (max sell for shared items, reset to 0 otherwise)
 - **Delete** - Reset current item to zero
-- **Alt+B** - Announce trade balance (your silver and current balance)
+- **Alt+B** - Announce currency holdings (your currency and trader's currency)
 - **Space** - Accept trade
 - **Tab** - Price breakdown (opens StatBreakdownState)
 - **Alt+I** - Inspect item (opens WindowlessInspectionState)
@@ -127,7 +127,9 @@ Harmony patches on `Window.OnCancelKeyPressed` and `Window.OnAcceptKeyPressed` p
 - [ ] End/Shift+End sets to opposite (shared) or reset (non-shared/gift)
 - [ ] Delete resets current item to zero
 - [ ] Quantity adjustments update visual UI
-- [ ] Alt+B announces player silver and spending/receiving balance
+- [ ] Alt+B announces "You have $X. Trader has $Y." (favor for tribute trades)
+- [ ] Tab switch to Their Items announces "Trader has $X"
+- [ ] Tab switch to Your Items announces "You have $X"
 - [ ] Tab shows price breakdown
 - [ ] Alt+I shows item inspection
 - [ ] Accept trade (Space) works
