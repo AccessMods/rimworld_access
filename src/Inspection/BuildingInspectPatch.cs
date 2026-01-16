@@ -429,12 +429,12 @@ namespace RimWorldAccess
                     break;
 
                 case KeyCode.Home:
-                    ThingFilterMenuState.JumpToFirst();
+                    ThingFilterMenuState.JumpToFirst(Event.current.control);
                     Event.current.Use();
                     break;
 
                 case KeyCode.End:
-                    ThingFilterMenuState.JumpToLast();
+                    ThingFilterMenuState.JumpToLast(Event.current.control);
                     Event.current.Use();
                     break;
 

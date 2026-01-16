@@ -629,26 +629,31 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Jumps to first item.
+        /// With Ctrl, jumps to absolute first. Otherwise jumps to first sibling at current level.
         /// </summary>
-        public static void JumpToFirst()
+        private static void JumpToFirst(bool ctrlPressed = false)
         {
-            if (visibleNodes.Count == 0)
-                return;
-
-            selectedIndex = 0;
-            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-            AnnounceCurrentSelection();
+            if (visibleNodes == null || visibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(visibleNodes, ref selectedIndex, node => node.Depth, ctrlPressed, ClearAndAnnounce);
         }
 
         /// <summary>
         /// Jumps to last item.
+        /// With Ctrl, jumps to absolute last. Otherwise jumps to last sibling/descendant at current level.
         /// </summary>
-        public static void JumpToLast()
+        private static void JumpToLast(bool ctrlPressed = false)
         {
-            if (visibleNodes.Count == 0)
-                return;
+            if (visibleNodes == null || visibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(visibleNodes, ref selectedIndex, node => node.Depth,
+                node => node.IsExpanded, node => node.CanExpand && node.Children != null && node.Children.Count > 0,
+                ctrlPressed, ClearAndAnnounce);
+        }
 
-            selectedIndex = visibleNodes.Count - 1;
+        /// <summary>
+        /// Helper for tree navigation callbacks - plays sound and announces selection.
+        /// </summary>
+        private static void ClearAndAnnounce()
+        {
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
@@ -752,15 +757,17 @@ namespace RimWorldAccess
                 return true;
             }
 
-            if (key == KeyCode.Home && !shift && !ctrl && !alt)
+            if (key == KeyCode.Home && !shift && !alt)
             {
-                JumpToFirst();
+                JumpToFirst(Event.current.control);
+                Event.current.Use();
                 return true;
             }
 
-            if (key == KeyCode.End && !shift && !ctrl && !alt)
+            if (key == KeyCode.End && !shift && !alt)
             {
-                JumpToLast();
+                JumpToLast(Event.current.control);
+                Event.current.Use();
                 return true;
             }
 

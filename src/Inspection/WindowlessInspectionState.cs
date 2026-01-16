@@ -707,9 +707,7 @@ namespace RimWorldAccess
         public static void JumpToFirst()
         {
             if (visibleItems == null || visibleItems.Count == 0) return;
-            selectedIndex = MenuHelper.JumpToFirstSibling(visibleItems, selectedIndex, item => item.IndentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeHomeKey(visibleItems, ref selectedIndex, item => item.IndentLevel, false, ClearAndAnnounce);
         }
 
         /// <summary>
@@ -720,33 +718,8 @@ namespace RimWorldAccess
         public static void JumpToLast()
         {
             if (visibleItems == null || visibleItems.Count == 0) return;
-
-            var currentItem = visibleItems[selectedIndex];
-
-            // If current item is expanded and has children, jump to last descendant
-            if (currentItem.IsExpanded && currentItem.Children.Count > 0)
-            {
-                // Find last visible descendant (items with higher indent until we hit same or lower indent)
-                int lastDescendantIndex = selectedIndex;
-                for (int i = selectedIndex + 1; i < visibleItems.Count; i++)
-                {
-                    if (visibleItems[i].IndentLevel <= currentItem.IndentLevel)
-                        break;
-                    lastDescendantIndex = i;
-                }
-                if (lastDescendantIndex > selectedIndex)
-                {
-                    selectedIndex = lastDescendantIndex;
-                    typeahead.ClearSearch();
-                    AnnounceCurrentSelection();
-                    return;
-                }
-            }
-
-            // Otherwise jump to last sibling
-            selectedIndex = MenuHelper.JumpToLastSibling(visibleItems, selectedIndex, item => item.IndentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeEndKey(visibleItems, ref selectedIndex, item => item.IndentLevel,
+                item => item.IsExpanded, item => item.Children.Count > 0, false, ClearAndAnnounce);
         }
 
         /// <summary>
@@ -755,9 +728,7 @@ namespace RimWorldAccess
         public static void JumpToAbsoluteFirst()
         {
             if (visibleItems == null || visibleItems.Count == 0) return;
-            selectedIndex = 0;
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeHomeKey(visibleItems, ref selectedIndex, item => item.IndentLevel, true, ClearAndAnnounce);
         }
 
         /// <summary>
@@ -766,8 +737,17 @@ namespace RimWorldAccess
         public static void JumpToAbsoluteLast()
         {
             if (visibleItems == null || visibleItems.Count == 0) return;
-            selectedIndex = visibleItems.Count - 1;
-            typeahead.ClearSearch();
+            MenuHelper.HandleTreeEndKey(visibleItems, ref selectedIndex, item => item.IndentLevel,
+                item => item.IsExpanded, item => item.Children.Count > 0, true, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Clears typeahead search and announces the current selection.
+        /// Used as callback for navigation methods.
+        /// </summary>
+        private static void ClearAndAnnounce()
+        {
+            typeahead?.ClearSearch();
             AnnounceCurrentSelection();
         }
 
@@ -974,34 +954,6 @@ namespace RimWorldAccess
                     {
                         // Navigate normally (either no search active, OR search with no matches)
                         SelectNext();
-                    }
-                    ev.Use();
-                    return true;
-                }
-
-                // Handle Home - jump to first item
-                if (key == KeyCode.Home)
-                {
-                    if (visibleItems.Count > 0)
-                    {
-                        selectedIndex = 0;
-                        typeahead.ClearSearch();
-                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                        AnnounceCurrentSelection();
-                    }
-                    ev.Use();
-                    return true;
-                }
-
-                // Handle End - jump to last item
-                if (key == KeyCode.End)
-                {
-                    if (visibleItems.Count > 0)
-                    {
-                        selectedIndex = visibleItems.Count - 1;
-                        typeahead.ClearSearch();
-                        SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-                        AnnounceCurrentSelection();
                     }
                     ev.Use();
                     return true;

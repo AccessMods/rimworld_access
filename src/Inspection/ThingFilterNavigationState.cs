@@ -630,6 +630,61 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Jumps to the first sibling at the same indent level (Home key) or absolute first (Ctrl+Home).
+        /// </summary>
+        public static void JumpToFirst(bool ctrlPressed = false)
+        {
+            if (flattenedNodes == null || flattenedNodes.Count == 0)
+                return;
+
+            MenuHelper.HandleTreeHomeKey(flattenedNodes, ref selectedIndex, node => node.IndentLevel, ctrlPressed, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the last item in scope (End key) or absolute last (Ctrl+End).
+        /// For expanded nodes: jumps to last visible descendant.
+        /// For collapsed/leaf nodes: jumps to last sibling.
+        /// </summary>
+        public static void JumpToLast(bool ctrlPressed = false)
+        {
+            if (flattenedNodes == null || flattenedNodes.Count == 0)
+                return;
+
+            MenuHelper.HandleTreeEndKey(
+                flattenedNodes,
+                ref selectedIndex,
+                node => node.IndentLevel,
+                node => node.Type == NodeType.Category && node.IsExpanded,
+                node => HasVisibleChildren(node),
+                ctrlPressed,
+                ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Checks if a node has visible children (next item has higher indent level).
+        /// </summary>
+        private static bool HasVisibleChildren(NavigationNode node)
+        {
+            if (node.Type != NodeType.Category || !node.IsExpanded)
+                return false;
+
+            int nodeIndex = flattenedNodes.IndexOf(node);
+            if (nodeIndex < 0 || nodeIndex >= flattenedNodes.Count - 1)
+                return false;
+
+            return flattenedNodes[nodeIndex + 1].IndentLevel > node.IndentLevel;
+        }
+
+        /// <summary>
+        /// Clears typeahead search and announces current node.
+        /// </summary>
+        private static void ClearAndAnnounce()
+        {
+            typeahead.ClearSearch();
+            AnnounceCurrentNode();
+        }
+
+        /// <summary>
         /// Gets the position of the current node among its siblings (same indent level, same parent).
         /// Returns (position, total) where position is 1-based.
         /// </summary>

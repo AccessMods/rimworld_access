@@ -818,71 +818,52 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Jumps to the first sibling at the same level within the current node.
+        /// Jumps to the first sibling at the same level (Home key) or absolute first (Ctrl+Home).
         /// </summary>
-        public static void JumpToFirst()
+        public static void JumpToFirst(bool ctrlPressed = false)
         {
             if (menuItems == null || menuItems.Count == 0) return;
-            selectedIndex = MenuHelper.JumpToFirstSibling(menuItems, selectedIndex, m => m.indentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeHomeKey(menuItems, ref selectedIndex, m => m.indentLevel, ctrlPressed, ClearAndAnnounce);
         }
 
         /// <summary>
-        /// Jumps to the last item in the current scope.
-        /// If on an expanded node, jumps to its last visible descendant.
-        /// Otherwise, jumps to last sibling at same level.
+        /// Jumps to the last item in scope (End key) or absolute last (Ctrl+End).
+        /// For expanded nodes: jumps to last visible descendant.
+        /// For collapsed/leaf nodes: jumps to last sibling.
         /// </summary>
-        public static void JumpToLast()
+        public static void JumpToLast(bool ctrlPressed = false)
         {
             if (menuItems == null || menuItems.Count == 0) return;
-
-            var currentItem = menuItems[selectedIndex];
-
-            // If current item is expanded category, jump to last descendant
-            if (currentItem.isExpanded && currentItem.type == MenuItemType.Category)
-            {
-                // Find last visible descendant (items with higher indent until we hit same or lower indent)
-                int lastDescendantIndex = selectedIndex;
-                for (int i = selectedIndex + 1; i < menuItems.Count; i++)
-                {
-                    if (menuItems[i].indentLevel <= currentItem.indentLevel)
-                        break;
-                    lastDescendantIndex = i;
-                }
-                if (lastDescendantIndex > selectedIndex)
-                {
-                    selectedIndex = lastDescendantIndex;
-                    typeahead.ClearSearch();
-                    AnnounceCurrentSelection();
-                    return;
-                }
-            }
-
-            // Otherwise jump to last sibling
-            selectedIndex = MenuHelper.JumpToLastSibling(menuItems, selectedIndex, m => m.indentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeEndKey(
+                menuItems,
+                ref selectedIndex,
+                m => m.indentLevel,
+                m => m.type == MenuItemType.Category && m.isExpanded,
+                m => HasVisibleChildren(m),
+                ctrlPressed,
+                ClearAndAnnounce);
         }
 
         /// <summary>
-        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// Checks if a menu item has visible children (next item has higher indent level).
         /// </summary>
-        public static void JumpToAbsoluteFirst()
+        private static bool HasVisibleChildren(MenuItem item)
         {
-            if (menuItems == null || menuItems.Count == 0) return;
-            selectedIndex = 0;
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            if (item.type != MenuItemType.Category || !item.isExpanded)
+                return false;
+
+            int itemIndex = menuItems.IndexOf(item);
+            if (itemIndex < 0 || itemIndex >= menuItems.Count - 1)
+                return false;
+
+            return menuItems[itemIndex + 1].indentLevel > item.indentLevel;
         }
 
         /// <summary>
-        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// Clears typeahead search and announces current selection.
         /// </summary>
-        public static void JumpToAbsoluteLast()
+        private static void ClearAndAnnounce()
         {
-            if (menuItems == null || menuItems.Count == 0) return;
-            selectedIndex = menuItems.Count - 1;
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }

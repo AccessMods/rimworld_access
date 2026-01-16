@@ -289,19 +289,25 @@ namespace RimWorldAccess
 
             KeyCode key = ev.keyCode;
 
-            // Handle Home - jump to first
+            // Home - jump to first (Ctrl+Home for absolute first)
             if (key == KeyCode.Home)
             {
                 ev.Use();
-                JumpToFirst();
+                if (ev.control)
+                    JumpToAbsoluteFirst();
+                else
+                    JumpToFirst();
                 return true;
             }
 
-            // Handle End - jump to last
+            // End - jump to last (Ctrl+End for absolute last)
             if (key == KeyCode.End)
             {
                 ev.Use();
-                JumpToLast();
+                if (ev.control)
+                    JumpToAbsoluteLast();
+                else
+                    JumpToLast();
                 return true;
             }
 
@@ -444,29 +450,54 @@ namespace RimWorldAccess
         public static bool HasActiveSearch => typeahead.HasActiveSearch;
 
         /// <summary>
-        /// Jumps to the first item in the list.
+        /// Helper method that clears typeahead search, plays tick sound, and announces the current selection.
+        /// Used as callback for MenuHelper tree navigation methods.
         /// </summary>
-        private static void JumpToFirst()
+        private static void ClearAndAnnounce()
         {
-            if (flattenedVisibleNodes.Count == 0) return;
-
-            selectedIndex = 0;
             typeahead.ClearSearch();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Jumps to the last item in the list.
+        /// Jumps to the first sibling at the same indent level (Home key).
+        /// </summary>
+        private static void JumpToFirst()
+        {
+            if (flattenedVisibleNodes == null || flattenedVisibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(flattenedVisibleNodes, ref selectedIndex, item => item.Depth, false, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope (End key).
+        /// If on an expanded node, jumps to its last visible descendant.
+        /// Otherwise, jumps to last sibling at same level.
         /// </summary>
         private static void JumpToLast()
         {
-            if (flattenedVisibleNodes.Count == 0) return;
+            if (flattenedVisibleNodes == null || flattenedVisibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(flattenedVisibleNodes, ref selectedIndex, item => item.Depth,
+                item => item.IsExpanded, item => item.Children != null && item.Children.Count > 0, false, ClearAndAnnounce);
+        }
 
-            selectedIndex = flattenedVisibleNodes.Count - 1;
-            typeahead.ClearSearch();
-            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-            AnnounceCurrentSelection();
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        private static void JumpToAbsoluteFirst()
+        {
+            if (flattenedVisibleNodes == null || flattenedVisibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(flattenedVisibleNodes, ref selectedIndex, item => item.Depth, true, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// </summary>
+        private static void JumpToAbsoluteLast()
+        {
+            if (flattenedVisibleNodes == null || flattenedVisibleNodes.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(flattenedVisibleNodes, ref selectedIndex, item => item.Depth,
+                item => item.IsExpanded, item => item.Children != null && item.Children.Count > 0, true, ClearAndAnnounce);
         }
 
         /// <summary>

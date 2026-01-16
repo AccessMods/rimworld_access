@@ -219,14 +219,10 @@ namespace RimWorldAccess
         /// <summary>
         /// Jumps to the first sibling at the same indent level (Home key).
         /// </summary>
-        public static void JumpToFirst()
+        private static void JumpToFirst()
         {
-            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
-                return;
-
-            selectedIndex = MenuHelper.JumpToFirstSibling(visibleItems, selectedIndex, item => item.IndentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(visibleItems, ref selectedIndex, item => item.IndentLevel, false, ClearAndAnnounce);
         }
 
         /// <summary>
@@ -234,59 +230,38 @@ namespace RimWorldAccess
         /// If on an expanded node, jumps to its last visible descendant.
         /// Otherwise, jumps to last sibling at same level.
         /// </summary>
-        public static void JumpToLast()
+        private static void JumpToLast()
         {
-            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
-                return;
-
-            var currentItem = visibleItems[selectedIndex];
-
-            // If current item is expanded and has children, jump to last descendant
-            if (currentItem.IsExpanded && currentItem.Children.Count > 0)
-            {
-                // Find last visible descendant
-                int lastDescendantIndex = selectedIndex;
-                for (int i = selectedIndex + 1; i < visibleItems.Count; i++)
-                {
-                    if (visibleItems[i].IndentLevel <= currentItem.IndentLevel)
-                        break;
-                    lastDescendantIndex = i;
-                }
-                selectedIndex = lastDescendantIndex;
-            }
-            else
-            {
-                // Jump to last sibling
-                selectedIndex = MenuHelper.JumpToLastSibling(visibleItems, selectedIndex, item => item.IndentLevel);
-            }
-
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(visibleItems, ref selectedIndex, item => item.IndentLevel,
+                item => item.IsExpanded, item => item.Children != null && item.Children.Count > 0, false, ClearAndAnnounce);
         }
 
         /// <summary>
         /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
         /// </summary>
-        public static void JumpToAbsoluteFirst()
+        private static void JumpToAbsoluteFirst()
         {
-            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
-                return;
-
-            selectedIndex = 0;
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(visibleItems, ref selectedIndex, item => item.IndentLevel, true, ClearAndAnnounce);
         }
 
         /// <summary>
         /// Jumps to the absolute last item in the entire tree (Ctrl+End).
         /// </summary>
-        public static void JumpToAbsoluteLast()
+        private static void JumpToAbsoluteLast()
         {
-            if (!IsActive || visibleItems == null || visibleItems.Count == 0)
-                return;
+            if (visibleItems == null || visibleItems.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(visibleItems, ref selectedIndex, item => item.IndentLevel,
+                item => item.IsExpanded, item => item.Children != null && item.Children.Count > 0, true, ClearAndAnnounce);
+        }
 
-            selectedIndex = visibleItems.Count - 1;
-            typeahead.ClearSearch();
+        /// <summary>
+        /// Clears typeahead search and announces the current selection.
+        /// </summary>
+        private static void ClearAndAnnounce()
+        {
+            typeahead?.ClearSearch();
             AnnounceCurrentSelection();
         }
 

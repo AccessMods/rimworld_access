@@ -73,10 +73,7 @@ namespace RimWorldAccess
             // Handle Home - jump to first (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.Home)
             {
-                if (Event.current.control)
-                    StorageSettingsMenuState.JumpToAbsoluteFirst();
-                else
-                    StorageSettingsMenuState.JumpToFirst();
+                StorageSettingsMenuState.JumpToFirst(Event.current.control);
                 Event.current.Use();
                 return;
             }
@@ -84,10 +81,7 @@ namespace RimWorldAccess
             // Handle End - jump to last (Ctrl = absolute, otherwise = within node)
             if (key == KeyCode.End)
             {
-                if (Event.current.control)
-                    StorageSettingsMenuState.JumpToAbsoluteLast();
-                else
-                    StorageSettingsMenuState.JumpToLast();
+                StorageSettingsMenuState.JumpToLast(Event.current.control);
                 Event.current.Use();
                 return;
             }

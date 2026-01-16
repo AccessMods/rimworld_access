@@ -148,6 +148,18 @@ namespace RimWorldAccess
                         ThingFilterNavigationState.ExpandAllSiblings();
                         handled = true;
                     }
+                    // Home - jump to first (Ctrl+Home for absolute first)
+                    else if (key == KeyCode.Home)
+                    {
+                        ThingFilterNavigationState.JumpToFirst(Event.current.control);
+                        handled = true;
+                    }
+                    // End - jump to last (Ctrl+End for absolute last)
+                    else if (key == KeyCode.End)
+                    {
+                        ThingFilterNavigationState.JumpToLast(Event.current.control);
+                        handled = true;
+                    }
                     else if (key == KeyCode.A && Event.current.control)
                     {
                         ThingFilterNavigationState.AllowAll();

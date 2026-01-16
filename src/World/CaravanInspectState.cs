@@ -333,6 +333,7 @@ namespace RimWorldAccess
             {
                 Type = NodeType.Root,
                 Label = "Root",
+                Depth = -1,
                 IsExpanded = true,
                 CanExpand = true
             };
@@ -356,7 +357,7 @@ namespace RimWorldAccess
             {
                 Type = NodeType.Category,
                 Label = "Caravan Status",
-                Depth = 0,
+                Depth = parent.Depth + 1,
                 CanExpand = true,
                 IsExpanded = false,
                 Parent = parent
@@ -638,7 +639,7 @@ namespace RimWorldAccess
             {
                 Type = NodeType.Category,
                 Label = $"Pawns ({totalPawns})",
-                Depth = 0,
+                Depth = parent.Depth + 1,
                 CanExpand = true,
                 IsExpanded = false,
                 Parent = parent
@@ -654,7 +655,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.SubCategory,
                     Label = $"Colonists ({colonists.Count})",
-                    Depth = 1,
+                    Depth = pawnsNode.Depth + 1,
                     CanExpand = true,
                     IsExpanded = false,
                     Parent = pawnsNode
@@ -672,7 +673,7 @@ namespace RimWorldAccess
                     {
                         Type = NodeType.Pawn,
                         Label = label,
-                        Depth = 2,
+                        Depth = colonistsNode.Depth + 1,
                         Parent = colonistsNode,
                         Data = pawn,
                         CanAbandon = true,
@@ -691,7 +692,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.SubCategory,
                     Label = $"Prisoners ({prisoners.Count})",
-                    Depth = 1,
+                    Depth = pawnsNode.Depth + 1,
                     CanExpand = true,
                     IsExpanded = false,
                     Parent = pawnsNode
@@ -703,7 +704,7 @@ namespace RimWorldAccess
                     {
                         Type = NodeType.Pawn,
                         Label = pawn.LabelShortCap,
-                        Depth = 2,
+                        Depth = prisonersNode.Depth + 1,
                         Parent = prisonersNode,
                         Data = pawn,
                         CanAbandon = true,
@@ -722,7 +723,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.SubCategory,
                     Label = $"Animals ({animals.Count})",
-                    Depth = 1,
+                    Depth = pawnsNode.Depth + 1,
                     CanExpand = true,
                     IsExpanded = false,
                     Parent = pawnsNode
@@ -734,7 +735,7 @@ namespace RimWorldAccess
                     {
                         Type = NodeType.Pawn,
                         Label = animal.LabelShortCap,
-                        Depth = 2,
+                        Depth = animalsNode.Depth + 1,
                         Parent = animalsNode,
                         Data = animal,
                         CanAbandon = true,
@@ -767,7 +768,7 @@ namespace RimWorldAccess
             {
                 Type = NodeType.Category,
                 Label = $"Gear ({totalGear} items)",
-                Depth = 0,
+                Depth = parent.Depth + 1,
                 CanExpand = true,
                 IsExpanded = false,
                 Parent = parent
@@ -785,7 +786,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.SubCategory,
                     Label = $"{pawn.LabelShortCap} ({pawnGearCount})",
-                    Depth = 1,
+                    Depth = gearNode.Depth + 1,
                     CanExpand = true,
                     IsExpanded = false,
                     Parent = gearNode,
@@ -800,7 +801,7 @@ namespace RimWorldAccess
                     {
                         Type = NodeType.GearItem,
                         Label = weapon.LabelCap,
-                        Depth = 2,
+                        Depth = pawnGearNode.Depth + 1,
                         Parent = pawnGearNode,
                         Data = weapon,
                         OwnerPawn = pawn,
@@ -818,7 +819,7 @@ namespace RimWorldAccess
                         {
                             Type = NodeType.GearItem,
                             Label = apparel.LabelCap,
-                            Depth = 2,
+                            Depth = pawnGearNode.Depth + 1,
                             Parent = pawnGearNode,
                             Data = apparel,
                             OwnerPawn = pawn,
@@ -847,7 +848,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.Category,
                     Label = "Items (empty)",
-                    Depth = 0,
+                    Depth = parent.Depth + 1,
                     CanExpand = false,
                     Parent = parent
                 };
@@ -865,14 +866,14 @@ namespace RimWorldAccess
             {
                 Type = NodeType.Category,
                 Label = $"Items ({totalCount})",
-                Depth = 0,
+                Depth = parent.Depth + 1,
                 CanExpand = true,
                 IsExpanded = false,
                 Parent = parent
             };
 
             // Convert InventoryHelper.CategoryNode tree to our TreeNode tree (read-only, no actions)
-            AddInventoryCategoryNodes(itemsNode, categoryTree, 1, inventoryItems);
+            AddInventoryCategoryNodes(itemsNode, categoryTree, inventoryItems);
 
             parent.Children.Add(itemsNode);
         }
@@ -880,7 +881,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Recursively adds inventory category nodes from InventoryHelper tree.
         /// </summary>
-        private static void AddInventoryCategoryNodes(TreeNode parent, List<InventoryHelper.CategoryNode> categoryNodes, int depth, List<Thing> allItems)
+        private static void AddInventoryCategoryNodes(TreeNode parent, List<InventoryHelper.CategoryNode> categoryNodes, List<Thing> allItems)
         {
             foreach (var categoryNode in categoryNodes)
             {
@@ -888,7 +889,7 @@ namespace RimWorldAccess
                 {
                     Type = NodeType.SubCategory,
                     Label = categoryNode.GetDisplayLabel(),
-                    Depth = depth,
+                    Depth = parent.Depth + 1,
                     CanExpand = categoryNode.SubCategories.Count > 0 || categoryNode.Items.Count > 0,
                     IsExpanded = false,
                     Parent = parent
@@ -897,7 +898,7 @@ namespace RimWorldAccess
                 // Recursively add subcategories
                 if (categoryNode.SubCategories.Count > 0)
                 {
-                    AddInventoryCategoryNodes(catNode, categoryNode.SubCategories, depth + 1, allItems);
+                    AddInventoryCategoryNodes(catNode, categoryNode.SubCategories, allItems);
                 }
 
                 // Add items (read-only - no Jump/View actions like in colony inventory)
@@ -913,7 +914,7 @@ namespace RimWorldAccess
                     {
                         Type = NodeType.InventoryItem,
                         Label = invItem.GetDisplayLabel(),
-                        Depth = depth + 1,
+                        Depth = catNode.Depth + 1,
                         Parent = catNode,
                         Data = representativeThing,  // Store actual Thing for abandon/inspect
                         CanAbandon = representativeThing != null,
@@ -1311,37 +1312,51 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Jumps to the first item.
+        /// Helper method to clear typeahead and announce current selection.
+        /// Used as callback for MenuHelper tree navigation methods.
         /// </summary>
-        public static void JumpToFirst()
+        private static void ClearAndAnnounce()
         {
-            if (visibleNodes.Count == 0)
-            {
-                TolkHelper.Speak("No items");
-                return;
-            }
-
-            selectedIndex = 0;
+            typeahead.ClearSearch();
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-            TolkHelper.Speak("Top");
             AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Jumps to the last item.
+        /// Jumps to the first item, or first sibling at current level.
+        /// Ctrl+Home jumps to absolute first.
         /// </summary>
-        public static void JumpToLast()
+        private static void JumpToFirst(bool ctrlPressed = false)
         {
-            if (visibleNodes.Count == 0)
+            if (visibleNodes == null || visibleNodes.Count == 0)
             {
                 TolkHelper.Speak("No items");
                 return;
             }
 
-            selectedIndex = visibleNodes.Count - 1;
-            SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
-            TolkHelper.Speak("Bottom");
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeHomeKey(visibleNodes, ref selectedIndex, node => node.Depth, ctrlPressed, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the last item, last sibling, or last visible descendant.
+        /// Ctrl+End jumps to absolute last.
+        /// </summary>
+        private static void JumpToLast(bool ctrlPressed = false)
+        {
+            if (visibleNodes == null || visibleNodes.Count == 0)
+            {
+                TolkHelper.Speak("No items");
+                return;
+            }
+
+            MenuHelper.HandleTreeEndKey(
+                visibleNodes,
+                ref selectedIndex,
+                node => node.Depth,
+                node => node.IsExpanded,
+                node => node.CanExpand && node.Children != null && node.Children.Count > 0,
+                ctrlPressed,
+                ClearAndAnnounce);
         }
 
         #endregion
@@ -1521,15 +1536,17 @@ namespace RimWorldAccess
                 return true;
             }
 
-            if (key == KeyCode.Home && !shift && !ctrl && !alt)
+            if (key == KeyCode.Home && !shift && !alt)
             {
-                JumpToFirst();
+                JumpToFirst(Event.current.control);
+                Event.current.Use();
                 return true;
             }
 
-            if (key == KeyCode.End && !shift && !ctrl && !alt)
+            if (key == KeyCode.End && !shift && !alt)
             {
-                JumpToLast();
+                JumpToLast(Event.current.control);
+                Event.current.Use();
                 return true;
             }
 

@@ -1056,25 +1056,55 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Jumps to the first item in the navigation list.
+        /// Helper method that clears typeahead search and announces the current selection.
+        /// Used as callback for MenuHelper tree navigation methods.
         /// </summary>
-        public static void JumpToFirst()
+        private static void ClearAndAnnounce()
         {
-            if (flatNavigationList.Count == 0) return;
-            currentIndex = 0;
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
 
         /// <summary>
-        /// Jumps to the last item in the navigation list.
+        /// Jumps to the first sibling at the same level within the current node (Home key).
+        /// </summary>
+        public static void JumpToFirst()
+        {
+            if (flatNavigationList == null || flatNavigationList.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(flatNavigationList, ref currentIndex, node => GetNodeLevel(node), false, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the last item in the current scope (End key).
+        /// If on an expanded node with children, jumps to its last visible descendant.
+        /// Otherwise, jumps to last sibling at same level.
         /// </summary>
         public static void JumpToLast()
         {
-            if (flatNavigationList.Count == 0) return;
-            currentIndex = flatNavigationList.Count - 1;
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            if (flatNavigationList == null || flatNavigationList.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(flatNavigationList, ref currentIndex, node => GetNodeLevel(node),
+                node => node.IsExpandable && node.IsExpanded,
+                node => node.Children != null && node.Children.Count > 0, false, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the absolute first item in the entire tree (Ctrl+Home).
+        /// </summary>
+        public static void JumpToAbsoluteFirst()
+        {
+            if (flatNavigationList == null || flatNavigationList.Count == 0) return;
+            MenuHelper.HandleTreeHomeKey(flatNavigationList, ref currentIndex, node => GetNodeLevel(node), true, ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Jumps to the absolute last item in the entire tree (Ctrl+End).
+        /// </summary>
+        public static void JumpToAbsoluteLast()
+        {
+            if (flatNavigationList == null || flatNavigationList.Count == 0) return;
+            MenuHelper.HandleTreeEndKey(flatNavigationList, ref currentIndex, node => GetNodeLevel(node),
+                node => node.IsExpandable && node.IsExpanded,
+                node => node.Children != null && node.Children.Count > 0, true, ClearAndAnnounce);
         }
     }
 

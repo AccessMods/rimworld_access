@@ -1536,16 +1536,22 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                // Handle Home - jump to first
+                // Handle Home - jump to first (Ctrl+Home for absolute first)
                 if (key == KeyCode.Home)
                 {
-                    WindowlessResearchDetailState.JumpToFirst();
+                    if (Event.current.control)
+                        WindowlessResearchDetailState.JumpToAbsoluteFirst();
+                    else
+                        WindowlessResearchDetailState.JumpToFirst();
                     handled = true;
                 }
-                // Handle End - jump to last
+                // Handle End - jump to last (Ctrl+End for absolute last)
                 else if (key == KeyCode.End)
                 {
-                    WindowlessResearchDetailState.JumpToLast();
+                    if (Event.current.control)
+                        WindowlessResearchDetailState.JumpToAbsoluteLast();
+                    else
+                        WindowlessResearchDetailState.JumpToLast();
                     handled = true;
                 }
                 // Handle Escape - clear search FIRST, then close
@@ -1640,16 +1646,22 @@ namespace RimWorldAccess
             {
                 bool handled = false;
 
-                // Handle Home - jump to first
+                // Handle Home - jump to first (Ctrl+Home for absolute first)
                 if (key == KeyCode.Home)
                 {
-                    WindowlessResearchMenuState.JumpToFirst();
+                    if (Event.current.control)
+                        WindowlessResearchMenuState.JumpToAbsoluteFirst();
+                    else
+                        WindowlessResearchMenuState.JumpToFirst();
                     handled = true;
                 }
-                // Handle End - jump to last
+                // Handle End - jump to last (Ctrl+End for absolute last)
                 else if (key == KeyCode.End)
                 {
-                    WindowlessResearchMenuState.JumpToLast();
+                    if (Event.current.control)
+                        WindowlessResearchMenuState.JumpToAbsoluteLast();
+                    else
+                        WindowlessResearchMenuState.JumpToLast();
                     handled = true;
                 }
                 // Handle Escape - clear search FIRST, then close

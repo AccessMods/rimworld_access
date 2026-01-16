@@ -251,6 +251,74 @@ namespace RimWorldAccess
             return lastSibling;
         }
 
+        /// <summary>
+        /// Handles Home key navigation for treeview states.
+        /// Jumps to first sibling at current level, or absolute first with Ctrl.
+        /// </summary>
+        public static void HandleTreeHomeKey<T>(
+            IList<T> items,
+            ref int selectedIndex,
+            Func<T, int> getIndentLevel,
+            bool ctrlPressed,
+            Action onNavigate)
+            where T : class
+        {
+            if (items == null || items.Count == 0)
+                return;
+
+            selectedIndex = ctrlPressed ? 0 : JumpToFirstSibling(items, selectedIndex, getIndentLevel);
+            onNavigate?.Invoke();
+        }
+
+        /// <summary>
+        /// Handles End key navigation for treeview states.
+        /// For expanded nodes with children: jumps to last visible descendant.
+        /// For collapsed/leaf nodes: jumps to last sibling at current level.
+        /// Ctrl+End jumps to absolute last.
+        /// </summary>
+        public static void HandleTreeEndKey<T>(
+            IList<T> items,
+            ref int selectedIndex,
+            Func<T, int> getIndentLevel,
+            Func<T, bool> isExpanded,
+            Func<T, bool> hasChildren,
+            bool ctrlPressed,
+            Action onNavigate)
+            where T : class
+        {
+            if (items == null || items.Count == 0)
+                return;
+
+            if (ctrlPressed)
+            {
+                selectedIndex = items.Count - 1;
+            }
+            else
+            {
+                T currentItem = items[selectedIndex];
+                if (isExpanded(currentItem) && hasChildren(currentItem))
+                {
+                    int currentLevel = getIndentLevel(currentItem);
+                    int lastDescendantIndex = selectedIndex;
+
+                    for (int i = selectedIndex + 1; i < items.Count; i++)
+                    {
+                        if (getIndentLevel(items[i]) <= currentLevel)
+                            break;
+                        lastDescendantIndex = i;
+                    }
+
+                    selectedIndex = lastDescendantIndex;
+                }
+                else
+                {
+                    selectedIndex = JumpToLastSibling(items, selectedIndex, getIndentLevel);
+                }
+            }
+
+            onNavigate?.Invoke();
+        }
+
         // ===== FORMATTING =====
 
         /// <summary>

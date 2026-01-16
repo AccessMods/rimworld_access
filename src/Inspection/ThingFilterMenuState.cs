@@ -577,23 +577,52 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Jumps to the first sibling at the same level (Home key).
+        /// Jumps to the first sibling at the same level (Home key) or absolute first (Ctrl+Home).
         /// </summary>
-        public static void JumpToFirst()
+        public static void JumpToFirst(bool ctrlPressed = false)
         {
             if (menuItems == null || menuItems.Count == 0) return;
-            selectedIndex = MenuHelper.JumpToFirstSibling(menuItems, selectedIndex, m => m.indentLevel);
-            typeahead.ClearSearch();
-            AnnounceCurrentSelection();
+            MenuHelper.HandleTreeHomeKey(menuItems, ref selectedIndex, m => m.indentLevel, ctrlPressed, ClearAndAnnounce);
         }
 
         /// <summary>
-        /// Jumps to the last sibling at the same level (End key).
+        /// Jumps to the last item in scope (End key) or absolute last (Ctrl+End).
+        /// For expanded nodes: jumps to last visible descendant.
+        /// For collapsed/leaf nodes: jumps to last sibling.
         /// </summary>
-        public static void JumpToLast()
+        public static void JumpToLast(bool ctrlPressed = false)
         {
             if (menuItems == null || menuItems.Count == 0) return;
-            selectedIndex = MenuHelper.JumpToLastSibling(menuItems, selectedIndex, m => m.indentLevel);
+            MenuHelper.HandleTreeEndKey(
+                menuItems,
+                ref selectedIndex,
+                m => m.indentLevel,
+                m => m.type == MenuItemType.Category && m.isExpanded,
+                m => HasVisibleChildren(m),
+                ctrlPressed,
+                ClearAndAnnounce);
+        }
+
+        /// <summary>
+        /// Checks if a menu item has visible children (next item has higher indent level).
+        /// </summary>
+        private static bool HasVisibleChildren(MenuItem item)
+        {
+            if (item.type != MenuItemType.Category || !item.isExpanded)
+                return false;
+
+            int itemIndex = menuItems.IndexOf(item);
+            if (itemIndex < 0 || itemIndex >= menuItems.Count - 1)
+                return false;
+
+            return menuItems[itemIndex + 1].indentLevel > item.indentLevel;
+        }
+
+        /// <summary>
+        /// Clears typeahead search and announces current selection.
+        /// </summary>
+        private static void ClearAndAnnounce()
+        {
             typeahead.ClearSearch();
             AnnounceCurrentSelection();
         }
