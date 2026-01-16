@@ -15,6 +15,40 @@ namespace RimWorldAccess
     public static class InspectionInfoHelper
     {
         /// <summary>
+        /// Processes an inspect string to ensure each line ends with proper punctuation.
+        /// RimWorld's GetInspectString() returns newline-separated stats that may lack punctuation.
+        /// When newlines become spaces (for screen reader output), stats run together without this fix.
+        /// </summary>
+        private static string FormatInspectStringWithPunctuation(string inspectString)
+        {
+            if (string.IsNullOrEmpty(inspectString))
+                return inspectString;
+
+            var lines = inspectString.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var result = new StringBuilder();
+
+            foreach (var line in lines)
+            {
+                string trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed))
+                    continue;
+
+                // Check if line already ends with sentence-ending punctuation
+                char lastChar = trimmed[trimmed.Length - 1];
+                if (lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':')
+                {
+                    trimmed += ".";
+                }
+
+                if (result.Length > 0)
+                    result.AppendLine();
+                result.Append(trimmed);
+            }
+
+            return result.ToString();
+        }
+
+        /// <summary>
         /// Gets a one-line summary description of an object.
         /// </summary>
         public static string GetObjectSummary(object obj)
@@ -391,8 +425,9 @@ namespace RimWorldAccess
 
             try
             {
-                // Extract inner pawn from corpse
-                if (obj is Corpse corpse)
+                // Extract inner pawn from corpse, but NOT for Overview category
+                // Overview should show corpse decay info from Corpse.GetInspectString()
+                if (obj is Corpse corpse && category != "Overview")
                 {
                     obj = corpse.InnerPawn;
                 }
@@ -549,10 +584,11 @@ namespace RimWorldAccess
 
             // Get the inspect string (current activity, status)
             // This already includes age, gender, faction, equipped items, and current activity
+            // Format with punctuation for screen reader clarity
             string inspectString = pawn.GetInspectString();
             if (!string.IsNullOrEmpty(inspectString))
             {
-                sb.AppendLine(inspectString);
+                sb.AppendLine(FormatInspectStringWithPunctuation(inspectString));
             }
 
             // Add description for animals (humanlike pawns have backstories in Character category instead)
@@ -714,11 +750,11 @@ namespace RimWorldAccess
             sb.AppendLine(building.LabelCap.StripTags());
             sb.AppendLine();
 
-            // Get the inspect string
+            // Get the inspect string and format with punctuation for screen reader clarity
             string inspectString = building.GetInspectString();
             if (!string.IsNullOrEmpty(inspectString))
             {
-                sb.AppendLine(inspectString);
+                sb.AppendLine(FormatInspectStringWithPunctuation(inspectString));
                 sb.AppendLine();
             }
 
@@ -944,11 +980,11 @@ namespace RimWorldAccess
             sb.AppendLine(plant.LabelCap.StripTags());
             sb.AppendLine();
 
-            // Get the inspect string
+            // Get the inspect string and format with punctuation for screen reader clarity
             string inspectString = plant.GetInspectString();
             if (!string.IsNullOrEmpty(inspectString))
             {
-                sb.AppendLine(inspectString);
+                sb.AppendLine(FormatInspectStringWithPunctuation(inspectString));
             }
 
             // Add description for plants
@@ -1030,10 +1066,11 @@ namespace RimWorldAccess
             sb.AppendLine(zone.label);
 
             // Get the inspect string from RimWorld (already localized)
+            // Format with punctuation for screen reader clarity
             string inspectString = zone.GetInspectString();
             if (!string.IsNullOrWhiteSpace(inspectString))
             {
-                sb.AppendLine(inspectString);
+                sb.AppendLine(FormatInspectStringWithPunctuation(inspectString));
             }
 
             return sb.ToString();
@@ -1105,11 +1142,11 @@ namespace RimWorldAccess
             if (thing.stackCount > 1)
                 sb.AppendLine($"Stack: {thing.stackCount}");
 
-            // Get the inspect string
+            // Get the inspect string and format with punctuation for screen reader clarity
             string inspectString = thing.GetInspectString();
             if (!string.IsNullOrEmpty(inspectString))
             {
-                sb.AppendLine(inspectString);
+                sb.AppendLine(FormatInspectStringWithPunctuation(inspectString));
             }
 
             // Add description for items
