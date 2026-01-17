@@ -33,7 +33,7 @@ namespace RimWorldAccess
         private static bool isInitialized = false;
         private static int initializedForMapId = -1; // Track which map we're initialized for
         private static bool suppressMapNavigation = false;
-        private static JumpMode currentJumpMode = JumpMode.Terrain;
+        private static JumpMode currentJumpMode = JumpMode.PresetDistance;
         private static int presetJumpDistance = 5;
 
         // Pending restore position - used when returning from dialogs like trade

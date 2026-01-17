@@ -140,6 +140,9 @@ namespace RimWorldAccess
 
             // Check for map switching (Shift+comma/period)
             // Regular comma/period pawn cycling is handled by ThingSelectionUtilityPatch
+            // NOTE: We use Input.GetKey/GetKeyDown here because CameraDriver.Update() is a
+            // Unity Update() method, not an OnGUI callback. IMGUI events (Event.current) are
+            // only valid during OnGUI calls and will be null/invalid in Update().
             bool shiftHeldForMapSwitch = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
             if (shiftHeldForMapSwitch && Input.GetKeyDown(KeyCode.Period))

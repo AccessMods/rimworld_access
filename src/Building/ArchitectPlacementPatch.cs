@@ -661,11 +661,11 @@ namespace RimWorldAccess
             if (Find.CurrentMap == null || !MapNavigationState.IsInitialized)
                 return;
 
-            // Check if any arrow key was pressed this frame
-            bool arrowKeyPressed = Input.GetKeyDown(KeyCode.UpArrow) ||
-                                   Input.GetKeyDown(KeyCode.DownArrow) ||
-                                   Input.GetKeyDown(KeyCode.LeftArrow) ||
-                                   Input.GetKeyDown(KeyCode.RightArrow);
+            // Check if any arrow key is being held (use GetKey for key repeat support)
+            bool arrowKeyPressed = Input.GetKey(KeyCode.UpArrow) ||
+                                   Input.GetKey(KeyCode.DownArrow) ||
+                                   Input.GetKey(KeyCode.LeftArrow) ||
+                                   Input.GetKey(KeyCode.RightArrow);
 
             if (!arrowKeyPressed)
                 return;

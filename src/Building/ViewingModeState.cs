@@ -37,6 +37,9 @@ namespace RimWorldAccess
         // Navigation is handled by ScannerState's temporary category
         private static List<IntVec3> obstacleCells = new List<IntVec3>();
 
+        // Track detected enclosures formed by wall blueprints
+        private static List<Enclosure> detectedEnclosures = new List<Enclosure>();
+
         // Track order targets (things that were designated) - for Hunt, Haul, Tame, etc.
         // These are Things (animals, items) that the order designator targeted
         private static List<Thing> orderTargets = new List<Thing>();
@@ -212,6 +215,15 @@ namespace RimWorldAccess
             usedShapeType = shapeType;
             isActive = true;
 
+            // Detect wall enclosures for build designators (do this before UpdateObstacleCategory
+            // so interior obstacles can be added to the scanner)
+            // Pass obstacleCells so we can detect corner gaps in the perimeter
+            detectedEnclosures.Clear();
+            if (isBuildDesignator)
+            {
+                detectedEnclosures = EnclosureDetector.DetectEnclosures(PlacedBlueprints, Find.CurrentMap, obstacleCells);
+            }
+
             // Create temporary scanner category for obstacles or targets
             if (isOrderDesignator)
             {
@@ -220,7 +232,7 @@ namespace RimWorldAccess
             }
             else
             {
-                // For builds, create obstacles category if any
+                // For builds, create obstacles category (includes interior obstacles from enclosures)
                 UpdateObstacleCategory();
             }
 
@@ -307,18 +319,375 @@ namespace RimWorldAccess
             }
             else
             {
-                // Standard announcement for builds
-                string itemType = isBuildDesignator ? "blueprints" : "designations";
+                // Build announcement for build designators with smooth flowing sentences
+                return BuildBuildDesignatorAnnouncement(designator, totalPlaced, segmentInfo);
+            }
+        }
 
-                if (obstacleCells.Count > 0)
+        /// <summary>
+        /// Builds the announcement specifically for build designators.
+        /// Produces smooth flowing sentences combining placement, obstacles, and enclosure info.
+        /// Examples:
+        /// - "Placed 28 wooden walls (140 wood). 7 by 9 enclosure formed containing 2 poplar trees, 1 cougar (dead), and 1 limestone chunk, but has 1 gap."
+        /// - "Placed 24 of 28 wooden walls (120 wood). 4 walls blocked by 2 compacted steel and 2 granite boulders."
+        /// </summary>
+        private static string BuildBuildDesignatorAnnouncement(Designator designator, int totalPlaced, string segmentInfo)
+        {
+            var parts = new List<string>();
+
+            // Get designator label for the announcement
+            // Strip "..." suffix that RimWorld adds when material hasn't been selected
+            string designatorLabel = designator?.Label ?? "blueprints";
+            if (designatorLabel.EndsWith("..."))
+            {
+                designatorLabel = designatorLabel.Substring(0, designatorLabel.Length - 3);
+            }
+            string itemType = isBuildDesignator ? "blueprints" : "designations";
+
+            // Calculate total intended placements (placed + blocked)
+            int totalIntended = totalPlaced + obstacleCells.Count;
+
+            // Get blocking obstacle summary
+            string blockingObstacleSummary = GetBlockingObstacleSummary();
+
+            // Build the main placement sentence
+            if (obstacleCells.Count > 0 && totalPlaced > 0)
+            {
+                // "Placed X of Y wooden walls (cost), Z blocked by [obstacle list]."
+                // Combined into one sentence for conciseness
+                string pluralLabel = totalPlaced > 1
+                    ? Find.ActiveLanguageWorker.Pluralize(designatorLabel, totalPlaced)
+                    : designatorLabel;
+
+                string costInfo = GetCostInfo();
+                string blockedPart;
+                if (!string.IsNullOrEmpty(blockingObstacleSummary))
                 {
-                    return $"Viewing mode. {totalPlaced} {itemType}{segmentInfo}. {obstacleCells.Count} obstacles. Use Page Up and Down to navigate obstacles.";
+                    blockedPart = $", {obstacleCells.Count} blocked by {blockingObstacleSummary}";
                 }
                 else
                 {
-                    return $"Viewing mode. {totalPlaced} {itemType}{segmentInfo}.";
+                    blockedPart = $", {obstacleCells.Count} blocked";
+                }
+                parts.Add($"Placed {totalPlaced} of {totalIntended} {pluralLabel}{costInfo}{blockedPart}{segmentInfo}");
+            }
+            else if (totalPlaced > 0)
+            {
+                // "Placed X wooden walls (cost)."
+                string pluralLabel = totalPlaced > 1
+                    ? Find.ActiveLanguageWorker.Pluralize(designatorLabel, totalPlaced)
+                    : designatorLabel;
+
+                string costInfo = GetCostInfo();
+                parts.Add($"Placed {totalPlaced} {pluralLabel}{costInfo}{segmentInfo}");
+            }
+            else
+            {
+                // No placements at all
+                parts.Add($"No {itemType} placed{segmentInfo}");
+
+                if (obstacleCells.Count > 0 && !string.IsNullOrEmpty(blockingObstacleSummary))
+                {
+                    parts.Add($"All blocked by {blockingObstacleSummary}");
                 }
             }
+
+            // Add enclosure info if any enclosures detected
+            if (detectedEnclosures.Count > 0)
+            {
+                if (detectedEnclosures.Count == 1)
+                {
+                    var enc = detectedEnclosures[0];
+                    var (width, height) = GetEnclosureDimensions(enc);
+                    string enclosurePart = $"{width} by {height} enclosure formed";
+
+                    // Add "containing X, Y, Z" if there are interior obstacles
+                    if (enc.ObstacleCount > 0 && enc.Obstacles != null)
+                    {
+                        string interiorSummary = FormatObstacleList(enc.Obstacles);
+                        if (!string.IsNullOrEmpty(interiorSummary))
+                        {
+                            enclosurePart += $" containing {interiorSummary}";
+                        }
+                    }
+
+                    // Add gap warning at the end
+                    if (enc.HasGaps)
+                    {
+                        string gapWord = enc.GapCount == 1 ? "gap" : "gaps";
+                        enclosurePart += $", but has {enc.GapCount} {gapWord}";
+                    }
+
+                    parts.Add(enclosurePart);
+                }
+                else
+                {
+                    int totalInteriorObstacles = detectedEnclosures.Sum(e => e.ObstacleCount);
+                    int totalGaps = detectedEnclosures.Sum(e => e.GapCount);
+
+                    // List dimensions for each enclosure
+                    var dimensionsList = new List<string>();
+                    foreach (var enc in detectedEnclosures)
+                    {
+                        var (w, h) = GetEnclosureDimensions(enc);
+                        dimensionsList.Add($"{w} by {h}");
+                    }
+                    string enclosurePart = $"{detectedEnclosures.Count} enclosures formed: {string.Join(", ", dimensionsList)}";
+
+                    // Add "containing X, Y, Z" if there are interior obstacles
+                    if (totalInteriorObstacles > 0)
+                    {
+                        // Gather all interior obstacles from all enclosures
+                        var allInteriorObstacles = new List<ScannerItem>();
+                        foreach (var enc in detectedEnclosures)
+                        {
+                            if (enc.Obstacles != null)
+                                allInteriorObstacles.AddRange(enc.Obstacles);
+                        }
+
+                        string interiorSummary = FormatObstacleList(allInteriorObstacles);
+                        if (!string.IsNullOrEmpty(interiorSummary))
+                        {
+                            enclosurePart += $" containing {interiorSummary}";
+                        }
+                    }
+
+                    // Add gap warning at the end
+                    if (totalGaps > 0)
+                    {
+                        string gapWord = totalGaps == 1 ? "gap" : "gaps";
+                        enclosurePart += $", but {totalGaps} {gapWord} total";
+                    }
+
+                    parts.Add(enclosurePart);
+                }
+            }
+
+            // Add navigation hint if there are obstacles or interior obstacles
+            bool hasAnyObstacles = obstacleCells.Count > 0 || detectedEnclosures.Any(e => e.ObstacleCount > 0);
+            if (hasAnyObstacles)
+            {
+                parts.Add("Page Up/Down to navigate");
+            }
+
+            return $"Viewing mode. {string.Join(". ", parts)}.";
+        }
+
+        /// <summary>
+        /// Gets a formatted summary of blocking obstacles (obstacles that prevented placement).
+        /// Groups obstacles by type and formats as "X thing1, Y thing2, and Z thing3".
+        /// </summary>
+        private static string GetBlockingObstacleSummary()
+        {
+            if (obstacleCells.Count == 0)
+                return string.Empty;
+
+            Map map = Find.CurrentMap;
+            if (map == null)
+                return string.Empty;
+
+            // Count obstacles by their label
+            var obstacleCounts = new Dictionary<string, int>();
+
+            foreach (IntVec3 cell in obstacleCells)
+            {
+                string label = GetObstacleLabel(cell, map);
+                if (obstacleCounts.ContainsKey(label))
+                    obstacleCounts[label]++;
+                else
+                    obstacleCounts[label] = 1;
+            }
+
+            return FormatCountedList(obstacleCounts);
+        }
+
+        // Prefix used to mark terrain-based obstacles for special formatting
+        private const string TerrainPrefix = "TERRAIN:";
+
+        /// <summary>
+        /// Gets a simple label for the obstacle at a cell (without "Obstacle:" prefix).
+        /// Terrain-based obstacles are prefixed with "TERRAIN:" for special formatting.
+        /// </summary>
+        private static string GetObstacleLabel(IntVec3 cell, Map map)
+        {
+            // Check for things at the cell
+            List<Thing> things = cell.GetThingList(map);
+            foreach (Thing thing in things)
+            {
+                // Skip plants, filth, and other minor things
+                if (thing is Building || thing is Pawn)
+                {
+                    return thing.LabelNoCount ?? thing.def?.label ?? "obstacle";
+                }
+
+                // Check for blueprints or frames
+                if (thing.def.IsBlueprint || thing.def.IsFrame)
+                {
+                    return thing.LabelNoCount ?? "blueprint";
+                }
+
+                // Check for items
+                if (thing.def.category == ThingCategory.Item)
+                {
+                    return thing.LabelNoCount ?? "item";
+                }
+            }
+
+            // Check terrain - prefix with TERRAIN: for special formatting as "X tiles"
+            TerrainDef terrain = cell.GetTerrain(map);
+            if (terrain != null && (terrain.passability == Traversability.Impassable || !terrain.affordances?.Contains(TerrainAffordanceDefOf.Light) == true))
+            {
+                return TerrainPrefix + (terrain.label ?? "terrain");
+            }
+
+            return "obstacle";
+        }
+
+        /// <summary>
+        /// Formats a list of ScannerItem obstacles as "X thing1, Y thing2, and Z thing3".
+        /// Lists all types without truncation.
+        /// </summary>
+        private static string FormatObstacleList(List<ScannerItem> obstacles)
+        {
+            if (obstacles == null || obstacles.Count == 0)
+                return string.Empty;
+
+            // Count obstacles by their label
+            var obstacleCounts = new Dictionary<string, int>();
+
+            foreach (var obstacle in obstacles)
+            {
+                // Use the thing's LabelNoCount for proper grouping
+                string label;
+                if (obstacle.Thing != null)
+                {
+                    label = obstacle.Thing.LabelNoCount ?? obstacle.Thing.def?.label ?? "obstacle";
+                }
+                else
+                {
+                    // For terrain-based obstacles, use the stored label (strip any prefix)
+                    label = obstacle.Label;
+                    if (label.StartsWith("Interior: "))
+                        label = label.Substring(10);
+                }
+
+                if (obstacleCounts.ContainsKey(label))
+                    obstacleCounts[label]++;
+                else
+                    obstacleCounts[label] = 1;
+            }
+
+            return FormatCountedList(obstacleCounts);
+        }
+
+        /// <summary>
+        /// Calculates the bounding box dimensions of an enclosure's interior cells.
+        /// Returns width and height as interior dimensions (not including walls).
+        /// </summary>
+        /// <param name="enclosure">The enclosure to measure</param>
+        /// <returns>A tuple of (width, height)</returns>
+        private static (int width, int height) GetEnclosureDimensions(Enclosure enclosure)
+        {
+            if (enclosure?.InteriorCells == null || enclosure.InteriorCells.Count == 0)
+                return (0, 0);
+
+            var cells = enclosure.InteriorCells;
+
+            int minX = cells.Min(c => c.x);
+            int maxX = cells.Max(c => c.x);
+            int minZ = cells.Min(c => c.z);
+            int maxZ = cells.Max(c => c.z);
+
+            int width = maxX - minX + 1;
+            int height = maxZ - minZ + 1;
+
+            return (width, height);
+        }
+
+        /// <summary>
+        /// Formats a dictionary of label counts as "X thing1, Y thing2, and Z thing3".
+        /// Pluralizes labels when count > 1.
+        /// Terrain-based obstacles (prefixed with TERRAIN:) are formatted as "X terrain tiles" instead of pluralizing.
+        /// </summary>
+        private static string FormatCountedList(Dictionary<string, int> counts)
+        {
+            if (counts == null || counts.Count == 0)
+                return string.Empty;
+
+            var formattedParts = new List<string>();
+
+            // Sort by count descending for consistency
+            foreach (var kvp in counts.OrderByDescending(x => x.Value))
+            {
+                string key = kvp.Key;
+                string label;
+
+                // Check for terrain prefix - terrain gets "X terrain tiles" format
+                if (key.StartsWith(TerrainPrefix))
+                {
+                    string terrainName = key.Substring(TerrainPrefix.Length);
+                    label = kvp.Value == 1 ? $"{terrainName} tile" : $"{terrainName} tiles";
+                }
+                else
+                {
+                    // Regular items get pluralized
+                    label = kvp.Value > 1
+                        ? Find.ActiveLanguageWorker.Pluralize(key, kvp.Value)
+                        : key;
+                }
+                formattedParts.Add($"{kvp.Value} {label}");
+            }
+
+            // Join with commas and "and" before the last item
+            if (formattedParts.Count == 1)
+            {
+                return formattedParts[0];
+            }
+            else if (formattedParts.Count == 2)
+            {
+                return $"{formattedParts[0]} and {formattedParts[1]}";
+            }
+            else
+            {
+                // "X thing1, Y thing2, and Z thing3"
+                string allButLast = string.Join(", ", formattedParts.Take(formattedParts.Count - 1));
+                return $"{allButLast}, and {formattedParts.Last()}";
+            }
+        }
+
+        /// <summary>
+        /// Gets the cost info string for the current placement (e.g., "(140 wood)").
+        /// </summary>
+        private static string GetCostInfo()
+        {
+            // Try to calculate total cost from placed blueprints
+            int totalCost = 0;
+            string resourceName = string.Empty;
+
+            var allBlueprints = PlacedBlueprints;
+            if (allBlueprints.Count > 0 && allBlueprints[0]?.def?.entityDefToBuild is ThingDef thingDef)
+            {
+                // Get the stuff used (material)
+                ThingDef stuffDef = ArchitectState.SelectedMaterial;
+
+                if (thingDef.MadeFromStuff && stuffDef != null)
+                {
+                    totalCost = thingDef.CostStuffCount * allBlueprints.Count;
+                    resourceName = stuffDef.label;
+                }
+                else if (thingDef.CostList != null && thingDef.CostList.Count > 0)
+                {
+                    totalCost = thingDef.CostList[0].count * allBlueprints.Count;
+                    resourceName = thingDef.CostList[0].thingDef.label;
+                }
+            }
+
+            if (totalCost > 0 && !string.IsNullOrEmpty(resourceName))
+            {
+                return $" ({totalCost} {resourceName})";
+            }
+
+            return string.Empty;
         }
 
         /// <summary>
@@ -505,31 +874,47 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Creates or updates the temporary scanner category with current obstacles.
+        /// Includes both placement obstacles and interior obstacles from enclosures.
         /// </summary>
         private static void UpdateObstacleCategory()
         {
-            if (obstacleCells.Count == 0)
+            var cursorPos = MapNavigationState.CurrentCursorPosition;
+            var allObstacles = new List<ScannerItem>();
+
+            // Add placement obstacles (cells where placement failed)
+            foreach (var cell in obstacleCells)
+            {
+                string obstacleDesc = GetObstacleDescription(cell);
+                var item = new ScannerItem(cell, $"Obstacle: {obstacleDesc}", cursorPos);
+                allObstacles.Add(item);
+            }
+
+            // Add interior obstacles from detected enclosures
+            foreach (var enclosure in detectedEnclosures)
+            {
+                if (enclosure.Obstacles != null)
+                {
+                    foreach (var obstacle in enclosure.Obstacles)
+                    {
+                        // Create a new item with "Interior:" prefix
+                        var item = new ScannerItem(obstacle.Thing, cursorPos);
+                        item.Label = $"Interior: {obstacle.Label}";
+                        allObstacles.Add(item);
+                    }
+                }
+            }
+
+            if (allObstacles.Count == 0)
             {
                 ScannerState.RemoveTemporaryCategory();
                 return;
             }
 
-            // Create scanner items for each obstacle cell
-            var cursorPos = MapNavigationState.CurrentCursorPosition;
-            var obstacleItems = new List<ScannerItem>();
-
-            foreach (var cell in obstacleCells)
-            {
-                string obstacleDesc = GetObstacleDescription(cell);
-                var item = new ScannerItem(cell, $"Obstacle: {obstacleDesc}", cursorPos);
-                obstacleItems.Add(item);
-            }
-
             // Sort by distance
-            obstacleItems.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            allObstacles.Sort((a, b) => a.Distance.CompareTo(b.Distance));
 
             // Create temporary category in ScannerState
-            ScannerState.CreateTemporaryCategory("Obstacles", obstacleItems);
+            ScannerState.CreateTemporaryCategory("Obstacles", allObstacles);
         }
 
         /// <summary>
@@ -1038,6 +1423,7 @@ namespace RimWorldAccess
             segments.Clear();
             cellSegments.Clear();
             obstacleCells.Clear();
+            detectedEnclosures.Clear();
             orderTargets.Clear();
             orderTargetCells.Clear();
             activeDesignator = null;

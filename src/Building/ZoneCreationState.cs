@@ -586,8 +586,21 @@ namespace RimWorldAccess
                         break;
                 }
 
-                TolkHelper.Speak($"{zoneName} created with {selectedCells.Count} cells");
-                Log.Message($"Created {zoneName} with {selectedCells.Count} cells");
+                // Check for obstacles in the new zone
+                var obstacles = ObstacleDetector.FindObstacles(
+                    map,
+                    selectedCells,
+                    MapNavigationState.CurrentCursorPosition);
+
+                string obstacleInfo = "";
+                if (obstacles.Count > 0)
+                {
+                    obstacleInfo = $" {obstacles.Count} obstacles found.";
+                    ObstacleDetector.AddToScanner(obstacles, "Zone Obstacles");
+                }
+
+                TolkHelper.Speak($"{zoneName} created with {selectedCells.Count} cells.{obstacleInfo}");
+                Log.Message($"Created {zoneName} with {selectedCells.Count} cells, {obstacles.Count} obstacles");
             }
             catch (System.Exception ex)
             {
@@ -633,8 +646,8 @@ namespace RimWorldAccess
 
             try
             {
-                int addedCount = 0;
                 int removedCount = 0;
+                List<IntVec3> newlyAddedCells = new List<IntVec3>();
 
                 // Build a set of selected cells for quick lookup
                 HashSet<IntVec3> selectedSet = new HashSet<IntVec3>(selectedCells);
@@ -655,13 +668,13 @@ namespace RimWorldAccess
                     removedCount++;
                 }
 
-                // Add cells that are selected but not in the zone
+                // Add cells that are selected but not in the zone, tracking which are new
                 foreach (IntVec3 cell in selectedCells)
                 {
                     if (cell.InBounds(map) && !expandingZone.ContainsCell(cell))
                     {
                         expandingZone.AddCell(cell);
-                        addedCount++;
+                        newlyAddedCells.Add(cell);
                     }
                 }
 
@@ -669,6 +682,7 @@ namespace RimWorldAccess
                 expandingZone.CheckContiguous();
 
                 // Build feedback message
+                int addedCount = newlyAddedCells.Count;
                 string message = $"Updated {expandingZone.label}: ";
                 if (addedCount > 0 && removedCount > 0)
                 {
@@ -685,6 +699,21 @@ namespace RimWorldAccess
                 else
                 {
                     message += "no changes";
+                }
+
+                // Check for obstacles in NEWLY ADDED cells only (not existing zone cells)
+                if (newlyAddedCells.Count > 0)
+                {
+                    var obstacles = ObstacleDetector.FindObstacles(
+                        map,
+                        newlyAddedCells,
+                        MapNavigationState.CurrentCursorPosition);
+
+                    if (obstacles.Count > 0)
+                    {
+                        message += $". {obstacles.Count} obstacles in new area.";
+                        ObstacleDetector.AddToScanner(obstacles, "Zone Obstacles");
+                    }
                 }
 
                 TolkHelper.Speak(message);
@@ -815,6 +844,9 @@ namespace RimWorldAccess
             currentDesignator = null;
             previewHelper.Reset();
             selectionMode = ZoneSelectionMode.BoxSelection; // Reset to default mode
+
+            // Clear any obstacle scanner category from zone creation
+            ObstacleDetector.ClearFromScanner();
         }
 
         /// <summary>
