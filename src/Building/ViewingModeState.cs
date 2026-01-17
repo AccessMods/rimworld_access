@@ -40,6 +40,12 @@ namespace RimWorldAccess
         // Track detected enclosures formed by wall blueprints
         private static List<Enclosure> detectedEnclosures = new List<Enclosure>();
 
+        // Track the number of disconnected regions for zone placements
+        private static int detectedRegionCount = 0;
+
+        // Track zones created by zone placement (for accurate confirmation message)
+        private static HashSet<Zone> createdZones = new HashSet<Zone>();
+
         // Track order targets (things that were designated) - for Hunt, Haul, Tame, etc.
         // These are Things (animals, items) that the order designator targeted
         private static List<Thing> orderTargets = new List<Thing>();
@@ -65,6 +71,9 @@ namespace RimWorldAccess
 
         // Track whether this is an Order designator (Hunt, Mine, Cancel, etc.)
         private static bool isOrderDesignator = false;
+
+        // Track whether this is a Zone designator (Stockpile, Growing, etc.)
+        private static bool isZoneDesignator = false;
 
         #region Properties
 
@@ -145,6 +154,11 @@ namespace RimWorldAccess
         /// </summary>
         public static bool IsOrderDesignator => isOrderDesignator;
 
+        /// <summary>
+        /// Whether the current designator is a Zone type (Stockpile, Growing, etc.).
+        /// </summary>
+        public static bool IsZoneDesignator => isZoneDesignator;
+
         #endregion
 
         #region State Management
@@ -174,10 +188,12 @@ namespace RimWorldAccess
                 segments.Clear();
                 cellSegments.Clear();
                 obstacleCells.Clear();
+                createdZones.Clear();
                 orderTargets.Clear();
                 orderTargetCells.Clear();
                 isBuildDesignator = ShapeHelper.IsBuildDesignator(designator);
                 isOrderDesignator = ShapeHelper.IsOrderDesignator(designator);
+                isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
             }
             isAddingMore = false; // Reset the flag
 
@@ -222,6 +238,17 @@ namespace RimWorldAccess
             if (isBuildDesignator)
             {
                 detectedEnclosures = EnclosureDetector.DetectEnclosures(PlacedBlueprints, Find.CurrentMap, obstacleCells);
+            }
+
+            // For zone designators, count disconnected regions and collect created zones
+            detectedRegionCount = 0;
+            if (isZoneDesignator && result.PlacedCells != null && result.PlacedCells.Count > 0)
+            {
+                // Count how many separate regions the valid cells form
+                detectedRegionCount = CountDisconnectedRegions(result.PlacedCells);
+
+                // Collect the actual zones created (for confirm message)
+                CollectCreatedZones(result.PlacedCells);
             }
 
             // Create temporary scanner category for obstacles or targets
@@ -317,11 +344,195 @@ namespace RimWorldAccess
                     return $"Viewing mode. {totalPlaced} designations{segmentInfo}.";
                 }
             }
+            else if (isZoneDesignator)
+            {
+                // Build zone-specific announcement with obstacle info and split warning
+                return BuildZoneDesignatorAnnouncement(designator, totalPlaced, segmentInfo);
+            }
             else
             {
                 // Build announcement for build designators with smooth flowing sentences
                 return BuildBuildDesignatorAnnouncement(designator, totalPlaced, segmentInfo);
             }
+        }
+
+        /// <summary>
+        /// Builds the announcement specifically for zone designators.
+        /// Produces smooth flowing sentences combining zone creation, obstacles, and split warnings.
+        /// Uses dimensions instead of cell counts for clarity.
+        /// Examples:
+        /// - "50 by 12 stockpile zone created."
+        /// - "50 by 12 stockpile zone created, 11 blocked by sandstones." (contiguous - no split warning)
+        /// - "50 by 12 stockpile zone created, 11 blocked by 3 walls. Zone will be split into 3 parts."
+        /// </summary>
+        private static string BuildZoneDesignatorAnnouncement(Designator designator, int totalPlaced, string segmentInfo)
+        {
+            var parts = new List<string>();
+
+            // Get zone type label from designator
+            string zoneName = GetZoneTypeName(designator).ToLower();
+
+            // Calculate dimensions from placed cells
+            var placedCells = PlacedCells;
+            var (width, height) = GetCellsDimensions(placedCells);
+
+            // Get blocking obstacle summary using zone-specific detection
+            string blockingObstacleSummary = GetZoneBlockingObstacleSummary();
+
+            // Build the main placement sentence
+            if (obstacleCells.Count > 0 && totalPlaced > 0)
+            {
+                // "50 by 12 stockpile zone created, 11 blocked by [obstacle list]."
+                string blockedPart;
+                if (!string.IsNullOrEmpty(blockingObstacleSummary))
+                {
+                    blockedPart = $", {obstacleCells.Count} blocked by {blockingObstacleSummary}";
+                }
+                else
+                {
+                    blockedPart = $", {obstacleCells.Count} blocked";
+                }
+
+                parts.Add($"{width} by {height} {zoneName} zone created{blockedPart}{segmentInfo}");
+
+                // Only add split warning if the valid cells form multiple disconnected regions
+                // Obstacles on the edge don't cause splits - only obstacles that break contiguity do
+                if (detectedRegionCount > 1)
+                {
+                    parts.Add($"Zone will be split into {detectedRegionCount} parts");
+                }
+            }
+            else if (totalPlaced > 0)
+            {
+                // "50 by 12 stockpile zone created."
+                parts.Add($"{width} by {height} {zoneName} zone created{segmentInfo}");
+            }
+            else
+            {
+                // No cells placed - all blocked
+                parts.Add($"No zone cells placed{segmentInfo}");
+
+                if (obstacleCells.Count > 0 && !string.IsNullOrEmpty(blockingObstacleSummary))
+                {
+                    parts.Add($"All {obstacleCells.Count} cells blocked by {blockingObstacleSummary}");
+                }
+            }
+
+            // Add navigation hint if there are obstacles
+            if (obstacleCells.Count > 0)
+            {
+                parts.Add("Page Up/Down to navigate obstacles");
+            }
+
+            return $"Viewing mode. {string.Join(". ", parts)}.";
+        }
+
+        /// <summary>
+        /// Gets the zone type name from a zone designator.
+        /// </summary>
+        private static string GetZoneTypeName(Designator designator)
+        {
+            if (designator == null)
+                return "Zone";
+
+            // Try to get a clean label
+            string label = designator.Label;
+            if (!string.IsNullOrEmpty(label))
+            {
+                // Common patterns: "Create stockpile zone", "Create growing zone"
+                // Extract just the zone type
+                string lowerLabel = label.ToLower();
+                if (lowerLabel.Contains("stockpile"))
+                    return "Stockpile";
+                if (lowerLabel.Contains("growing"))
+                    return "Growing";
+                if (lowerLabel.Contains("dumping"))
+                    return "Dumping";
+                if (lowerLabel.Contains("fishing"))
+                    return "Fishing";
+
+                // Fallback to the label with some cleanup
+                label = label.Replace("Create ", "").Replace(" zone", "");
+                if (!string.IsNullOrEmpty(label))
+                    return char.ToUpper(label[0]) + label.Substring(1);
+            }
+
+            return "Zone";
+        }
+
+        /// <summary>
+        /// Gets a formatted summary of obstacles blocking zone placement.
+        /// Specifically looks for things that can't overlap zones (buildings, walls, etc.).
+        /// Groups obstacles by type and formats as "X thing1, Y thing2, and Z thing3".
+        /// </summary>
+        private static string GetZoneBlockingObstacleSummary()
+        {
+            if (obstacleCells.Count == 0)
+                return string.Empty;
+
+            Map map = Find.CurrentMap;
+            if (map == null)
+                return string.Empty;
+
+            // Count obstacles by their label
+            var obstacleCounts = new Dictionary<string, int>();
+
+            foreach (IntVec3 cell in obstacleCells)
+            {
+                string label = GetZoneObstacleLabel(cell, map);
+                if (obstacleCounts.ContainsKey(label))
+                    obstacleCounts[label]++;
+                else
+                    obstacleCounts[label] = 1;
+            }
+
+            return FormatCountedList(obstacleCounts, truncate: true);
+        }
+
+        /// <summary>
+        /// Gets a simple label for the obstacle blocking zone placement at a cell.
+        /// Checks for things that can't overlap zones according to RimWorld's CanOverlapZones property.
+        /// </summary>
+        private static string GetZoneObstacleLabel(IntVec3 cell, Map map)
+        {
+            // Check for things at the cell that can't overlap zones
+            List<Thing> things = cell.GetThingList(map);
+            foreach (Thing thing in things)
+            {
+                // Check if this thing prevents zone overlap
+                if (thing.def != null && !thing.def.CanOverlapZones)
+                {
+                    return thing.LabelNoCount ?? thing.def?.label ?? "obstacle";
+                }
+            }
+
+            // Check for existing zone of different type
+            Zone existingZone = map.zoneManager.ZoneAt(cell);
+            if (existingZone != null)
+            {
+                return $"existing {existingZone.label}";
+            }
+
+            // Check if too close to map edge
+            if (cell.InNoZoneEdgeArea(map))
+            {
+                return TerrainPrefix + "edge area";
+            }
+
+            // Check if fogged
+            if (cell.Fogged(map))
+            {
+                return "fog of war";
+            }
+
+            // Check terrain for impassable areas
+            TerrainDef terrain = cell.GetTerrain(map);
+            if (terrain != null && terrain.passability == Traversability.Impassable)
+            {
+                return TerrainPrefix + (terrain.label ?? "terrain");
+            }
+
+            return "obstacle";
         }
 
         /// <summary>
@@ -494,7 +705,7 @@ namespace RimWorldAccess
                     obstacleCounts[label] = 1;
             }
 
-            return FormatCountedList(obstacleCounts);
+            return FormatCountedList(obstacleCounts, truncate: true);
         }
 
         // Prefix used to mark terrain-based obstacles for special formatting
@@ -573,7 +784,7 @@ namespace RimWorldAccess
                     obstacleCounts[label] = 1;
             }
 
-            return FormatCountedList(obstacleCounts);
+            return FormatCountedList(obstacleCounts, truncate: true);
         }
 
         /// <summary>
@@ -587,7 +798,19 @@ namespace RimWorldAccess
             if (enclosure?.InteriorCells == null || enclosure.InteriorCells.Count == 0)
                 return (0, 0);
 
-            var cells = enclosure.InteriorCells;
+            return GetCellsDimensions(enclosure.InteriorCells);
+        }
+
+        /// <summary>
+        /// Calculates the bounding box dimensions of a set of cells.
+        /// Returns width and height of the bounding box.
+        /// </summary>
+        /// <param name="cells">The cells to measure</param>
+        /// <returns>A tuple of (width, height)</returns>
+        private static (int width, int height) GetCellsDimensions(IEnumerable<IntVec3> cells)
+        {
+            if (cells == null || !cells.Any())
+                return (0, 0);
 
             int minX = cells.Min(c => c.x);
             int maxX = cells.Max(c => c.x);
@@ -601,20 +824,53 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the cells belonging to a zone.
+        /// </summary>
+        /// <param name="zone">The zone to get cells from</param>
+        /// <returns>A list of cells in the zone</returns>
+        private static List<IntVec3> GetZoneCells(Zone zone)
+        {
+            if (zone == null)
+                return new List<IntVec3>();
+
+            return zone.Cells.ToList();
+        }
+
+        /// <summary>
         /// Formats a dictionary of label counts as "X thing1, Y thing2, and Z thing3".
         /// Pluralizes labels when count > 1.
         /// Terrain-based obstacles (prefixed with TERRAIN:) are formatted as "X terrain tiles" instead of pluralizing.
+        /// When truncate is true, groups with less than 1% of the total are summarized as
+        /// "and X more in Y smaller groups".
         /// </summary>
-        private static string FormatCountedList(Dictionary<string, int> counts)
+        /// <param name="counts">Dictionary of label to count</param>
+        /// <param name="truncate">If true, truncate groups under 1% threshold</param>
+        private static string FormatCountedList(Dictionary<string, int> counts, bool truncate = false)
         {
             if (counts == null || counts.Count == 0)
                 return string.Empty;
 
             var formattedParts = new List<string>();
+            int smallGroupCount = 0;
+            int smallGroupItems = 0;
+
+            // Calculate 1% threshold for truncation
+            int totalCount = counts.Values.Sum();
+            int threshold = truncate ? totalCount / 100 : 0;
+            if (truncate && threshold < 1)
+                threshold = 1; // minimum 1
 
             // Sort by count descending for consistency
             foreach (var kvp in counts.OrderByDescending(x => x.Value))
             {
+                // If truncating and this group is below threshold, add to summary
+                if (truncate && kvp.Value < threshold)
+                {
+                    smallGroupCount++;
+                    smallGroupItems += kvp.Value;
+                    continue;
+                }
+
                 string key = kvp.Key;
                 string label;
 
@@ -632,6 +888,13 @@ namespace RimWorldAccess
                         : key;
                 }
                 formattedParts.Add($"{kvp.Value} {label}");
+            }
+
+            // Add truncated summary if any small groups were skipped
+            if (smallGroupCount > 0)
+            {
+                string groupWord = smallGroupCount == 1 ? "group" : "groups";
+                formattedParts.Add($"{smallGroupItems} more in {smallGroupCount} smaller {groupWord}");
             }
 
             // Join with commas and "and" before the last item
@@ -915,12 +1178,19 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets a description of what is blocking placement at a cell.
+        /// For zone designators, uses zone-specific obstacle detection.
         /// </summary>
         private static string GetObstacleDescription(IntVec3 cell)
         {
             Map map = Find.CurrentMap;
             if (map == null)
                 return "Unknown";
+
+            // For zone designators, use zone-specific detection
+            if (isZoneDesignator)
+            {
+                return GetZoneObstacleDescriptionForScanner(cell, map);
+            }
 
             // Check for things at the cell
             List<Thing> things = cell.GetThingList(map);
@@ -969,8 +1239,56 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets a description for zone obstacles for scanner navigation.
+        /// Returns a short, friendly description for screen reader announcement.
+        /// </summary>
+        private static string GetZoneObstacleDescriptionForScanner(IntVec3 cell, Map map)
+        {
+            // Check for things that can't overlap zones
+            List<Thing> things = cell.GetThingList(map);
+            foreach (Thing thing in things)
+            {
+                if (thing.def != null && !thing.def.CanOverlapZones)
+                {
+                    return thing.LabelShort ?? thing.def?.label ?? "Obstacle";
+                }
+            }
+
+            // Check for existing zone of different type
+            Zone existingZone = map.zoneManager.ZoneAt(cell);
+            if (existingZone != null)
+            {
+                return $"Existing {existingZone.label}";
+            }
+
+            // Check if too close to map edge
+            if (cell.InNoZoneEdgeArea(map))
+            {
+                return "Edge area";
+            }
+
+            // Check if fogged
+            if (cell.Fogged(map))
+            {
+                return "Fog of war";
+            }
+
+            // Check terrain
+            TerrainDef terrain = cell.GetTerrain(map);
+            if (terrain != null && terrain.passability == Traversability.Impassable)
+            {
+                return terrain.label ?? "Terrain";
+            }
+
+            return "Blocked";
+        }
+
+        /// <summary>
         /// Exits viewing mode and confirms all placements.
         /// Also exits architect/placement mode entirely.
+        /// Note: We do NOT call RestoreFocus() here because users expect to stay
+        /// at their current position after confirming (near their placed buildings).
+        /// RestoreFocus() is only appropriate for cancel/undo operations.
         /// </summary>
         public static void Confirm()
         {
@@ -978,11 +1296,80 @@ namespace RimWorldAccess
                 return;
 
             int totalPlaced = PlacedCount;
-            string itemType = isBuildDesignator ? "blueprints" : "designations";
-            TolkHelper.Speak($"Orders confirmed. {totalPlaced} {itemType} placed.", SpeechPriority.Normal);
+            string announcement;
 
-            // Restore scanner focus
-            RestoreFocus();
+            if (isZoneDesignator)
+            {
+                // For zones, report with dimensions
+                int zoneCount = createdZones.Count;
+                string zoneName = GetZoneTypeName(activeDesignator).ToLower();
+                string zoneWord = zoneCount == 1 ? "zone" : "zones";
+
+                if (zoneCount == 1)
+                {
+                    // Single zone - just use overall dimensions
+                    var (width, height) = GetCellsDimensions(PlacedCells);
+                    announcement = $"Confirmed. {width} by {height} {zoneName} zone created.";
+                }
+                else
+                {
+                    // Multiple zones - list dimensions for each, sorted by size
+                    // Truncate smaller zones (under 1% of total cells)
+                    var zoneSizes = new List<(Zone zone, int cellCount, string dims)>();
+                    int totalCells = 0;
+
+                    foreach (Zone zone in createdZones)
+                    {
+                        var zoneCells = GetZoneCells(zone);
+                        var (w, h) = GetCellsDimensions(zoneCells);
+                        int cellCount = zoneCells.Count;
+                        totalCells += cellCount;
+                        zoneSizes.Add((zone, cellCount, $"{w} by {h}"));
+                    }
+
+                    // Sort by cell count descending (largest first)
+                    zoneSizes.Sort((a, b) => b.cellCount.CompareTo(a.cellCount));
+
+                    // 1% threshold for truncation
+                    int threshold = totalCells / 100;
+                    if (threshold < 1)
+                        threshold = 1;
+
+                    var significantDimensions = new List<string>();
+                    int smallZoneCount = 0;
+
+                    foreach (var (zone, cellCount, dims) in zoneSizes)
+                    {
+                        if (cellCount >= threshold)
+                        {
+                            significantDimensions.Add(dims);
+                        }
+                        else
+                        {
+                            smallZoneCount++;
+                        }
+                    }
+
+                    string dimensionsPart = string.Join(", ", significantDimensions);
+                    if (smallZoneCount > 0)
+                    {
+                        string smallWord = smallZoneCount == 1 ? "zone" : "zones";
+                        dimensionsPart += $", and {smallZoneCount} smaller {smallWord}";
+                    }
+
+                    announcement = $"Confirmed. {zoneCount} {zoneName} {zoneWord} created: {dimensionsPart}.";
+                }
+            }
+            else if (isBuildDesignator)
+            {
+                announcement = $"Orders confirmed. {totalPlaced} blueprints placed.";
+            }
+            else
+            {
+                announcement = $"Orders confirmed. {totalPlaced} designations placed.";
+            }
+
+            TolkHelper.Speak(announcement, SpeechPriority.Normal);
 
             Reset();
 
@@ -1416,10 +1803,13 @@ namespace RimWorldAccess
             isAddingMore = false;
             isBuildDesignator = false;
             isOrderDesignator = false;
+            isZoneDesignator = false;
             segments.Clear();
             cellSegments.Clear();
             obstacleCells.Clear();
             detectedEnclosures.Clear();
+            detectedRegionCount = 0;
+            createdZones.Clear();
             orderTargets.Clear();
             orderTargetCells.Clear();
             activeDesignator = null;
@@ -1566,6 +1956,86 @@ namespace RimWorldAccess
             SoundDefOf.Designate_Cancel.PlayOneShotOnCamera();
             TolkHelper.Speak($"Cancelled {thingLabel}", SpeechPriority.Normal);
             Log.Message($"[ViewingModeState] Removed blueprint at {cursorPos}");
+        }
+
+        #endregion
+
+        #region Zone Region Detection
+
+        /// <summary>
+        /// Counts the number of disconnected regions among a set of cells using flood fill.
+        /// This helps determine if zone placement will result in multiple separate zones.
+        /// </summary>
+        /// <param name="cells">The cells to analyze for contiguity</param>
+        /// <returns>The number of disconnected regions (1 = fully contiguous, 2+ = will be split)</returns>
+        private static int CountDisconnectedRegions(List<IntVec3> cells)
+        {
+            if (cells == null || cells.Count == 0)
+                return 0;
+
+            // Build a set for efficient lookup
+            var remainingCells = new HashSet<IntVec3>(cells);
+            int regionCount = 0;
+
+            // Keep flood filling until all cells are processed
+            while (remainingCells.Count > 0)
+            {
+                regionCount++;
+
+                // Start a new region from any remaining cell
+                IntVec3 startCell = default;
+                foreach (var cell in remainingCells)
+                {
+                    startCell = cell;
+                    break;
+                }
+
+                // Flood fill to find all connected cells in this region
+                var queue = new Queue<IntVec3>();
+                queue.Enqueue(startCell);
+                remainingCells.Remove(startCell);
+
+                while (queue.Count > 0)
+                {
+                    IntVec3 current = queue.Dequeue();
+
+                    // Check all 4 cardinal neighbors
+                    foreach (IntVec3 offset in GenAdj.CardinalDirections)
+                    {
+                        IntVec3 neighbor = current + offset;
+
+                        // If this neighbor is in our remaining cells, it's connected
+                        if (remainingCells.Contains(neighbor))
+                        {
+                            remainingCells.Remove(neighbor);
+                            queue.Enqueue(neighbor);
+                        }
+                    }
+                }
+            }
+
+            return regionCount;
+        }
+
+        /// <summary>
+        /// Collects the unique zones that were created/expanded by zone placement.
+        /// Call this after DesignateMultiCell to find what zones contain our cells.
+        /// </summary>
+        /// <param name="placedCells">The cells that were designated for zoning</param>
+        private static void CollectCreatedZones(List<IntVec3> placedCells)
+        {
+            Map map = Find.CurrentMap;
+            if (map?.zoneManager == null || placedCells == null)
+                return;
+
+            foreach (IntVec3 cell in placedCells)
+            {
+                Zone zone = map.zoneManager.ZoneAt(cell);
+                if (zone != null)
+                {
+                    createdZones.Add(zone);
+                }
+            }
         }
 
         #endregion

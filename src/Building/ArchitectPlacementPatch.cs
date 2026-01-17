@@ -297,7 +297,8 @@ namespace RimWorldAccess
                 {
                     // Save the current shape before placing (for restore after undo)
                     ShapeType currentShape = ShapePlacementState.CurrentShape;
-                    var result = ShapePlacementState.PlaceDesignations();
+                    // Pass silent: true because ViewingModeState.Enter will announce the placement
+                    var result = ShapePlacementState.PlaceDesignations(silent: true);
                     if (result.PlacedCount > 0)
                     {
                         ViewingModeState.Enter(result, activeDesignator, currentShape);

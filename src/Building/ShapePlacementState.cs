@@ -220,8 +220,9 @@ namespace RimWorldAccess
         /// Places designations for all cells in the current preview.
         /// Works for all designator types: Build (blueprints), Orders (Hunt, Haul), Zones, and Cells (Mine).
         /// </summary>
+        /// <param name="silent">If true, does not announce the placement (caller will announce, e.g., viewing mode)</param>
         /// <returns>A PlacementResult containing statistics and placed items</returns>
-        public static PlacementResult PlaceDesignations()
+        public static PlacementResult PlaceDesignations(bool silent = false)
         {
             PlacementResult result = new PlacementResult();
 
@@ -365,9 +366,12 @@ namespace RimWorldAccess
 
             result.PlacedBlueprints = placedThisOperation;
 
-            // Announce results
-            string announcement = BuildPlacementAnnouncement(result, designatorName, activeDesignator);
-            TolkHelper.Speak(announcement);
+            // Announce results unless silent (caller will announce, e.g., viewing mode)
+            if (!silent)
+            {
+                string announcement = BuildPlacementAnnouncement(result, designatorName, activeDesignator);
+                TolkHelper.Speak(announcement);
+            }
 
             Log.Message($"[ShapePlacementState] Placed {result.PlacedCount} designations, {result.ObstacleCount} obstacles");
 

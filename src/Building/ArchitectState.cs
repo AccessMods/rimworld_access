@@ -207,12 +207,9 @@ namespace RimWorldAccess
 
             // Check if this designator supports shapes - if so, we'll skip manual mode announcement
             // and let ShapePlacementState.Enter() handle the announcement
-            bool supportsShapes = false;
-            if (designator is Designator_Build)
-            {
-                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-                supportsShapes = availableShapes.Count > 0;
-            }
+            // This applies to all designator types (Build, Zone, Orders, etc.)
+            var availableShapes = ShapeHelper.GetAvailableShapes(designator);
+            bool supportsShapes = availableShapes.Count > 0;
 
             // Only announce manual mode if shapes are NOT available
             // This prevents double-announcement (manual mode + shape mode)
@@ -226,7 +223,6 @@ namespace RimWorldAccess
             // Auto-enter shape placement mode if the designator supports shapes
             if (supportsShapes)
             {
-                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
                 // Use the game's default shape (first in the list)
                 ShapeType defaultShape = availableShapes[0];
                 ShapePlacementState.Enter(designator, defaultShape);
