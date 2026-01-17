@@ -174,6 +174,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Enters placement mode with the selected designator.
+        /// This method sets up ArchitectState and calls DesignatorManager.Select().
+        /// The DesignatorManagerPatch will handle entering ShapePlacementState or announcing manual mode.
         /// </summary>
         public static void EnterPlacementMode(Designator designator, ThingDef material = null)
         {
@@ -188,12 +190,6 @@ namespace RimWorldAccess
             // Reset selection mode to box selection
             selectionMode = ArchitectSelectionMode.BoxSelection;
 
-            // Set the designator as selected in the game's DesignatorManager
-            if (Find.DesignatorManager != null)
-            {
-                Find.DesignatorManager.Select(designator);
-            }
-
             // If this is a place designator (build or install), set its rotation via reflection
             if (designator is Designator_Place placeDesignator)
             {
@@ -204,29 +200,13 @@ namespace RimWorldAccess
             }
 
             string toolName = designator.Label;
-
-            // Check if this designator supports shapes - if so, we'll skip manual mode announcement
-            // and let ShapePlacementState.Enter() handle the announcement
-            // This applies to all designator types (Build, Zone, Orders, etc.)
-            var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-            bool supportsShapes = availableShapes.Count > 0;
-
-            // Only announce manual mode if shapes are NOT available
-            // This prevents double-announcement (manual mode + shape mode)
-            if (!supportsShapes)
-            {
-                string announcement = GetPlacementAnnouncement(designator);
-                TolkHelper.Speak(announcement);
-            }
             Log.Message($"Entered placement mode with designator: {toolName}");
 
-            // Auto-enter shape placement mode if the designator supports shapes
-            if (supportsShapes)
+            // Set the designator as selected in the game's DesignatorManager
+            // The DesignatorManagerPatch.Postfix will handle entering accessible placement mode
+            if (Find.DesignatorManager != null)
             {
-                // Use the game's default shape (first in the list)
-                ShapeType defaultShape = availableShapes[0];
-                ShapePlacementState.Enter(designator, defaultShape);
-                Log.Message($"Auto-entered shape placement with default shape: {defaultShape}");
+                Find.DesignatorManager.Select(designator);
             }
         }
 
@@ -252,54 +232,6 @@ namespace RimWorldAccess
             string announcement = GetRotationAnnouncementForDef(placeDesignator.PlacingDef, currentRotation);
             TolkHelper.Speak(announcement);
             Log.Message($"Rotated building to: {currentRotation}");
-        }
-
-        /// <summary>
-        /// Gets the initial placement announcement including size and rotation info.
-        /// Works with all designator types: Build, Orders, Zones, etc.
-        /// </summary>
-        private static string GetPlacementAnnouncement(Designator designator)
-        {
-            // Handle Designator_Place (parent of both Designator_Build and Designator_Install)
-            if (!(designator is Designator_Place placeDesignator))
-            {
-                // For non-Place designators (Orders, Zones, Cells), check if shapes are available
-                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-                bool hasShapes = availableShapes.Count > 0;
-
-                if (hasShapes)
-                {
-                    return $"{designator.Label} selected. Press Space to designate, Tab for shapes, Enter to confirm, Escape to cancel";
-                }
-                return $"{designator.Label} selected. Press Space to designate tiles, Enter to confirm, Escape to cancel";
-            }
-
-            BuildableDef entDef = placeDesignator.PlacingDef;
-            if (entDef == null)
-            {
-                return $"{designator.Label} selected. Press Space to place, R to rotate, Escape to cancel";
-            }
-
-            IntVec2 size = entDef.Size;
-
-            string sizeInfo = GetSizeDescription(size, currentRotation);
-            string specialRequirements = GetSpecialSpatialRequirements(entDef, currentRotation);
-            string controlInfo = "Press Space to place, R to rotate, Escape to cancel";
-
-            if (!string.IsNullOrEmpty(specialRequirements))
-            {
-                return $"{designator.Label} selected. {sizeInfo}. {specialRequirements}. {controlInfo}";
-            }
-
-            return $"{designator.Label} selected. {sizeInfo}. {controlInfo}";
-        }
-
-        /// <summary>
-        /// Gets rotation announcement including size and spatial requirements.
-        /// </summary>
-        private static string GetRotationAnnouncement(Designator_Build buildDesignator)
-        {
-            return GetRotationAnnouncementForDef(buildDesignator.PlacingDef, currentRotation);
         }
 
         /// <summary>

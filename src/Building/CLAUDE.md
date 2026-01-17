@@ -4,7 +4,7 @@
 Construction, architect menu, zones, and areas management.
 
 ## Files
-**Patches:** ArchitectMenuPatch.cs, ArchitectPlacementPatch.cs, ZoneMenuPatch.cs, ZoneCreationPatch.cs, AreaPatch.cs, ForbidTogglePatch.cs
+**Patches:** ArchitectMenuPatch.cs, ArchitectPlacementPatch.cs, DesignatorManagerPatch.cs, ZoneMenuPatch.cs, ZoneCreationPatch.cs, AreaPatch.cs, ForbidTogglePatch.cs
 **States:** ArchitectState.cs, ZoneCreationState.cs, ZoneRenameState.cs, ZoneSettingsMenuState.cs, AreaPaintingState.cs, WindowlessAreaState.cs, PlantSelectionMenuState.cs, (plus 8 component states)
 **Helpers:** ArchitectHelper.cs, BuildingComponentsHelper.cs
 
@@ -28,3 +28,4 @@ ArchitectState uses enum modes: CategorySelection → ToolSelection → Material
 - [ ] Building placement works
 - [ ] Zone creation functional
 - [ ] Area management accessible
+- [ ] Gizmo-triggered placements announce and have keyboard controls (reinstall, bed end table, etc.)
