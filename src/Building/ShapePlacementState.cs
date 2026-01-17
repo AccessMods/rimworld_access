@@ -148,7 +148,7 @@ namespace RimWorldAccess
             hasViewingModeOnStack = fromViewingMode;
 
             string shapeName = ShapeHelper.GetShapeName(shape);
-            string designatorLabel = designator?.Label ?? "Unknown";
+            string designatorLabel = ArchitectHelper.GetSanitizedLabel(designator);
 
             if (shape == ShapeType.Manual)
             {
@@ -248,7 +248,8 @@ namespace RimWorldAccess
             List<Thing> placedThisOperation = new List<Thing>();
 
             // Get designator info
-            string designatorName = activeDesignator.Label ?? "Unknown";
+            // Use sanitized label to strip "..." suffix (prevents "wall...s" bug)
+            string designatorName = ArchitectHelper.GetSanitizedLabel(activeDesignator);
             bool isBuildDesignator = ShapeHelper.IsBuildDesignator(activeDesignator);
             bool isZoneDesignator = ShapeHelper.IsZoneDesignator(activeDesignator);
 

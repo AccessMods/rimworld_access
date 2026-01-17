@@ -203,6 +203,24 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the designator label with the "..." suffix stripped.
+        /// RimWorld adds "..." to labels when no material is selected (e.g., "wall...").
+        /// This suffix needs to be removed before pluralization to avoid "wall...s".
+        /// </summary>
+        /// <param name="designator">The designator to get the label from</param>
+        /// <param name="fallback">Fallback value if designator is null or label is empty</param>
+        /// <returns>The sanitized label without trailing "..."</returns>
+        public static string GetSanitizedLabel(Designator designator, string fallback = "Unknown")
+        {
+            string label = designator?.Label ?? fallback;
+            if (label.EndsWith("..."))
+            {
+                label = label.Substring(0, label.Length - 3);
+            }
+            return label;
+        }
+
+        /// <summary>
         /// Gets the default or most commonly available material for a buildable.
         /// </summary>
         public static ThingDef GetDefaultMaterial(BuildableDef buildable)

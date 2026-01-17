@@ -336,12 +336,8 @@ namespace RimWorldAccess
             var parts = new List<string>();
 
             // Get designator label for the announcement
-            // Strip "..." suffix that RimWorld adds when material hasn't been selected
-            string designatorLabel = designator?.Label ?? "blueprints";
-            if (designatorLabel.EndsWith("..."))
-            {
-                designatorLabel = designatorLabel.Substring(0, designatorLabel.Length - 3);
-            }
+            // Use sanitized label to strip "..." suffix (prevents "wall...s" bug)
+            string designatorLabel = ArchitectHelper.GetSanitizedLabel(designator, "blueprints");
             string itemType = isBuildDesignator ? "blueprints" : "designations";
 
             // Calculate total intended placements (placed + blocked)
