@@ -330,14 +330,14 @@ namespace RimWorldAccess
                     {
                         if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells.Contains(newPosition))
                         {
-                            // Only label corners, not intermediate tiles
+                            // Only label points, not intermediate tiles
                             if (ShapePlacementState.FirstCorner.HasValue && newPosition == ShapePlacementState.FirstCorner.Value)
                             {
-                                tileInfo = "First corner, " + tileInfo;
+                                tileInfo = "First point, " + tileInfo;
                             }
                             else if (ShapePlacementState.SecondCorner.HasValue && newPosition == ShapePlacementState.SecondCorner.Value)
                             {
-                                tileInfo = "Second corner, " + tileInfo;
+                                tileInfo = "Second point, " + tileInfo;
                             }
                             // No else - intermediate tiles in preview don't get a prefix
                         }

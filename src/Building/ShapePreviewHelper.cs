@@ -42,16 +42,16 @@ namespace RimWorldAccess
             previewCells.Clear();
             lastCellCount = 0;
             lastDragRealTime = Time.realtimeSinceStartup;
-            TolkHelper.Speak($"First corner, {cell.x}, {cell.z}");
+            TolkHelper.Speak($"First point, {cell.x}, {cell.z}");
             if (!string.IsNullOrEmpty(context))
-                Log.Message($"{context}: First corner set at {cell}");
+                Log.Message($"{context}: First point set at {cell}");
         }
 
         public void SetSecondCorner(IntVec3 cell, string context = "")
         {
             if (!firstCorner.HasValue)
             {
-                Log.Warning($"{context}: SetSecondCorner called without first corner set");
+                Log.Warning($"{context}: SetSecondCorner called without first point set");
                 return;
             }
 
@@ -61,9 +61,9 @@ namespace RimWorldAccess
             var (width, height) = ShapeHelper.GetDimensions(firstCorner.Value, cell);
             int cellCount = previewCells.Count;
 
-            TolkHelper.Speak($"Second corner, {width} by {height}, {cellCount} cells");
+            TolkHelper.Speak($"Second point, {width} by {height}, {cellCount} cells");
             if (!string.IsNullOrEmpty(context))
-                Log.Message($"{context}: Second corner at {cell}. {width}x{height}, {cellCount} cells");
+                Log.Message($"{context}: Second point at {cell}. {width}x{height}, {cellCount} cells");
         }
 
         public void UpdatePreview(IntVec3 cursor)

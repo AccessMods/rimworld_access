@@ -204,21 +204,33 @@ namespace RimWorldAccess
             }
 
             string toolName = designator.Label;
-            string announcement = GetPlacementAnnouncement(designator);
-            TolkHelper.Speak(announcement);
-            Log.Message($"Entered placement mode with designator: {toolName}");
 
-            // Auto-enter shape placement mode if the designator supports shapes
+            // Check if this designator supports shapes - if so, we'll skip manual mode announcement
+            // and let ShapePlacementState.Enter() handle the announcement
+            bool supportsShapes = false;
             if (designator is Designator_Build)
             {
                 var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-                if (availableShapes.Count > 0)
-                {
-                    // Use the game's default shape (first in the list)
-                    ShapeType defaultShape = availableShapes[0];
-                    ShapePlacementState.Enter(designator, defaultShape);
-                    Log.Message($"Auto-entered shape placement with default shape: {defaultShape}");
-                }
+                supportsShapes = availableShapes.Count > 0;
+            }
+
+            // Only announce manual mode if shapes are NOT available
+            // This prevents double-announcement (manual mode + shape mode)
+            if (!supportsShapes)
+            {
+                string announcement = GetPlacementAnnouncement(designator);
+                TolkHelper.Speak(announcement);
+            }
+            Log.Message($"Entered placement mode with designator: {toolName}");
+
+            // Auto-enter shape placement mode if the designator supports shapes
+            if (supportsShapes)
+            {
+                var availableShapes = ShapeHelper.GetAvailableShapes(designator);
+                // Use the game's default shape (first in the list)
+                ShapeType defaultShape = availableShapes[0];
+                ShapePlacementState.Enter(designator, defaultShape);
+                Log.Message($"Auto-entered shape placement with default shape: {defaultShape}");
             }
         }
 

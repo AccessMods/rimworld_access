@@ -311,11 +311,11 @@ namespace RimWorldAccess
                 {
                     if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingFirstCorner)
                     {
-                        TolkHelper.Speak("Place first corner with Space");
+                        TolkHelper.Speak("Place first point with Space");
                     }
                     else if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingSecondCorner)
                     {
-                        TolkHelper.Speak("Place second corner with Space");
+                        TolkHelper.Speak("Place second point with Space");
                     }
                     handled = true;
                 }

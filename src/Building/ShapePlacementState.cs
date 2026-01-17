@@ -156,7 +156,7 @@ namespace RimWorldAccess
             }
             else
             {
-                TolkHelper.Speak($"{designatorLabel} {shapeName} placement. Move to first corner and press Space.");
+                TolkHelper.Speak($"{designatorLabel} {shapeName} placement. Move to first point and press Space.");
             }
 
             Log.Message($"[ShapePlacementState] Entered with shape {shape} for designator {designatorLabel}, viewingModeOnStack={fromViewingMode}");
@@ -400,7 +400,7 @@ namespace RimWorldAccess
                     TolkHelper.Speak("Shape placement cancelled");
                     break;
                 case PlacementPhase.SettingSecondCorner:
-                    TolkHelper.Speak("Shape cancelled, back to first corner");
+                    TolkHelper.Speak("Shape cancelled, back to first point");
                     break;
                 case PlacementPhase.Previewing:
                     TolkHelper.Speak("Preview cancelled");
@@ -439,7 +439,7 @@ namespace RimWorldAccess
                 }
                 else if (previousPhase == PlacementPhase.SettingSecondCorner)
                 {
-                    TolkHelper.Speak("Selection cancelled, back to first corner");
+                    TolkHelper.Speak("Selection cancelled, back to first point");
                 }
             }
 
