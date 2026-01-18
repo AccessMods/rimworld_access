@@ -97,15 +97,15 @@ namespace RimWorldAccess
             }
             else
             {
-                // Sort by age (oldest to newest) and take the last 10
+                // Sort by age (most recent first) and take the first 10
                 var recentEntries = allEntries
                     .OrderBy(e => e.ageTicks)
-                    .TakeLast(10)
+                    .Take(10)
                     .ToList();
 
                 string currentBattleName = null;
 
-                // Build output for the last 10 entries
+                // Build output for the most recent entries
                 foreach (var (ageTicks, battleName, entryText) in recentEntries)
                 {
                     // Add battle header if it changed
