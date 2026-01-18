@@ -75,6 +75,9 @@ namespace RimWorldAccess
         // Track whether this is a Zone designator (Stockpile, Growing, etc.)
         private static bool isZoneDesignator = false;
 
+        // Track whether this is a delete/shrink designator (removes cells, no obstacles possible)
+        private static bool isDeleteDesignator = false;
+
         #region Properties
 
         /// <summary>
@@ -194,6 +197,7 @@ namespace RimWorldAccess
                 isBuildDesignator = ShapeHelper.IsBuildDesignator(designator);
                 isOrderDesignator = ShapeHelper.IsOrderDesignator(designator);
                 isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
+                isDeleteDesignator = ShapeHelper.IsDeleteDesignator(designator);
             }
             isAddingMore = false; // Reset the flag
 
@@ -217,8 +221,8 @@ namespace RimWorldAccess
                 }
             }
 
-            // Add any new obstacles
-            if (result.ObstacleCells != null)
+            // Add any new obstacles (skip for delete designators since removing cells can't have obstacles)
+            if (!isDeleteDesignator && result.ObstacleCells != null)
             {
                 foreach (var cell in result.ObstacleCells)
                 {
@@ -249,17 +253,21 @@ namespace RimWorldAccess
 
                 // Collect the actual zones created (for confirm message)
                 CollectCreatedZones(result.PlacedCells);
+
+                // Store the zone undo record as a segment (for undo support)
+                ZoneUndoTracker.AddSegment();
             }
 
             // Create temporary scanner category for obstacles or targets
+            // Skip for delete designators since they can't have obstacles
             if (isOrderDesignator)
             {
                 // For orders, create targets category instead of obstacles
                 UpdateTargetsCategory();
             }
-            else
+            else if (!isDeleteDesignator)
             {
-                // For builds, create obstacles category (includes interior obstacles from enclosures)
+                // For builds and zone-add, create obstacles category (includes interior obstacles from enclosures)
                 UpdateObstacleCategory();
             }
 
@@ -317,6 +325,14 @@ namespace RimWorldAccess
             }
         }
 
+        #region Announcement Building
+        // NOTE: The announcement methods (BuildEntryAnnouncement, BuildZoneDesignatorAnnouncement,
+        // BuildBuildDesignatorAnnouncement, BuildOrderTargetSummary, FormatCountedList) are kept
+        // in this class rather than extracted to a helper because they have deep dependencies on
+        // the static state (isOrderDesignator, obstacleCells, detectedEnclosures, orderTargets, etc.).
+        // Extracting them would require either unwieldy parameter lists or breaking encapsulation.
+        // The ~400 lines they occupy are acceptable given they're cohesive with the state they access.
+
         /// <summary>
         /// Builds the announcement for entering viewing mode.
         /// For orders, includes a summary of what was designated.
@@ -358,16 +374,35 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Builds the announcement specifically for zone designators.
-        /// Produces smooth flowing sentences combining zone creation, obstacles, and split warnings.
+        /// Produces smooth flowing sentences combining zone creation/expansion, obstacles, and split warnings.
         /// Uses dimensions instead of cell counts for clarity.
         /// Examples:
-        /// - "50 by 12 stockpile zone created."
-        /// - "50 by 12 stockpile zone created, 11 blocked by sandstones." (contiguous - no split warning)
-        /// - "50 by 12 stockpile zone created, 11 blocked by 3 walls. Zone will be split into 3 parts."
+        /// - "50 by 12 stockpile zone created." (new zone)
+        /// - "50 by 12 stockpile zone expanded." (adding to existing zone)
+        /// - "50 by 12 stockpile zone created, 11 cells blocked by sandstones." (contiguous - no split warning)
+        /// - "50 by 12 stockpile zone created, 11 cells blocked by 3 walls. Warning: This will create 3 separate zones. Press Escape to cancel."
+        /// For delete/shrink: "Removed 50 cells from zone."
         /// </summary>
         private static string BuildZoneDesignatorAnnouncement(Designator designator, int totalPlaced, string segmentInfo)
         {
             var parts = new List<string>();
+
+            // Handle delete/shrink designators differently
+            if (isDeleteDesignator)
+            {
+                // For shrink, we're removing cells, not creating zones
+                if (totalPlaced > 0)
+                {
+                    string cellWord = totalPlaced == 1 ? "cell" : "cells";
+                    parts.Add($"Removed {totalPlaced} {cellWord} from zone{segmentInfo}");
+                }
+                else
+                {
+                    parts.Add($"No zone cells removed{segmentInfo}");
+                }
+
+                return $"Viewing mode. {string.Join(". ", parts)}.";
+            }
 
             // Get zone type label from designator
             string zoneName = GetZoneTypeName(designator).ToLower();
@@ -379,33 +414,37 @@ namespace RimWorldAccess
             // Get blocking obstacle summary using zone-specific detection
             string blockingObstacleSummary = GetZoneBlockingObstacleSummary();
 
+            // Determine if this is an expansion of existing zone vs new zone creation
+            // Use "expanded" for adding to existing zone, "created" for new zone
+            string actionVerb = ZoneUndoTracker.WasZoneExpansion ? "expanded" : "created";
+
             // Build the main placement sentence
             if (obstacleCells.Count > 0 && totalPlaced > 0)
             {
-                // "50 by 12 stockpile zone created, 11 blocked by [obstacle list]."
+                // "50 by 12 stockpile zone created, 11 cells blocked by [obstacle list]."
                 string blockedPart;
                 if (!string.IsNullOrEmpty(blockingObstacleSummary))
                 {
-                    blockedPart = $", {obstacleCells.Count} blocked by {blockingObstacleSummary}";
+                    blockedPart = $", {obstacleCells.Count} cells blocked by {blockingObstacleSummary}";
                 }
                 else
                 {
-                    blockedPart = $", {obstacleCells.Count} blocked";
+                    blockedPart = $", {obstacleCells.Count} cells blocked";
                 }
 
-                parts.Add($"{width} by {height} {zoneName} zone created{blockedPart}{segmentInfo}");
+                parts.Add($"{width} by {height} {zoneName} zone {actionVerb}{blockedPart}{segmentInfo}");
 
                 // Only add split warning if the valid cells form multiple disconnected regions
                 // Obstacles on the edge don't cause splits - only obstacles that break contiguity do
                 if (detectedRegionCount > 1)
                 {
-                    parts.Add($"Zone will be split into {detectedRegionCount} parts");
+                    parts.Add($"Warning: This will create {detectedRegionCount} separate zones. Press Escape to cancel");
                 }
             }
             else if (totalPlaced > 0)
             {
                 // "50 by 12 stockpile zone created."
-                parts.Add($"{width} by {height} {zoneName} zone created{segmentInfo}");
+                parts.Add($"{width} by {height} {zoneName} zone {actionVerb}{segmentInfo}");
             }
             else
             {
@@ -461,6 +500,30 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Counts items by their label from a collection of cells.
+        /// This is a shared helper for GetZoneBlockingObstacleSummary and GetBlockingObstacleSummary.
+        /// </summary>
+        /// <param name="cells">The cells to process</param>
+        /// <param name="labelGetter">A function that gets the label for a cell</param>
+        /// <param name="map">The map to use for label lookup</param>
+        /// <returns>A dictionary of label to count</returns>
+        private static Dictionary<string, int> CountItemsByLabel(IEnumerable<IntVec3> cells, System.Func<IntVec3, Map, string> labelGetter, Map map)
+        {
+            var counts = new Dictionary<string, int>();
+
+            foreach (IntVec3 cell in cells)
+            {
+                string label = labelGetter(cell, map);
+                if (counts.ContainsKey(label))
+                    counts[label]++;
+                else
+                    counts[label] = 1;
+            }
+
+            return counts;
+        }
+
+        /// <summary>
         /// Gets a formatted summary of obstacles blocking zone placement.
         /// Specifically looks for things that can't overlap zones (buildings, walls, etc.).
         /// Groups obstacles by type and formats as "X thing1, Y thing2, and Z thing3".
@@ -474,18 +537,7 @@ namespace RimWorldAccess
             if (map == null)
                 return string.Empty;
 
-            // Count obstacles by their label
-            var obstacleCounts = new Dictionary<string, int>();
-
-            foreach (IntVec3 cell in obstacleCells)
-            {
-                string label = GetZoneObstacleLabel(cell, map);
-                if (obstacleCounts.ContainsKey(label))
-                    obstacleCounts[label]++;
-                else
-                    obstacleCounts[label] = 1;
-            }
-
+            var obstacleCounts = CountItemsByLabel(obstacleCells, GetZoneObstacleLabel, map);
             return FormatCountedList(obstacleCounts, truncate: true);
         }
 
@@ -502,7 +554,26 @@ namespace RimWorldAccess
                 // Check if this thing prevents zone overlap
                 if (thing.def != null && !thing.def.CanOverlapZones)
                 {
-                    return thing.LabelNoCount ?? thing.def?.label ?? "obstacle";
+                    // Try multiple label sources to get a meaningful name
+                    string label = thing.LabelNoCount;
+                    if (string.IsNullOrEmpty(label))
+                    {
+                        label = thing.def?.label;
+                    }
+                    if (string.IsNullOrEmpty(label))
+                    {
+                        // For blueprints/frames, try to get the label of what's being built
+                        if (thing.def?.entityDefToBuild is ThingDef builtDef)
+                        {
+                            label = builtDef.label + " (unbuilt)";
+                        }
+                    }
+                    if (string.IsNullOrEmpty(label))
+                    {
+                        // Use the thing's category as a last resort
+                        label = thing.def?.category.ToString().ToLower() ?? "structure";
+                    }
+                    return label;
                 }
             }
 
@@ -532,7 +603,9 @@ namespace RimWorldAccess
                 return TerrainPrefix + (terrain.label ?? "terrain");
             }
 
-            return "obstacle";
+            // If we still can't identify the obstacle, use a clear fallback
+            // This shouldn't happen often, but if it does, "blocked cell" is clearer than "obstacle"
+            return "blocked cell";
         }
 
         /// <summary>
@@ -693,18 +766,7 @@ namespace RimWorldAccess
             if (map == null)
                 return string.Empty;
 
-            // Count obstacles by their label
-            var obstacleCounts = new Dictionary<string, int>();
-
-            foreach (IntVec3 cell in obstacleCells)
-            {
-                string label = GetObstacleLabel(cell, map);
-                if (obstacleCounts.ContainsKey(label))
-                    obstacleCounts[label]++;
-                else
-                    obstacleCounts[label] = 1;
-            }
-
+            var obstacleCounts = CountItemsByLabel(obstacleCells, GetObstacleLabel, map);
             return FormatCountedList(obstacleCounts, truncate: true);
         }
 
@@ -1036,6 +1098,8 @@ namespace RimWorldAccess
             return result;
         }
 
+        #endregion
+
         /// <summary>
         /// Creates or updates the temporary scanner category with current order targets.
         /// Similar to UpdateObstacleCategory but for order targets.
@@ -1300,64 +1364,73 @@ namespace RimWorldAccess
 
             if (isZoneDesignator)
             {
-                // For zones, report with dimensions
-                int zoneCount = createdZones.Count;
-                string zoneName = GetZoneTypeName(activeDesignator).ToLower();
-                string zoneWord = zoneCount == 1 ? "zone" : "zones";
-
-                if (zoneCount == 1)
+                // Handle delete/shrink designators differently
+                if (isDeleteDesignator)
                 {
-                    // Single zone - just use overall dimensions
-                    var (width, height) = GetCellsDimensions(PlacedCells);
-                    announcement = $"Confirmed. {width} by {height} {zoneName} zone created.";
+                    string cellWord = totalPlaced == 1 ? "cell" : "cells";
+                    announcement = $"Confirmed. {totalPlaced} zone {cellWord} removed.";
                 }
                 else
                 {
-                    // Multiple zones - list dimensions for each, sorted by size
-                    // Truncate smaller zones (under 1% of total cells)
-                    var zoneSizes = new List<(Zone zone, int cellCount, string dims)>();
-                    int totalCells = 0;
+                    // For zone creation, report with dimensions
+                    int zoneCount = createdZones.Count;
+                    string zoneName = GetZoneTypeName(activeDesignator).ToLower();
+                    string zoneWord = zoneCount == 1 ? "zone" : "zones";
 
-                    foreach (Zone zone in createdZones)
+                    if (zoneCount == 1)
                     {
-                        var zoneCells = GetZoneCells(zone);
-                        var (w, h) = GetCellsDimensions(zoneCells);
-                        int cellCount = zoneCells.Count;
-                        totalCells += cellCount;
-                        zoneSizes.Add((zone, cellCount, $"{w} by {h}"));
+                        // Single zone - just use overall dimensions
+                        var (width, height) = GetCellsDimensions(PlacedCells);
+                        announcement = $"Confirmed. {width} by {height} {zoneName} zone created.";
                     }
-
-                    // Sort by cell count descending (largest first)
-                    zoneSizes.Sort((a, b) => b.cellCount.CompareTo(a.cellCount));
-
-                    // 1% threshold for truncation
-                    int threshold = totalCells / 100;
-                    if (threshold < 1)
-                        threshold = 1;
-
-                    var significantDimensions = new List<string>();
-                    int smallZoneCount = 0;
-
-                    foreach (var (zone, cellCount, dims) in zoneSizes)
+                    else
                     {
-                        if (cellCount >= threshold)
+                        // Multiple zones - list dimensions for each, sorted by size
+                        // Truncate smaller zones (under 1% of total cells)
+                        var zoneSizes = new List<(Zone zone, int cellCount, string dims)>();
+                        int totalCells = 0;
+
+                        foreach (Zone zone in createdZones)
                         {
-                            significantDimensions.Add(dims);
+                            var zoneCells = GetZoneCells(zone);
+                            var (w, h) = GetCellsDimensions(zoneCells);
+                            int cellCount = zoneCells.Count;
+                            totalCells += cellCount;
+                            zoneSizes.Add((zone, cellCount, $"{w} by {h}"));
                         }
-                        else
+
+                        // Sort by cell count descending (largest first)
+                        zoneSizes.Sort((a, b) => b.cellCount.CompareTo(a.cellCount));
+
+                        // 1% threshold for truncation
+                        int threshold = totalCells / 100;
+                        if (threshold < 1)
+                            threshold = 1;
+
+                        var significantDimensions = new List<string>();
+                        int smallZoneCount = 0;
+
+                        foreach (var (zone, cellCount, dims) in zoneSizes)
                         {
-                            smallZoneCount++;
+                            if (cellCount >= threshold)
+                            {
+                                significantDimensions.Add(dims);
+                            }
+                            else
+                            {
+                                smallZoneCount++;
+                            }
                         }
-                    }
 
-                    string dimensionsPart = string.Join(", ", significantDimensions);
-                    if (smallZoneCount > 0)
-                    {
-                        string smallWord = smallZoneCount == 1 ? "zone" : "zones";
-                        dimensionsPart += $", and {smallZoneCount} smaller {smallWord}";
-                    }
+                        string dimensionsPart = string.Join(", ", significantDimensions);
+                        if (smallZoneCount > 0)
+                        {
+                            string smallWord = smallZoneCount == 1 ? "zone" : "zones";
+                            dimensionsPart += $", and {smallZoneCount} smaller {smallWord}";
+                        }
 
-                    announcement = $"Confirmed. {zoneCount} {zoneName} {zoneWord} created: {dimensionsPart}.";
+                        announcement = $"Confirmed. {zoneCount} {zoneName} {zoneWord} created: {dimensionsPart}.";
+                    }
                 }
             }
             else if (isBuildDesignator)
@@ -1370,6 +1443,12 @@ namespace RimWorldAccess
             }
 
             TolkHelper.Speak(announcement, SpeechPriority.Normal);
+
+            // Clear zone undo tracker data since changes are confirmed
+            if (isZoneDesignator)
+            {
+                ZoneUndoTracker.Clear();
+            }
 
             Reset();
 
@@ -1395,40 +1474,18 @@ namespace RimWorldAccess
             if (currentSegCount == 0)
                 return;
 
-            int removedCount = 0;
-            string itemType = isBuildDesignator ? "blueprints" : "designations";
+            // Remove the last segment using centralized helper
+            int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
+            int removedCount = RemoveSegmentItems(lastIndex);
 
+            // Remove the segment from the list
             if (isBuildDesignator)
-            {
-                // For Build designators, destroy the Things (blueprints)
-                var lastSegment = segments[segments.Count - 1];
-                foreach (Thing blueprint in lastSegment)
-                {
-                    if (blueprint != null && !blueprint.Destroyed)
-                    {
-                        blueprint.Destroy(DestroyMode.Cancel);
-                        removedCount++;
-                    }
-                }
                 segments.RemoveAt(segments.Count - 1);
-            }
             else
-            {
-                // For Orders/Zones/Cells, remove designations from DesignationManager
-                var lastCellSegment = cellSegments[cellSegments.Count - 1];
-                Map map = Find.CurrentMap;
-                if (map != null)
-                {
-                    foreach (IntVec3 cell in lastCellSegment)
-                    {
-                        // Try to remove any designation at this cell
-                        bool removed = RemoveDesignationAtCell(cell, map);
-                        if (removed)
-                            removedCount++;
-                    }
-                }
                 cellSegments.RemoveAt(cellSegments.Count - 1);
-            }
+
+            // Determine item type with proper pluralization
+            string itemType = GetItemTypeForCount(removedCount);
 
             // Announce what happened
             int remainingCount = PlacedCount;
@@ -1454,7 +1511,7 @@ namespace RimWorldAccess
                 }
             }
 
-            Log.Message($"[ViewingModeState] Removed last segment ({removedCount} {itemType}), {remainingSegments} segments remaining");
+            Log.Message($"[ViewingModeState] Removed last segment ({removedCount} items), {remainingSegments} segments remaining");
         }
 
         /// <summary>
@@ -1547,40 +1604,22 @@ namespace RimWorldAccess
                 return;
 
             int removedCount = 0;
-            string itemType = isBuildDesignator ? "blueprints" : "designations";
             int currentSegCount = SegmentCount;
 
             // Remove the last segment if there is one
             if (currentSegCount > 0)
             {
-                if (isBuildDesignator)
-                {
-                    var lastSegment = segments[segments.Count - 1];
-                    foreach (Thing blueprint in lastSegment)
-                    {
-                        if (blueprint != null && !blueprint.Destroyed)
-                        {
-                            blueprint.Destroy(DestroyMode.Cancel);
-                            removedCount++;
-                        }
-                    }
-                    segments.RemoveAt(segments.Count - 1);
-                }
-                else
-                {
-                    var lastCellSegment = cellSegments[cellSegments.Count - 1];
-                    Map map = Find.CurrentMap;
-                    if (map != null)
-                    {
-                        foreach (IntVec3 cell in lastCellSegment)
-                        {
-                            if (RemoveDesignationAtCell(cell, map))
-                                removedCount++;
-                        }
-                    }
-                    cellSegments.RemoveAt(cellSegments.Count - 1);
-                }
+                // Remove the last segment using centralized helper
+                int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
+                removedCount = RemoveSegmentItems(lastIndex);
 
+                // Remove the segment from the list
+                if (isBuildDesignator)
+                    segments.RemoveAt(segments.Count - 1);
+                else
+                    cellSegments.RemoveAt(cellSegments.Count - 1);
+
+                string itemType = GetItemTypeForCount(removedCount);
                 TolkHelper.Speak($"Removed {removedCount} {itemType}. Returning to placement.", SpeechPriority.Normal);
             }
             else
@@ -1627,42 +1666,12 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
-            int removedCount = 0;
-            string itemType = isBuildDesignator ? "blueprints" : "designations";
+            // Remove all segments using centralized helper (-1 = all segments)
+            int removedCount = RemoveSegmentItems(-1);
 
-            if (isBuildDesignator)
-            {
-                // Remove all blueprints from all segments
-                foreach (var segment in segments)
-                {
-                    foreach (Thing blueprint in segment)
-                    {
-                        if (blueprint != null && !blueprint.Destroyed)
-                        {
-                            blueprint.Destroy(DestroyMode.Cancel);
-                            removedCount++;
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Remove all designations from all cell segments
-                Map map = Find.CurrentMap;
-                if (map != null)
-                {
-                    foreach (var cellSegment in cellSegments)
-                    {
-                        foreach (IntVec3 cell in cellSegment)
-                        {
-                            if (RemoveDesignationAtCell(cell, map))
-                                removedCount++;
-                        }
-                    }
-                }
-            }
-
-            TolkHelper.Speak($"Removed all {removedCount} {itemType}", SpeechPriority.Normal);
+            string itemType = GetItemTypeForCount(removedCount);
+            string allWord = removedCount == 1 ? "" : "all ";
+            TolkHelper.Speak($"Removed {allWord}{removedCount} {itemType}", SpeechPriority.Normal);
 
             // Restore scanner focus
             RestoreFocus();
@@ -1679,12 +1688,12 @@ namespace RimWorldAccess
                 ShapePlacementState.Enter(savedDesignator, savedShape);
             }
 
-            Log.Message($"[ViewingModeState] Undid all {removedCount} {itemType} and returned to {savedShape} placement");
+            Log.Message($"[ViewingModeState] Undid all {removedCount} items and returned to {savedShape} placement");
         }
 
         /// <summary>
         /// Shows a confirmation dialog before exiting viewing mode.
-        /// "Leave" removes all blueprints and exits to game map.
+        /// "Leave" removes all blueprints/designations/zone changes and exits to game map.
         /// "Stay" closes the dialog and stays in preview mode.
         /// </summary>
         private static void ShowExitConfirmation()
@@ -1692,52 +1701,38 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
+            // Determine dialog message based on designator type
+            string dialogMessage;
+            if (isBuildDesignator)
+            {
+                dialogMessage = "Leave preview? All blueprints will be lost.";
+            }
+            else if (isZoneDesignator)
+            {
+                dialogMessage = "Leave preview? All zone changes will be undone.";
+            }
+            else
+            {
+                dialogMessage = "Leave preview? All designations will be removed.";
+            }
+
             Find.WindowStack.Add(new Dialog_MessageBox(
-                "Leave preview? All blueprints will be lost.",
+                dialogMessage,
                 "Leave",
                 () =>
                 {
-                    // Remove all blueprints/designations
-                    int removedCount = 0;
-                    string itemType = isBuildDesignator ? "blueprints" : "designations";
+                    // Remove all segments using centralized helper (-1 = all segments)
+                    int removedCount = RemoveSegmentItems(-1);
 
-                    if (isBuildDesignator)
-                    {
-                        foreach (var segment in segments)
-                        {
-                            foreach (Thing blueprint in segment)
-                            {
-                                if (blueprint != null && !blueprint.Destroyed)
-                                {
-                                    blueprint.Destroy(DestroyMode.Cancel);
-                                    removedCount++;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        Map map = Find.CurrentMap;
-                        if (map != null)
-                        {
-                            foreach (var cellSegment in cellSegments)
-                            {
-                                foreach (IntVec3 cell in cellSegment)
-                                {
-                                    if (RemoveDesignationAtCell(cell, map))
-                                        removedCount++;
-                                }
-                            }
-                        }
-                    }
-
-                    TolkHelper.Speak($"Removed all {removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
+                    string itemType = GetItemTypeForCount(removedCount);
+                    string allWord = removedCount == 1 ? "" : "all ";
+                    TolkHelper.Speak($"Removed {allWord}{removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
 
                     // Restore focus and exit completely
                     RestoreFocus();
                     Reset();
 
-                    Log.Message($"[ViewingModeState] Exited via confirmation, removed {removedCount} {itemType}");
+                    Log.Message($"[ViewingModeState] Exited via confirmation, removed {removedCount} items");
                 },
                 "Stay",
                 null,
@@ -1795,15 +1790,131 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets the item type string with proper pluralization based on count.
+        /// Returns singular form for count of 1, plural form otherwise.
+        /// </summary>
+        private static string GetItemTypeForCount(int count)
+        {
+            if (isBuildDesignator)
+                return count == 1 ? "blueprint" : "blueprints";
+            else if (isZoneDesignator)
+                return count == 1 ? "zone cell" : "zone cells";
+            else
+                return count == 1 ? "designation" : "designations";
+        }
+
+        /// <summary>
+        /// Removes items from a single segment (blueprints, zone cells, or designations).
+        /// This is the core removal logic extracted from RemoveLastSegment, UndoLastAndReturn,
+        /// UndoAll, and ShowExitConfirmation to eliminate code duplication.
+        /// </summary>
+        /// <param name="segmentIndex">Index of the segment to remove, or -1 to process all segments</param>
+        /// <returns>The count of items that were removed</returns>
+        private static int RemoveSegmentItems(int segmentIndex = -1)
+        {
+            int removedCount = 0;
+            Map map = Find.CurrentMap;
+
+            if (isBuildDesignator)
+            {
+                // For Build designators, destroy the Things (blueprints)
+                if (segmentIndex >= 0 && segmentIndex < segments.Count)
+                {
+                    // Remove single segment
+                    var segment = segments[segmentIndex];
+                    foreach (Thing blueprint in segment)
+                    {
+                        if (blueprint != null && !blueprint.Destroyed)
+                        {
+                            blueprint.Destroy(DestroyMode.Cancel);
+                            removedCount++;
+                        }
+                    }
+                }
+                else if (segmentIndex == -1)
+                {
+                    // Remove all segments
+                    foreach (var segment in segments)
+                    {
+                        foreach (Thing blueprint in segment)
+                        {
+                            if (blueprint != null && !blueprint.Destroyed)
+                            {
+                                blueprint.Destroy(DestroyMode.Cancel);
+                                removedCount++;
+                            }
+                        }
+                    }
+                }
+            }
+            else if (isZoneDesignator)
+            {
+                // For Zone designators, use ZoneUndoTracker to restore previous state
+                if (map != null)
+                {
+                    if (segmentIndex >= 0 && segmentIndex < cellSegments.Count)
+                    {
+                        // Count cells in segment for feedback
+                        removedCount = cellSegments[segmentIndex].Count;
+                        ZoneUndoTracker.UndoLastSegment(map);
+                    }
+                    else if (segmentIndex == -1)
+                    {
+                        // Count total cells for feedback
+                        foreach (var cellSegment in cellSegments)
+                        {
+                            removedCount += cellSegment.Count;
+                        }
+                        ZoneUndoTracker.UndoAll(map);
+                    }
+                }
+            }
+            else
+            {
+                // For Orders/Cells, remove designations from DesignationManager
+                if (map != null)
+                {
+                    if (segmentIndex >= 0 && segmentIndex < cellSegments.Count)
+                    {
+                        // Remove single segment
+                        foreach (IntVec3 cell in cellSegments[segmentIndex])
+                        {
+                            if (RemoveDesignationAtCell(cell, map))
+                                removedCount++;
+                        }
+                    }
+                    else if (segmentIndex == -1)
+                    {
+                        // Remove all segments
+                        foreach (var cellSegment in cellSegments)
+                        {
+                            foreach (IntVec3 cell in cellSegment)
+                            {
+                                if (RemoveDesignationAtCell(cell, map))
+                                    removedCount++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return removedCount;
+        }
+
+        /// <summary>
         /// Resets all state to inactive.
         /// </summary>
         private static void Reset()
         {
+            // Clear zone undo tracker data
+            ZoneUndoTracker.Clear();
+
             isActive = false;
             isAddingMore = false;
             isBuildDesignator = false;
             isOrderDesignator = false;
             isZoneDesignator = false;
+            isDeleteDesignator = false;
             segments.Clear();
             cellSegments.Clear();
             obstacleCells.Clear();

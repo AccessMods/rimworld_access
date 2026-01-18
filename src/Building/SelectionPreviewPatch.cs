@@ -87,12 +87,12 @@ namespace RimWorldAccess
                 // Draw preview cells using native green highlight material
                 RenderCells(ShapePlacementState.PreviewCells, DesignatorUtility.DragHighlightCellMat);
 
-                // Draw rectangle outline connecting first corner to current cursor
-                if (ShapePlacementState.FirstCorner.HasValue)
+                // Draw rectangle outline connecting first point to current cursor
+                if (ShapePlacementState.FirstPoint.HasValue)
                 {
-                    IntVec3 firstCorner = ShapePlacementState.FirstCorner.Value;
-                    IntVec3 secondCorner = ShapePlacementState.SecondCorner ?? MapNavigationState.CurrentCursorPosition;
-                    RenderRectangleOutline(firstCorner, secondCorner);
+                    IntVec3 firstPoint = ShapePlacementState.FirstPoint.Value;
+                    IntVec3 secondPoint = ShapePlacementState.SecondPoint ?? MapNavigationState.CurrentCursorPosition;
+                    RenderRectangleOutline(firstPoint, secondPoint);
                 }
             }
 

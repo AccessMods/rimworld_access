@@ -166,7 +166,7 @@ namespace RimWorldAccess
                 return false;
 
             var shapes = GetAvailableShapes(designator);
-            return shapes.Count > 0;
+            return shapes.Count > 1; // More than just Manual
         }
 
         /// <summary>
@@ -186,18 +186,21 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Checks if a designator is a Zone designator.
+        /// Checks if a designator inherits from a type with the given name.
+        /// Walks the type hierarchy checking type names.
         /// </summary>
-        public static bool IsZoneDesignator(Designator designator)
+        /// <param name="designator">The designator to check</param>
+        /// <param name="typeName">The type name to search for in the hierarchy</param>
+        /// <returns>True if the designator's type hierarchy includes the specified type name</returns>
+        private static bool InheritsFromTypeName(Designator designator, string typeName)
         {
             if (designator == null)
                 return false;
 
-            // Check if this designator's type hierarchy includes "Designator_Zone"
-            System.Type type = designator.GetType();
+            Type type = designator.GetType();
             while (type != null)
             {
-                if (type.Name == "Designator_Zone")
+                if (type.Name == typeName)
                     return true;
                 type = type.BaseType;
             }
@@ -205,22 +208,29 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Checks if a designator is a Zone designator.
+        /// </summary>
+        public static bool IsZoneDesignator(Designator designator)
+        {
+            return InheritsFromTypeName(designator, "Designator_Zone");
+        }
+
+        /// <summary>
+        /// Checks if a designator is a delete/shrink designator (removes cells rather than adding them).
+        /// Examples: Designator_ZoneDelete, Designator_ZoneDelete_Shrink
+        /// These designators should skip obstacle detection since removing cells can't have obstacles.
+        /// </summary>
+        public static bool IsDeleteDesignator(Designator designator)
+        {
+            return InheritsFromTypeName(designator, "Designator_ZoneDelete");
+        }
+
+        /// <summary>
         /// Checks if a designator is a Cells designator (multi-cell selection like Mine).
         /// </summary>
         public static bool IsCellsDesignator(Designator designator)
         {
-            if (designator == null)
-                return false;
-
-            // Check if this designator's type hierarchy includes "Designator_Cells"
-            System.Type type = designator.GetType();
-            while (type != null)
-            {
-                if (type.Name == "Designator_Cells")
-                    return true;
-                type = type.BaseType;
-            }
-            return false;
+            return InheritsFromTypeName(designator, "Designator_Cells");
         }
 
         /// <summary>

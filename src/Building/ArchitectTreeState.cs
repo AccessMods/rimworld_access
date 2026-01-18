@@ -448,12 +448,20 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the sibling position (X of Y) for a menu item.
+        /// Uses a counting loop instead of LINQ to avoid allocation.
         /// </summary>
         private static (int position, int total) GetSiblingPosition(MenuItem item)
         {
-            var siblings = menuItems.Where(m => m.parent == item.parent).ToList();
-            int position = siblings.IndexOf(item) + 1;
-            return (position, siblings.Count);
+            int position = 0, total = 0;
+            foreach (var m in menuItems)
+            {
+                if (m.parent == item.parent)
+                {
+                    total++;
+                    if (m == item) position = total;
+                }
+            }
+            return (position, total);
         }
 
         private static void AnnounceCurrentSelection()
@@ -577,6 +585,9 @@ namespace RimWorldAccess
 
         public static bool ProcessTypeaheadCharacter(char c)
         {
+            if (menuItems == null || menuItems.Count == 0)
+                return false;
+
             var labels = GetVisibleItemLabels();
             if (typeahead.ProcessCharacterInput(c, labels, out int newIndex))
             {

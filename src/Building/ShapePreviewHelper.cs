@@ -35,14 +35,17 @@ namespace RimWorldAccess
             currentShape = shape;
         }
 
-        public void SetFirstCorner(IntVec3 cell, string context = "")
+        public void SetFirstCorner(IntVec3 cell, string context = "", bool silent = false)
         {
             firstCorner = cell;
             secondCorner = null;
             previewCells.Clear();
             lastCellCount = 0;
             lastDragRealTime = Time.realtimeSinceStartup;
-            TolkHelper.Speak($"First point, {cell.x}, {cell.z}");
+            if (!silent)
+            {
+                TolkHelper.Speak($"First point, {cell.x}, {cell.z}");
+            }
             if (!string.IsNullOrEmpty(context))
                 Log.Message($"{context}: First point set at {cell}");
         }

@@ -300,17 +300,14 @@ namespace RimWorldAccess
                     // Get tile information and announce it
                     string tileInfo = TileInfoHelper.GetTileSummary(newPosition, Find.CurrentMap);
 
-                    // If in zone creation mode, prepend selection state
-                    if (ZoneCreationState.IsInCreationMode)
+                    // If in zone creation mode and single tile selection, prepend selection state
+                    // In shape mode (BoxSelection), we don't announce "Selected" for existing cells
+                    // as they're just the initial zone boundary, not active selections
+                    if (ZoneCreationState.IsInCreationMode &&
+                        ZoneCreationState.SelectionMode == ZoneSelectionMode.SingleTile &&
+                        ZoneCreationState.IsCellSelected(newPosition))
                     {
-                        if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(newPosition))
-                        {
-                            tileInfo = "Preview, " + tileInfo;
-                        }
-                        else if (ZoneCreationState.IsCellSelected(newPosition))
-                        {
-                            tileInfo = "Selected, " + tileInfo;
-                        }
+                        tileInfo = "Selected, " + tileInfo;
                     }
                     // If in area painting mode, prepend selection/preview state
                     else if (AreaPaintingState.IsActive)
@@ -331,11 +328,11 @@ namespace RimWorldAccess
                         if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells.Contains(newPosition))
                         {
                             // Only label points, not intermediate tiles
-                            if (ShapePlacementState.FirstCorner.HasValue && newPosition == ShapePlacementState.FirstCorner.Value)
+                            if (ShapePlacementState.FirstPoint.HasValue && newPosition == ShapePlacementState.FirstPoint.Value)
                             {
                                 tileInfo = "First point, " + tileInfo;
                             }
-                            else if (ShapePlacementState.SecondCorner.HasValue && newPosition == ShapePlacementState.SecondCorner.Value)
+                            else if (ShapePlacementState.SecondPoint.HasValue && newPosition == ShapePlacementState.SecondPoint.Value)
                             {
                                 tileInfo = "Second point, " + tileInfo;
                             }

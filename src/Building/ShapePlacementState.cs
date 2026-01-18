@@ -11,9 +11,9 @@ namespace RimWorldAccess
     {
         /// <summary>Shape placement is not active</summary>
         Inactive,
-        /// <summary>User is positioning the first corner of the shape</summary>
+        /// <summary>User is positioning the first point of the shape</summary>
         SettingFirstCorner,
-        /// <summary>User is positioning the second corner (shape preview updates live)</summary>
+        /// <summary>User is positioning the second point (shape preview updates live)</summary>
         SettingSecondCorner,
         /// <summary>Shape is defined, user is reviewing before placing</summary>
         Previewing
@@ -47,6 +47,22 @@ namespace RimWorldAccess
         public List<Thing> PlacedBlueprints { get; set; }
 
         /// <summary>
+        /// True if this operation would delete an entire zone and needs confirmation.
+        /// When true, the result contains no placements - caller should show warning dialog.
+        /// </summary>
+        public bool NeedsFullDeletionConfirmation { get; set; }
+
+        /// <summary>
+        /// The zone that would be deleted if NeedsFullDeletionConfirmation is true.
+        /// </summary>
+        public Zone ZonePendingDeletion { get; set; }
+
+        /// <summary>
+        /// The valid cells that would delete the zone if NeedsFullDeletionConfirmation is true.
+        /// </summary>
+        public List<IntVec3> PendingValidCells { get; set; }
+
+        /// <summary>
         /// Creates a new empty PlacementResult.
         /// </summary>
         public PlacementResult()
@@ -54,13 +70,14 @@ namespace RimWorldAccess
             PlacedCells = new List<IntVec3>();
             ObstacleCells = new List<IntVec3>();
             PlacedBlueprints = new List<Thing>();
+            PendingValidCells = new List<IntVec3>();
             ResourceName = string.Empty;
         }
     }
 
     /// <summary>
     /// State machine for two-point shape-based building placement.
-    /// Manages the workflow: Enter -> SetFirstCorner -> SetSecondCorner/UpdatePreview -> PlaceBlueprints.
+    /// Manages the workflow: Enter -> SetFirstPoint -> SetSecondPoint/UpdatePreview -> PlaceBlueprints.
     /// </summary>
     public static class ShapePlacementState
     {
@@ -74,6 +91,19 @@ namespace RimWorldAccess
 
         // Stack tracking - whether we can return to viewing mode on exit
         private static bool hasViewingModeOnStack = false;
+
+        // Mapping of designator name keywords to gerund action phrases
+        private static readonly Dictionary<string, string> DesignatorActionMap = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
+        {
+            { "haul", "hauling" },
+            { "hunt", "hunting" },
+            { "mine", "mining" },
+            { "deconstruct", "deconstruction" },
+            { "cut", "cutting" },
+            { "smooth", "smoothing" },
+            { "tame", "taming" },
+            { "cancel", "cancellation" }
+        };
 
         #region Properties
 
@@ -93,14 +123,14 @@ namespace RimWorldAccess
         public static ShapeType CurrentShape => currentShape;
 
         /// <summary>
-        /// The first corner of the shape (origin point).
+        /// The first point of the shape (origin point).
         /// </summary>
-        public static IntVec3? FirstCorner => previewHelper.FirstCorner;
+        public static IntVec3? FirstPoint => previewHelper.FirstCorner;
 
         /// <summary>
-        /// The second corner of the shape (target point).
+        /// The second point of the shape (target point).
         /// </summary>
-        public static IntVec3? SecondCorner => previewHelper.SecondCorner;
+        public static IntVec3? SecondPoint => previewHelper.SecondCorner;
 
         /// <summary>
         /// The cells that make up the current shape preview.
@@ -109,12 +139,12 @@ namespace RimWorldAccess
         public static IReadOnlyList<IntVec3> PreviewCells => previewHelper.PreviewCells;
 
         /// <summary>
-        /// Whether the first corner has been set.
+        /// Whether the first point has been set.
         /// </summary>
-        public static bool HasFirstCorner => previewHelper.HasFirstCorner;
+        public static bool HasFirstPoint => previewHelper.HasFirstCorner;
 
         /// <summary>
-        /// Whether we're in preview mode (both corners set).
+        /// Whether we're in preview mode (both points set).
         /// </summary>
         public static bool IsInPreviewMode => previewHelper.IsInPreviewMode;
 
@@ -163,14 +193,14 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the first corner of the shape at the specified cell.
+        /// Sets the first point of the shape at the specified cell.
         /// </summary>
-        /// <param name="cell">The cell position for the first corner</param>
-        public static void SetFirstCorner(IntVec3 cell)
+        /// <param name="cell">The cell position for the first point</param>
+        public static void SetFirstPoint(IntVec3 cell)
         {
             if (currentPhase != PlacementPhase.SettingFirstCorner)
             {
-                Log.Warning($"[ShapePlacementState] SetFirstCorner called in wrong phase: {currentPhase}");
+                Log.Warning($"[ShapePlacementState] SetFirstPoint called in wrong phase: {currentPhase}");
                 return;
             }
 
@@ -179,20 +209,20 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the second corner of the shape and transitions to previewing phase.
+        /// Sets the second point of the shape and transitions to previewing phase.
         /// </summary>
-        /// <param name="cell">The cell position for the second corner</param>
-        public static void SetSecondCorner(IntVec3 cell)
+        /// <param name="cell">The cell position for the second point</param>
+        public static void SetSecondPoint(IntVec3 cell)
         {
             if (currentPhase != PlacementPhase.SettingSecondCorner)
             {
-                Log.Warning($"[ShapePlacementState] SetSecondCorner called in wrong phase: {currentPhase}");
+                Log.Warning($"[ShapePlacementState] SetSecondPoint called in wrong phase: {currentPhase}");
                 return;
             }
 
             if (!previewHelper.HasFirstCorner)
             {
-                Log.Error("[ShapePlacementState] SetSecondCorner called without first corner set");
+                Log.Error("[ShapePlacementState] SetSecondPoint called without first point set");
                 return;
             }
 
@@ -226,131 +256,212 @@ namespace RimWorldAccess
         {
             PlacementResult result = new PlacementResult();
 
+            // Validate pre-conditions
+            Map map = ValidatePrePlacement(result);
+            if (map == null)
+                return result;
+
+            // Track items placed this operation for undo
+            List<Thing> placedThisOperation = new List<Thing>();
+
+            // Get designator info
+            bool isZoneDesignator = ShapeHelper.IsZoneDesignator(activeDesignator);
+
+            // For zones, use DesignateMultiCell with all valid cells at once
+            if (isZoneDesignator)
+            {
+                PlacementResult zoneResult = PlaceZoneDesignations(result, map);
+                if (zoneResult != null)
+                    return zoneResult; // Early return for zone deletion confirmation
+            }
+            // For all other designators (Build, Orders, Cells), use DesignateSingleCell per cell
+            else
+            {
+                PlaceNonZoneDesignations(result, map, placedThisOperation);
+            }
+
+            FinalizeAndAnnounce(result, placedThisOperation, silent);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Validates pre-conditions for placement.
+        /// </summary>
+        /// <param name="result">The PlacementResult to populate with error info</param>
+        /// <returns>The current map if valid, null if validation failed</returns>
+        private static Map ValidatePrePlacement(PlacementResult result)
+        {
             if (activeDesignator == null)
             {
                 TolkHelper.Speak("No designator active", SpeechPriority.High);
-                return result;
+                return null;
             }
 
             if (previewHelper.PreviewCells.Count == 0)
             {
                 TolkHelper.Speak("No cells selected", SpeechPriority.High);
-                return result;
+                return null;
             }
 
             Map map = Find.CurrentMap;
             if (map == null)
             {
                 TolkHelper.Speak("No map available", SpeechPriority.High);
-                return result;
+                return null;
             }
 
-            // Track items placed this operation for undo
-            List<Thing> placedThisOperation = new List<Thing>();
+            return map;
+        }
 
-            // Get designator info
-            // Use sanitized label to strip "..." suffix (prevents "wall...s" bug)
-            string designatorName = ArchitectHelper.GetSanitizedLabel(activeDesignator);
-            bool isBuildDesignator = ShapeHelper.IsBuildDesignator(activeDesignator);
-            bool isZoneDesignator = ShapeHelper.IsZoneDesignator(activeDesignator);
+        /// <summary>
+        /// Places zone designations using DesignateMultiCell.
+        /// </summary>
+        /// <param name="result">The PlacementResult to populate</param>
+        /// <param name="map">The current map</param>
+        /// <returns>A PlacementResult if early return needed (zone deletion confirmation), null otherwise</returns>
+        private static PlacementResult PlaceZoneDesignations(PlacementResult result, Map map)
+        {
+            bool isDeleteDesignator = ShapeHelper.IsDeleteDesignator(activeDesignator);
 
-            // For zones, use DesignateMultiCell with all valid cells at once
-            if (isZoneDesignator)
+            // Filter to valid cells first
+            List<IntVec3> validCells = new List<IntVec3>();
+            foreach (IntVec3 cell in previewHelper.PreviewCells)
             {
-                // Filter to valid cells first
-                List<IntVec3> validCells = new List<IntVec3>();
-                foreach (IntVec3 cell in previewHelper.PreviewCells)
+                AcceptanceReport report = activeDesignator.CanDesignateCell(cell);
+                if (report.Accepted)
                 {
-                    AcceptanceReport report = activeDesignator.CanDesignateCell(cell);
-                    if (report.Accepted)
-                    {
-                        validCells.Add(cell);
-                    }
-                    else
-                    {
-                        result.ObstacleCells.Add(cell);
-                        result.ObstacleCount++;
-                    }
+                    validCells.Add(cell);
                 }
+                else
+                {
+                    result.ObstacleCells.Add(cell);
+                    result.ObstacleCount++;
+                }
+            }
 
-                if (validCells.Count > 0)
+            if (validCells.Count > 0)
+            {
+                try
+                {
+                    // Get the target zone from selection (for shrink operations)
+                    Zone targetZone = GetSelectedZone();
+
+                    // For shrink operations, check if this would delete the entire zone
+                    if (isDeleteDesignator && targetZone != null)
+                    {
+                        if (ZoneUndoTracker.WouldDeleteEntireZone(targetZone, validCells))
+                        {
+                            // Return early with pending confirmation flag
+                            result.NeedsFullDeletionConfirmation = true;
+                            result.ZonePendingDeletion = targetZone;
+                            result.PendingValidCells.AddRange(validCells);
+                            result.ObstacleCells.Clear(); // Clear obstacles since we're not placing yet
+                            result.ObstacleCount = 0;
+                            Log.Message($"[ShapePlacementState] Shrink would delete entire zone {targetZone.label}, needs confirmation");
+                            return result;
+                        }
+                    }
+
+                    // Capture zone state BEFORE modification for undo support
+                    ZoneUndoTracker.CaptureBeforeState(targetZone, map, isDeleteDesignator);
+
+                    activeDesignator.DesignateMultiCell(validCells);
+
+                    // Capture zone state AFTER modification (detects splits)
+                    ZoneUndoTracker.CaptureAfterState(map);
+
+                    result.PlacedCells.AddRange(validCells);
+                    result.PlacedCount = validCells.Count;
+                }
+                catch (System.Exception ex)
+                {
+                    Log.Error($"[ShapePlacementState] Error placing zone: {ex.Message}");
+                }
+            }
+
+            return null; // Continue with normal flow
+        }
+
+        /// <summary>
+        /// Places non-zone designations (Build, Orders, Cells) using DesignateSingleCell per cell.
+        /// </summary>
+        /// <param name="result">The PlacementResult to populate</param>
+        /// <param name="map">The current map</param>
+        /// <param name="placedThisOperation">List to track placed things for undo</param>
+        private static void PlaceNonZoneDesignations(PlacementResult result, Map map, List<Thing> placedThisOperation)
+        {
+            bool isBuildDesignator = ShapeHelper.IsBuildDesignator(activeDesignator);
+
+            // Get building info for cost calculation (only applies to Build designators)
+            BuildableDef buildableDef = isBuildDesignator ? GetBuildableDefFromDesignator(activeDesignator) : null;
+            int costPerCell = GetCostPerCell(buildableDef);
+            string resourceName = GetResourceName(buildableDef);
+
+            // Place designation for each cell
+            foreach (IntVec3 cell in previewHelper.PreviewCells)
+            {
+                AcceptanceReport report = activeDesignator.CanDesignateCell(cell);
+
+                if (report.Accepted)
                 {
                     try
                     {
-                        activeDesignator.DesignateMultiCell(validCells);
-                        result.PlacedCells.AddRange(validCells);
-                        result.PlacedCount = validCells.Count;
+                        // For Build designators, track the blueprint for undo
+                        if (isBuildDesignator)
+                        {
+                            List<Thing> thingsBefore = new List<Thing>(cell.GetThingList(map));
+                            activeDesignator.DesignateSingleCell(cell);
+                            List<Thing> thingsAfter = cell.GetThingList(map);
+                            foreach (Thing thing in thingsAfter)
+                            {
+                                if (!thingsBefore.Contains(thing) &&
+                                    (thing.def.IsBlueprint || thing.def.IsFrame))
+                                {
+                                    placedThisOperation.Add(thing);
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // For Orders (Hunt, Haul) and Cells (Mine), just designate
+                            activeDesignator.DesignateSingleCell(cell);
+                        }
+
+                        result.PlacedCells.Add(cell);
+                        result.PlacedCount++;
                     }
                     catch (System.Exception ex)
                     {
-                        Log.Error($"[ShapePlacementState] Error placing zone: {ex.Message}");
-                    }
-                }
-            }
-            // For all other designators (Build, Orders, Cells), use DesignateSingleCell per cell
-            else
-            {
-                // Get building info for cost calculation (only applies to Build designators)
-                BuildableDef buildableDef = isBuildDesignator ? GetBuildableDefFromDesignator(activeDesignator) : null;
-                int costPerCell = GetCostPerCell(buildableDef);
-                string resourceName = GetResourceName(buildableDef);
-
-                // Place designation for each cell
-                foreach (IntVec3 cell in previewHelper.PreviewCells)
-                {
-                    AcceptanceReport report = activeDesignator.CanDesignateCell(cell);
-
-                    if (report.Accepted)
-                    {
-                        try
-                        {
-                            // For Build designators, track the blueprint for undo
-                            if (isBuildDesignator)
-                            {
-                                List<Thing> thingsBefore = new List<Thing>(cell.GetThingList(map));
-                                activeDesignator.DesignateSingleCell(cell);
-                                List<Thing> thingsAfter = cell.GetThingList(map);
-                                foreach (Thing thing in thingsAfter)
-                                {
-                                    if (!thingsBefore.Contains(thing) &&
-                                        (thing.def.IsBlueprint || thing.def.IsFrame))
-                                    {
-                                        placedThisOperation.Add(thing);
-                                        break;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // For Orders (Hunt, Haul) and Cells (Mine), just designate
-                                activeDesignator.DesignateSingleCell(cell);
-                            }
-
-                            result.PlacedCells.Add(cell);
-                            result.PlacedCount++;
-                        }
-                        catch (System.Exception ex)
-                        {
-                            Log.Error($"[ShapePlacementState] Error placing at {cell}: {ex.Message}");
-                            result.ObstacleCells.Add(cell);
-                            result.ObstacleCount++;
-                        }
-                    }
-                    else
-                    {
+                        Log.Error($"[ShapePlacementState] Error placing at {cell}: {ex.Message}");
                         result.ObstacleCells.Add(cell);
                         result.ObstacleCount++;
                     }
                 }
-
-                // Calculate total resource cost (only for Build designators)
-                if (isBuildDesignator)
+                else
                 {
-                    result.TotalResourceCost = result.PlacedCount * costPerCell;
-                    result.ResourceName = resourceName;
+                    result.ObstacleCells.Add(cell);
+                    result.ObstacleCount++;
                 }
             }
 
+            // Calculate total resource cost (only for Build designators)
+            if (isBuildDesignator)
+            {
+                result.TotalResourceCost = result.PlacedCount * costPerCell;
+                result.ResourceName = resourceName;
+            }
+        }
+
+        /// <summary>
+        /// Finalizes the designator and announces results.
+        /// </summary>
+        /// <param name="result">The PlacementResult to finalize</param>
+        /// <param name="placedThisOperation">List of placed things for undo tracking</param>
+        /// <param name="silent">If true, does not announce the placement</param>
+        private static void FinalizeAndAnnounce(PlacementResult result, List<Thing> placedThisOperation, bool silent)
+        {
             // Finalize the designator if any placements succeeded
             if (result.PlacedCount > 0)
             {
@@ -369,13 +480,13 @@ namespace RimWorldAccess
             // Announce results unless silent (caller will announce, e.g., viewing mode)
             if (!silent)
             {
+                // Use sanitized label to strip "..." suffix (prevents "wall...s" bug)
+                string designatorName = ArchitectHelper.GetSanitizedLabel(activeDesignator);
                 string announcement = BuildPlacementAnnouncement(result, designatorName, activeDesignator);
                 TolkHelper.Speak(announcement);
             }
 
             Log.Message($"[ShapePlacementState] Placed {result.PlacedCount} designations, {result.ObstacleCount} obstacles");
-
-            return result;
         }
 
         /// <summary>
@@ -386,6 +497,57 @@ namespace RimWorldAccess
         public static PlacementResult PlaceBlueprints()
         {
             return PlaceDesignations();
+        }
+
+        /// <summary>
+        /// Executes the zone deletion after user confirms via dialog.
+        /// Called when PlacementResult.NeedsFullDeletionConfirmation was true and user clicked "Delete Zone".
+        /// </summary>
+        /// <param name="pendingResult">The result that contains the pending deletion info</param>
+        /// <param name="silent">If true, does not announce the deletion (caller will announce)</param>
+        /// <returns>Updated PlacementResult with actual deletion results</returns>
+        public static PlacementResult ExecuteConfirmedZoneDeletion(PlacementResult pendingResult, bool silent = false)
+        {
+            if (pendingResult == null || !pendingResult.NeedsFullDeletionConfirmation)
+            {
+                Log.Warning("[ShapePlacementState] ExecuteConfirmedZoneDeletion called without pending confirmation");
+                return pendingResult;
+            }
+
+            Zone targetZone = pendingResult.ZonePendingDeletion;
+            List<IntVec3> validCells = pendingResult.PendingValidCells;
+            Map map = Find.CurrentMap;
+
+            if (targetZone == null || map == null)
+            {
+                Log.Error("[ShapePlacementState] ExecuteConfirmedZoneDeletion: missing zone or map");
+                return pendingResult;
+            }
+
+            try
+            {
+                // Delete the zone directly (no undo tracking since this is irreversible)
+                string zoneName = targetZone.label;
+                targetZone.Delete();
+
+                // Update the result
+                pendingResult.PlacedCells.AddRange(validCells);
+                pendingResult.PlacedCount = validCells.Count;
+                pendingResult.NeedsFullDeletionConfirmation = false;
+
+                if (!silent)
+                {
+                    TolkHelper.Speak($"Zone {zoneName} deleted.", SpeechPriority.Normal);
+                }
+
+                Log.Message($"[ShapePlacementState] Confirmed deletion of zone {zoneName}");
+            }
+            catch (System.Exception ex)
+            {
+                Log.Error($"[ShapePlacementState] Error executing zone deletion: {ex.Message}");
+            }
+
+            return pendingResult;
         }
 
         /// <summary>
@@ -457,6 +619,42 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Removes the most recently set point, stepping back through the placement phases.
+        /// Used by Shift+Space to undo points one at a time.
+        /// </summary>
+        /// <returns>True if a point was removed, false if no points to remove</returns>
+        public static bool RemoveLastPoint()
+        {
+            // If in Previewing phase (both points set), remove second point
+            if (currentPhase == PlacementPhase.Previewing && previewHelper.IsInPreviewMode)
+            {
+                // Clear second point by resetting preview and keeping first point position
+                IntVec3 firstPointPos = previewHelper.FirstCorner.Value;
+                previewHelper.Reset();
+                // Use silent=true to avoid redundant "First point" announcement
+                previewHelper.SetFirstCorner(firstPointPos, "[ShapePlacementState]", silent: true);
+                currentPhase = PlacementPhase.SettingSecondCorner;
+                TolkHelper.Speak("Second point removed");
+                Log.Message("[ShapePlacementState] Removed second point, back to SettingSecondCorner phase");
+                return true;
+            }
+
+            // If in SettingSecondCorner phase (only first point set), remove first point
+            if (currentPhase == PlacementPhase.SettingSecondCorner && previewHelper.HasFirstCorner)
+            {
+                previewHelper.Reset();
+                currentPhase = PlacementPhase.SettingFirstCorner;
+                TolkHelper.Speak("First point removed");
+                Log.Message("[ShapePlacementState] Removed first point, back to SettingFirstCorner phase");
+                return true;
+            }
+
+            // No points to remove (in SettingFirstCorner phase with no first point, or unexpected state)
+            TolkHelper.Speak("No points to remove");
+            return false;
+        }
+
+        /// <summary>
         /// Resets all state variables to their initial values.
         /// </summary>
         public static void Reset()
@@ -473,6 +671,26 @@ namespace RimWorldAccess
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Gets the currently selected zone from Find.Selector.
+        /// Used for zone expand/shrink operations to identify the target zone.
+        /// </summary>
+        /// <returns>The selected zone, or null if no zone is selected</returns>
+        private static Zone GetSelectedZone()
+        {
+            var selectedObjects = Find.Selector?.SelectedObjects;
+            if (selectedObjects == null)
+                return null;
+
+            foreach (object obj in selectedObjects)
+            {
+                if (obj is Zone zone)
+                    return zone;
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// Gets the BuildableDef from a designator for cost calculation.
@@ -589,8 +807,9 @@ namespace RimWorldAccess
                 }
             }
 
-            // Obstacle info - only for build designators, not for orders
-            if (!isOrder && result.ObstacleCount > 0)
+            // Obstacle info - only for build designators and zone-add, not for orders or delete/shrink
+            bool isDelete = ShapeHelper.IsDeleteDesignator(designator);
+            if (!isOrder && !isDelete && result.ObstacleCount > 0)
             {
                 parts.Add($"{result.ObstacleCount} obstacles found");
             }
@@ -605,40 +824,14 @@ namespace RimWorldAccess
         /// <returns>A gerund action phrase (e.g., "hauling", "hunting", "mining")</returns>
         private static string GetActionFromDesignatorName(string designatorName)
         {
-            // Handle common designator names and convert to gerund form
             string lowerName = designatorName.ToLower();
 
-            // "Haul things" -> "hauling"
-            if (lowerName.Contains("haul"))
-                return "hauling";
-
-            // "Hunt" -> "hunting"
-            if (lowerName.Contains("hunt"))
-                return "hunting";
-
-            // "Mine" -> "mining"
-            if (lowerName.Contains("mine"))
-                return "mining";
-
-            // "Deconstruct" -> "deconstruction"
-            if (lowerName.Contains("deconstruct"))
-                return "deconstruction";
-
-            // "Cut plants" -> "cutting"
-            if (lowerName.Contains("cut"))
-                return "cutting";
-
-            // "Smooth" -> "smoothing"
-            if (lowerName.Contains("smooth"))
-                return "smoothing";
-
-            // "Tame" -> "taming"
-            if (lowerName.Contains("tame"))
-                return "taming";
-
-            // "Cancel" -> "cancellation"
-            if (lowerName.Contains("cancel"))
-                return "cancellation";
+            // Check each keyword in the map
+            foreach (var kvp in DesignatorActionMap)
+            {
+                if (lowerName.Contains(kvp.Key))
+                    return kvp.Value;
+            }
 
             // For unknown designators, just use the name lowercase
             return lowerName;

@@ -75,8 +75,18 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the list of selected cells for placement.
+        /// Returns a read-only view to prevent external mutation.
         /// </summary>
-        public static List<IntVec3> SelectedCells => selectedCells;
+        public static IReadOnlyList<IntVec3> SelectedCells => selectedCells.AsReadOnly();
+
+        /// <summary>
+        /// Clears the internal selected cells list.
+        /// Used after placing a build designator at a single cell.
+        /// </summary>
+        public static void ClearSelectedCells()
+        {
+            selectedCells.Clear();
+        }
 
         /// <summary>
         /// Gets or sets the current rotation for building placement.
@@ -295,31 +305,29 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets spatial requirements for wind turbines.
+        /// Wind turbine clear space requirements by rotation.
         /// Verified against WindTurbineUtility.CalculateWindCells() in game code:
         /// - North/East facing: 9 tiles front, 5 tiles back
         /// - South/West facing: 5 tiles front, 9 tiles back
         /// </summary>
+        private static readonly Dictionary<Rot4, (string front, string back)> WindTurbineDirections = new Dictionary<Rot4, (string, string)>
+        {
+            { Rot4.North, ("9 tiles north", "5 tiles south") },
+            { Rot4.East, ("9 tiles east", "5 tiles west") },
+            { Rot4.South, ("5 tiles north", "9 tiles south") },
+            { Rot4.West, ("5 tiles east", "9 tiles west") }
+        };
+
+        /// <summary>
+        /// Gets spatial requirements for wind turbines.
+        /// </summary>
         private static string GetWindTurbineRequirements(Rot4 rotation)
         {
-            // Wind turbines need clear space in front and behind
-            // The exact distances vary based on rotation
-            if (rotation == Rot4.North)
+            if (WindTurbineDirections.TryGetValue(rotation, out var directions))
             {
-                return "Requires clear space: 9 tiles north, 5 tiles south";
+                return $"Requires clear space: {directions.front}, {directions.back}";
             }
-            else if (rotation == Rot4.East)
-            {
-                return "Requires clear space: 9 tiles east, 5 tiles west";
-            }
-            else if (rotation == Rot4.South)
-            {
-                return "Requires clear space: 5 tiles north, 9 tiles south";
-            }
-            else // West
-            {
-                return "Requires clear space: 5 tiles east, 9 tiles west";
-            }
+            return "Requires clear space in front and behind";
         }
 
         // NOTE: Cooler handling moved to BuildingCellHelper.GetCoolerDirectionInfo()
@@ -474,23 +482,11 @@ namespace RimWorldAccess
         /// <summary>
         /// Checks if the current designator is a zone/area/cell-based designator.
         /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
+        /// Delegates to ShapeHelper for the type hierarchy check.
         /// </summary>
         public static bool IsZoneDesignator()
         {
-            if (selectedDesignator == null)
-                return false;
-
-            // Check if this designator's type hierarchy includes "Designator_Cells"
-            // This covers all multi-cell designators: zones, areas, roofs, etc.
-            System.Type type = selectedDesignator.GetType();
-            while (type != null)
-            {
-                if (type.Name == "Designator_Cells")
-                    return true;
-                type = type.BaseType;
-            }
-
-            return false;
+            return ShapeHelper.IsCellsDesignator(selectedDesignator) || ShapeHelper.IsZoneDesignator(selectedDesignator);
         }
 
         /// <summary>

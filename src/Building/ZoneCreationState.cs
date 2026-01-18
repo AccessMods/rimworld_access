@@ -36,7 +36,7 @@ namespace RimWorldAccess
         private static bool isInCreationMode = false;
         private static ZoneType selectedZoneType = ZoneType.Stockpile;
         private static List<IntVec3> selectedCells = new List<IntVec3>();
-        private static Zone expandingZone = null; // Track zone being expanded
+        private static Zone targetZone = null; // Zone being modified (expand or shrink mode)
         private static bool isShrinking = false; // true = shrink mode (selected cells will be removed)
         private static string pendingAllowedAreaName = null; // Store name for allowed area creation
         private static ZoneSelectionMode selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
@@ -96,22 +96,27 @@ namespace RimWorldAccess
         /// </summary>
         public static IReadOnlyList<IntVec3> PreviewCells => previewHelper.PreviewCells;
 
-        // Legacy property aliases for backward compatibility
+        // Legacy property aliases for backward compatibility.
+        // These are used by ZoneCreationPatch.cs for announcements and by tests.
+        // Kept to avoid breaking existing code that uses rectangle-specific naming.
         /// <summary>
         /// Whether a rectangle start corner has been set.
         /// Alias for HasFirstCorner for backward compatibility.
+        /// Used by: ZoneCreationPatch (announcements), ZoneCreationState tests.
         /// </summary>
         public static bool HasRectangleStart => previewHelper.HasFirstCorner;
 
         /// <summary>
         /// The start corner of the rectangle being selected.
         /// Alias for FirstCorner for backward compatibility.
+        /// Used by: ZoneCreationPatch (coordinate announcements).
         /// </summary>
         public static IntVec3? RectangleStart => previewHelper.FirstCorner;
 
         /// <summary>
         /// The end corner of the rectangle being selected.
         /// Alias for SecondCorner for backward compatibility.
+        /// Used by: ZoneCreationPatch (coordinate announcements).
         /// </summary>
         public static IntVec3? RectangleEnd => previewHelper.SecondCorner;
 
@@ -196,16 +201,9 @@ namespace RimWorldAccess
         /// <param name="designator">Optional designator to determine available shapes</param>
         public static void EnterCreationMode(ZoneType zoneType, Designator designator = null)
         {
-            isInCreationMode = true;
+            InitializeMode(designator);
             selectedZoneType = zoneType;
-            currentDesignator = designator;
-            selectedCells.Clear();
-            previewHelper.Reset();
             selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
-
-            // Use designator's default shape if available, otherwise fall back to FilledRectangle
-            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
-            previewHelper.SetCurrentShape(currentShape);
 
             string zoneName = GetZoneTypeName(zoneType);
             string shapeName = ShapeHelper.GetShapeName(currentShape);
@@ -382,16 +380,9 @@ namespace RimWorldAccess
                 return;
             }
 
-            isInCreationMode = true;
-            expandingZone = zone;
+            InitializeMode(designator);
+            targetZone = zone;
             isShrinking = false;
-            currentDesignator = designator;
-            selectedCells.Clear();
-            previewHelper.Reset();
-
-            // Use designator's default shape if available, otherwise fall back to FilledRectangle
-            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
-            previewHelper.SetCurrentShape(currentShape);
 
             // Pre-select all existing zone tiles
             foreach (IntVec3 cell in zone.Cells)
@@ -438,16 +429,9 @@ namespace RimWorldAccess
                 return;
             }
 
-            isInCreationMode = true;
-            expandingZone = zone;
+            InitializeMode(designator);
+            targetZone = zone;
             isShrinking = true;
-            currentDesignator = designator;
-            selectedCells.Clear(); // Start with empty selection - selected cells will be removed
-            previewHelper.Reset();
-
-            // Use designator's default shape if available, otherwise fall back to FilledRectangle
-            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
-            previewHelper.SetCurrentShape(currentShape);
 
             string shapeName = ShapeHelper.GetShapeName(currentShape);
             string instructions = $"{shapeName} mode: Press Space to set corners, Enter to confirm, Escape to cancel.";
@@ -463,7 +447,7 @@ namespace RimWorldAccess
         public static void CreateZone(Map map)
         {
             // Handle expansion mode
-            if (expandingZone != null)
+            if (targetZone != null)
             {
                 ExpandZone(map);
                 return;
@@ -484,105 +468,43 @@ namespace RimWorldAccess
                 switch (selectedZoneType)
                 {
                     case ZoneType.Stockpile:
-                        {
-                            Zone_Stockpile stockpile = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
-                            map.zoneManager.RegisterZone(stockpile);
-                            foreach (IntVec3 cell in selectedCells)
-                            {
-                                if (cell.InBounds(map))
-                                {
-                                    stockpile.AddCell(cell);
-                                }
-                            }
-                            zoneName = "Stockpile zone";
-                        }
+                        CreateStockpileZone(map, selectedCells);
+                        zoneName = "Stockpile zone";
                         break;
 
                     case ZoneType.DumpingStockpile:
-                        {
-                            Zone_Stockpile dumpingStockpile = new Zone_Stockpile(StorageSettingsPreset.DumpingStockpile, map.zoneManager);
-                            map.zoneManager.RegisterZone(dumpingStockpile);
-                            foreach (IntVec3 cell in selectedCells)
-                            {
-                                if (cell.InBounds(map))
-                                {
-                                    dumpingStockpile.AddCell(cell);
-                                }
-                            }
-                            zoneName = "Dumping stockpile zone";
-                        }
+                        CreateDumpingStockpileZone(map, selectedCells);
+                        zoneName = "Dumping stockpile zone";
                         break;
 
                     case ZoneType.GrowingZone:
-                        {
-                            Zone_Growing growingZone = new Zone_Growing(map.zoneManager);
-                            map.zoneManager.RegisterZone(growingZone);
-                            foreach (IntVec3 cell in selectedCells)
-                            {
-                                if (cell.InBounds(map))
-                                {
-                                    growingZone.AddCell(cell);
-                                }
-                            }
-                            zoneName = "Growing zone";
-                        }
+                        CreateGrowingZone(map, selectedCells);
+                        zoneName = "Growing zone";
                         break;
 
                     case ZoneType.AllowedArea:
                         {
-                            // Create allowed area using the area manager
-                            if (!map.areaManager.TryMakeNewAllowed(out Area_Allowed allowedArea))
+                            Area_Allowed allowedArea = CreateAllowedArea(map, selectedCells);
+                            if (allowedArea == null)
                             {
                                 TolkHelper.Speak("Cannot create more allowed areas. Maximum of 10 reached.", SpeechPriority.High);
                                 Log.Warning("Failed to create allowed area: max limit reached");
                                 Reset();
                                 return;
                             }
-
-                            // Set the custom name if provided
-                            string areaName = pendingAllowedAreaName;
-                            if (!string.IsNullOrWhiteSpace(areaName))
-                            {
-                                allowedArea.SetLabel(areaName);
-                            }
-
-                            // Add cells to the area
-                            foreach (IntVec3 cell in selectedCells)
-                            {
-                                if (cell.InBounds(map))
-                                {
-                                    allowedArea[cell] = true; // Areas use indexer syntax
-                                }
-                            }
-
                             zoneName = $"Allowed area '{allowedArea.Label}'";
-                            pendingAllowedAreaName = null; // Clear the pending name
                         }
                         break;
 
                     case ZoneType.HomeZone:
+                        if (!ExpandHomeZone(map, selectedCells))
                         {
-                            // Get the home area from the area manager
-                            Area_Home homeArea = map.areaManager.Home;
-                            if (homeArea == null)
-                            {
-                                TolkHelper.Speak("Error: Home area not found", SpeechPriority.High);
-                                Log.Error("Home area not found in area manager");
-                                Reset();
-                                return;
-                            }
-
-                            // Add cells to the home area
-                            foreach (IntVec3 cell in selectedCells)
-                            {
-                                if (cell.InBounds(map))
-                                {
-                                    homeArea[cell] = true; // Areas use indexer syntax
-                                }
-                            }
-
-                            zoneName = "Home zone";
+                            TolkHelper.Speak("Error: Home area not found", SpeechPriority.High);
+                            Log.Error("Home area not found in area manager");
+                            Reset();
+                            return;
                         }
+                        zoneName = "Home zone";
                         break;
                 }
 
@@ -620,10 +542,10 @@ namespace RimWorldAccess
         /// </summary>
         private static void ExpandZone(Map map)
         {
-            if (expandingZone == null)
+            if (targetZone == null)
             {
                 TolkHelper.Speak("Error: No zone to modify", SpeechPriority.High);
-                Log.Error("ExpandZone called but expandingZone is null");
+                Log.Error("ExpandZone called but targetZone is null");
                 Reset();
                 return;
             }
@@ -639,7 +561,7 @@ namespace RimWorldAccess
             if (selectedCells.Count == 0)
             {
                 TolkHelper.Speak("All cells removed. Zone deleted.");
-                expandingZone.Delete();
+                targetZone.Delete();
                 Reset();
                 return;
             }
@@ -654,7 +576,7 @@ namespace RimWorldAccess
 
                 // Remove cells that are in the zone but not in the selection
                 List<IntVec3> cellsToRemove = new List<IntVec3>();
-                foreach (IntVec3 cell in expandingZone.Cells)
+                foreach (IntVec3 cell in targetZone.Cells)
                 {
                     if (!selectedSet.Contains(cell))
                     {
@@ -664,26 +586,26 @@ namespace RimWorldAccess
 
                 foreach (IntVec3 cell in cellsToRemove)
                 {
-                    expandingZone.RemoveCell(cell);
+                    targetZone.RemoveCell(cell);
                     removedCount++;
                 }
 
                 // Add cells that are selected but not in the zone, tracking which are new
                 foreach (IntVec3 cell in selectedCells)
                 {
-                    if (cell.InBounds(map) && !expandingZone.ContainsCell(cell))
+                    if (cell.InBounds(map) && !targetZone.ContainsCell(cell))
                     {
-                        expandingZone.AddCell(cell);
+                        targetZone.AddCell(cell);
                         newlyAddedCells.Add(cell);
                     }
                 }
 
                 // Check for disconnected fragments AFTER all modifications (matches standard RimWorld behavior)
-                expandingZone.CheckContiguous();
+                targetZone.CheckContiguous();
 
                 // Build feedback message
                 int addedCount = newlyAddedCells.Count;
-                string message = $"Updated {expandingZone.label}: ";
+                string message = $"Updated {targetZone.label}: ";
                 if (addedCount > 0 && removedCount > 0)
                 {
                     message += $"added {addedCount}, removed {removedCount} cells";
@@ -717,7 +639,7 @@ namespace RimWorldAccess
                 }
 
                 TolkHelper.Speak(message);
-                Log.Message($"Expanded zone {expandingZone.label}: added {addedCount}, removed {removedCount} cells");
+                Log.Message($"Expanded zone {targetZone.label}: added {addedCount}, removed {removedCount} cells");
             }
             catch (System.Exception ex)
             {
@@ -749,27 +671,27 @@ namespace RimWorldAccess
                 // Remove selected cells from the zone
                 foreach (IntVec3 cell in selectedCells)
                 {
-                    if (expandingZone.ContainsCell(cell))
+                    if (targetZone.ContainsCell(cell))
                     {
-                        expandingZone.RemoveCell(cell);
+                        targetZone.RemoveCell(cell);
                         removedCount++;
                     }
                 }
 
                 // Check if zone is now empty
-                if (expandingZone.Cells.Count() == 0)
+                if (targetZone.Cells.Count() == 0)
                 {
-                    TolkHelper.Speak($"All cells removed. {expandingZone.label} deleted.");
-                    expandingZone.Delete();
+                    TolkHelper.Speak($"All cells removed. {targetZone.label} deleted.");
+                    targetZone.Delete();
                 }
                 else
                 {
                     // Check for disconnected fragments
-                    expandingZone.CheckContiguous();
-                    TolkHelper.Speak($"Removed {removedCount} cells from {expandingZone.label}. {expandingZone.Cells.Count()} cells remaining.");
+                    targetZone.CheckContiguous();
+                    TolkHelper.Speak($"Removed {removedCount} cells from {targetZone.label}. {targetZone.Cells.Count()} cells remaining.");
                 }
 
-                Log.Message($"Shrunk zone {expandingZone?.label}: removed {removedCount} cells");
+                Log.Message($"Shrunk zone {targetZone?.label}: removed {removedCount} cells");
             }
             catch (System.Exception ex)
             {
@@ -793,43 +715,122 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Auto-selects cells in a direction until hitting a wall or impassable terrain.
-        /// Adds cells to the existing selection.
+        /// Creates a stockpile zone with the selected cells.
         /// </summary>
-        public static void AutoSelectToWall(IntVec3 startPosition, Rot4 direction, Map map)
+        private static Zone CreateStockpileZone(Map map, List<IntVec3> cells)
         {
-            try
+            Zone_Stockpile stockpile = new Zone_Stockpile(StorageSettingsPreset.DefaultStockpile, map.zoneManager);
+            map.zoneManager.RegisterZone(stockpile);
+            foreach (IntVec3 cell in cells)
             {
-                List<IntVec3> lineCells = new List<IntVec3>();
-                IntVec3 currentCell = startPosition + direction.FacingCell;
-
-                // Move in the direction until we hit a wall or go out of bounds
-                while (currentCell.InBounds(map) && !currentCell.Impassable(map))
+                if (cell.InBounds(map))
                 {
-                    lineCells.Add(currentCell);
-                    currentCell += direction.FacingCell;
+                    stockpile.AddCell(cell);
                 }
-
-                // Add all cells to selection
-                int addedCount = 0;
-                foreach (IntVec3 cell in lineCells)
-                {
-                    if (!selectedCells.Contains(cell))
-                    {
-                        selectedCells.Add(cell);
-                        addedCount++;
-                    }
-                }
-
-                string directionName = direction.ToStringHuman();
-                TolkHelper.Speak($"Selected {addedCount} cells to {directionName}. Total: {selectedCells.Count}");
-                Log.Message($"Auto-select to wall: {addedCount} cells in direction {directionName}");
             }
-            catch (System.Exception ex)
+            return stockpile;
+        }
+
+        /// <summary>
+        /// Creates a dumping stockpile zone with the selected cells.
+        /// </summary>
+        private static Zone CreateDumpingStockpileZone(Map map, List<IntVec3> cells)
+        {
+            Zone_Stockpile dumpingStockpile = new Zone_Stockpile(StorageSettingsPreset.DumpingStockpile, map.zoneManager);
+            map.zoneManager.RegisterZone(dumpingStockpile);
+            foreach (IntVec3 cell in cells)
             {
-                TolkHelper.Speak($"Error auto-selecting: {ex.Message}", SpeechPriority.High);
-                Log.Error($"AutoSelectToWall error: {ex}");
+                if (cell.InBounds(map))
+                {
+                    dumpingStockpile.AddCell(cell);
+                }
             }
+            return dumpingStockpile;
+        }
+
+        /// <summary>
+        /// Creates a growing zone with the selected cells.
+        /// </summary>
+        private static Zone CreateGrowingZone(Map map, List<IntVec3> cells)
+        {
+            Zone_Growing growingZone = new Zone_Growing(map.zoneManager);
+            map.zoneManager.RegisterZone(growingZone);
+            foreach (IntVec3 cell in cells)
+            {
+                if (cell.InBounds(map))
+                {
+                    growingZone.AddCell(cell);
+                }
+            }
+            return growingZone;
+        }
+
+        /// <summary>
+        /// Creates an allowed area with the selected cells.
+        /// Returns null if the maximum number of allowed areas has been reached.
+        /// </summary>
+        private static Area_Allowed CreateAllowedArea(Map map, List<IntVec3> cells)
+        {
+            if (!map.areaManager.TryMakeNewAllowed(out Area_Allowed allowedArea))
+            {
+                return null;
+            }
+
+            // Set the custom name if provided
+            string areaName = pendingAllowedAreaName;
+            if (!string.IsNullOrWhiteSpace(areaName))
+            {
+                allowedArea.SetLabel(areaName);
+            }
+
+            // Add cells to the area
+            foreach (IntVec3 cell in cells)
+            {
+                if (cell.InBounds(map))
+                {
+                    allowedArea[cell] = true;
+                }
+            }
+
+            pendingAllowedAreaName = null;
+            return allowedArea;
+        }
+
+        /// <summary>
+        /// Expands the home zone with the selected cells.
+        /// Returns false if the home area was not found.
+        /// </summary>
+        private static bool ExpandHomeZone(Map map, List<IntVec3> cells)
+        {
+            Area_Home homeArea = map.areaManager.Home;
+            if (homeArea == null)
+            {
+                return false;
+            }
+
+            foreach (IntVec3 cell in cells)
+            {
+                if (cell.InBounds(map))
+                {
+                    homeArea[cell] = true;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Initializes common mode state (creation, expansion, or shrink).
+        /// Clears selection, resets preview, and sets shape based on designator.
+        /// </summary>
+        /// <param name="designator">Optional designator to determine available shapes</param>
+        private static void InitializeMode(Designator designator)
+        {
+            isInCreationMode = true;
+            currentDesignator = designator;
+            selectedCells.Clear();
+            previewHelper.Reset();
+            currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
+            previewHelper.SetCurrentShape(currentShape);
         }
 
         /// <summary>
@@ -839,7 +840,7 @@ namespace RimWorldAccess
         {
             isInCreationMode = false;
             selectedCells.Clear();
-            expandingZone = null;
+            targetZone = null;
             isShrinking = false;
             currentDesignator = null;
             previewHelper.Reset();

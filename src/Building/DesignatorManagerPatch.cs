@@ -35,14 +35,20 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Only intercept placement designators (Designator_Build, Designator_Install, Designator_Place)
-            if (!(des is Designator_Place placeDesignator))
+            // Handle Designator_Place (Build, Install, etc.)
+            if (des is Designator_Place placeDesignator)
             {
+                RouteToAccessiblePlacement(placeDesignator);
                 return;
             }
 
-            // Route to accessible placement
-            RouteToAccessiblePlacement(placeDesignator);
+            // Handle zone designators (ZoneAdd for expand, ZoneDelete for shrink)
+            // These support shape-based placement just like building designators
+            if (ShapeHelper.IsZoneDesignator(des))
+            {
+                RouteZoneToAccessiblePlacement(des);
+                return;
+            }
         }
 
         /// <summary>
@@ -111,6 +117,41 @@ namespace RimWorldAccess
 
                 TolkHelper.Speak(announcement);
                 Log.Message($"[DesignatorManagerPatch] Routed gizmo placement to manual mode: {itemName}");
+            }
+        }
+
+        /// <summary>
+        /// Routes a zone designator (expand/shrink) to the accessible system.
+        /// Zone designators support shape-based selection just like building designators.
+        /// </summary>
+        /// <param name="designator">The zone designator</param>
+        private static void RouteZoneToAccessiblePlacement(Designator designator)
+        {
+            // Get the zone name for announcement
+            string zoneName = ArchitectHelper.GetSanitizedLabel(designator);
+
+            // Check if shapes are available for this designator
+            var availableShapes = ShapeHelper.GetAvailableShapes(designator);
+            bool supportsShapes = availableShapes.Count > 1; // More than just Manual
+
+            if (supportsShapes)
+            {
+                // Use the game's default shape (first in the list)
+                ShapeType defaultShape = availableShapes[0];
+                string shapeName = ShapeHelper.GetShapeName(defaultShape);
+
+                // Enter ShapePlacementState with the default shape
+                ShapePlacementState.Enter(designator, defaultShape);
+
+                // The Enter method handles the announcement
+                Log.Message($"[DesignatorManagerPatch] Routed zone designator to shape mode: {zoneName} with {shapeName}");
+            }
+            else
+            {
+                // Manual mode for zones - check if expanding or shrinking
+                string operation = ShapeHelper.IsDeleteDesignator(designator) ? "Shrinking" : "Expanding";
+                TolkHelper.Speak($"{operation} {zoneName}. Space to set corners, Enter to confirm, Escape to cancel.");
+                Log.Message($"[DesignatorManagerPatch] Routed zone designator to manual mode: {zoneName}");
             }
         }
     }

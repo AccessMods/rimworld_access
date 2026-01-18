@@ -427,23 +427,22 @@ namespace RimWorldAccess
                     string designatorTypeName = designator.GetType().Name;
 
                     // Zone expand designators (Designator_ZoneAdd*_Expand)
+                    // Route through normal designator flow for viewing mode support
                     if (designatorTypeName.Contains("_Expand")
-                        && designatorTypeName.Contains("ZoneAdd")
-                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable expandOwner)
-                        && expandOwner is Zone expandZone)
+                        && designatorTypeName.Contains("ZoneAdd"))
                     {
                         Close();
-                        ZoneCreationState.EnterExpansionMode(expandZone);
+                        // Select the designator - DesignatorManagerPatch will route it to ShapePlacementState
+                        Find.DesignatorManager.Select(designator);
                         return;
                     }
 
-                    // Zone shrink designator - enter shrink mode (selected cells will be removed)
-                    if (designatorTypeName == "Designator_ZoneDelete_Shrink"
-                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable shrinkOwner)
-                        && shrinkOwner is Zone shrinkZone)
+                    // Zone shrink designator - route through normal designator flow
+                    if (designatorTypeName == "Designator_ZoneDelete_Shrink")
                     {
                         Close();
-                        ZoneCreationState.EnterShrinkMode(shrinkZone);
+                        // Select the designator - DesignatorManagerPatch will route it to ShapePlacementState
+                        Find.DesignatorManager.Select(designator);
                         return;
                     }
 

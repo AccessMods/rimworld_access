@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 using Verse;
@@ -115,8 +116,61 @@ namespace RimWorldAccess
             var availableShapes = ShapeHelper.GetAvailableShapes(activeDesignator);
             bool supportsShapes = availableShapes.Count >= 1;
 
+            // Tab key - open shape selection menu or switch to manual mode
+            if (key == KeyCode.Tab)
+            {
+                handled = HandleTabKey(activeDesignator, shiftHeld, supportsShapes, inArchitectMode, availableShapes);
+            }
+            // Shift+Space - Remove shape points OR cancel blueprint at cursor position
+            else if (shiftHeld && key == KeyCode.Space)
+            {
+                handled = HandleShiftSpaceKey();
+            }
+            // R key - rotate building
+            else if (key == KeyCode.R)
+            {
+                handled = HandleRotateKey(activeDesignator, inArchitectMode);
+            }
+            // Space key - unified handling for all designator types
+            else if (key == KeyCode.Space)
+            {
+                // Cooldown to prevent rapid toggling
+                if (Time.time - lastSpaceTime < SpaceCooldown)
+                {
+                    Event.current.Use();
+                    return;
+                }
+
+                lastSpaceTime = Time.time;
+                IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
+                handled = HandleSpaceKey(activeDesignator, currentPosition, inArchitectMode, isPlaceDesignator, isZoneDesignator, isOrderDesignator, isCellsDesignator);
+            }
+            // Enter key - confirm and execute designation
+            else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+            {
+                handled = HandleEnterKey(activeDesignator, inArchitectMode, isPlaceDesignator, isZoneDesignator, isOrderDesignator, isCellsDesignator);
+            }
+            // Escape key - cancel shape placement, rectangle, or cancel placement
+            else if (key == KeyCode.Escape)
+            {
+                handled = HandleEscapeKey(inArchitectMode);
+            }
+
+            if (handled)
+            {
+                Event.current.Use();
+            }
+        }
+
+        /// <summary>
+        /// Handles Tab key input for shape selection.
+        /// Tab opens shape selection menu, Shift+Tab switches to manual mode.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleTabKey(Designator activeDesignator, bool shiftHeld, bool supportsShapes, bool inArchitectMode, List<ShapeType> availableShapes)
+        {
             // Tab key - open shape selection menu (for any designator that supports shapes)
-            if (key == KeyCode.Tab && !shiftHeld)
+            if (!shiftHeld)
             {
                 if (supportsShapes && inArchitectMode)
                 {
@@ -136,12 +190,11 @@ namespace RimWorldAccess
                         // Only one shape - activate it directly
                         ShapePlacementState.Enter(activeDesignator, availableShapes[0]);
                     }
-                    handled = true;
+                    return true;
                 }
             }
-
             // Shift+Tab - quick switch to Manual mode (for any designator with shapes)
-            if (key == KeyCode.Tab && shiftHeld && supportsShapes && inArchitectMode)
+            else if (supportsShapes && inArchitectMode)
             {
                 // Reset to manual mode and cancel any shape in progress
                 if (ShapePlacementState.IsActive)
@@ -149,255 +202,286 @@ namespace RimWorldAccess
                     ShapePlacementState.Cancel();
                 }
                 ShapePlacementState.Enter(activeDesignator, ShapeType.Manual);
-                handled = true;
+                return true;
             }
-            // Shift+Space - Cancel blueprint at cursor position (check before regular Space)
-            if (shiftHeld && key == KeyCode.Space)
+
+            return false;
+        }
+
+        /// <summary>
+        /// Handles R key input for rotating buildings.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleRotateKey(Designator activeDesignator, bool inArchitectMode)
+        {
+            if (inArchitectMode)
+            {
+                ArchitectState.RotateBuilding();
+            }
+            else if (activeDesignator is Designator_Place designatorPlace)
+            {
+                // Use reflection to access private placingRot field
+                var rotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
+                if (rotField != null)
+                {
+                    Rot4 currentRot = (Rot4)rotField.GetValue(designatorPlace);
+                    currentRot.Rotate(RotationDirection.Clockwise);
+                    rotField.SetValue(designatorPlace, currentRot);
+
+                    // Build a proper announcement with direction and special info
+                    string announcement = GetDesignatorRotationAnnouncement(designatorPlace, currentRot);
+                    TolkHelper.Speak(announcement);
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Handles Shift+Space input for removing shape points or cancelling blueprints.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleShiftSpaceKey()
+        {
+            // If in shape placement mode with points set, remove points step-by-step
+            if (ShapePlacementState.IsActive &&
+                ShapePlacementState.CurrentShape != ShapeType.Manual &&
+                ShapePlacementState.HasFirstPoint)
+            {
+                ShapePlacementState.RemoveLastPoint();
+                return true;
+            }
+            // If in shape placement mode but no points set, announce that
+            else if (ShapePlacementState.IsActive &&
+                     ShapePlacementState.CurrentShape != ShapeType.Manual &&
+                     !ShapePlacementState.HasFirstPoint)
+            {
+                TolkHelper.Speak("No points to remove");
+                return true;
+            }
+            // Otherwise, cancel blueprint at cursor position (existing behavior)
+            else
             {
                 IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
                 CancelBlueprintAtPosition(currentPosition);
-                handled = true;
+                return true;
             }
-            // R key - rotate building
-            else if (key == KeyCode.R)
+        }
+
+        /// <summary>
+        /// Handles Space key input for placing cells, setting shape points, or toggling selections.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleSpaceKey(Designator activeDesignator, IntVec3 currentPosition, bool inArchitectMode, bool isPlaceDesignator, bool isZoneDesignator, bool isOrderDesignator, bool isCellsDesignator)
+        {
+            // Check if we're in shape placement mode with a non-Manual shape
+            // This applies to ALL designator types (build, orders, zones)
+            if (ShapePlacementState.IsActive && ShapePlacementState.CurrentShape != ShapeType.Manual)
             {
-                if (inArchitectMode)
+                // Two-point placement workflow - same for all designator types
+                if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingFirstCorner)
                 {
-                    ArchitectState.RotateBuilding();
+                    ShapePlacementState.SetFirstPoint(currentPosition);
                 }
-                else if (activeDesignator is Designator_Place designatorPlace)
+                else if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingSecondCorner)
                 {
-                    // Use reflection to access private placingRot field
-                    var rotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
-                    if (rotField != null)
-                    {
-                        Rot4 currentRot = (Rot4)rotField.GetValue(designatorPlace);
-                        currentRot.Rotate(RotationDirection.Clockwise);
-                        rotField.SetValue(designatorPlace, currentRot);
-
-                        // Build a proper announcement with direction and special info
-                        string announcement = GetDesignatorRotationAnnouncement(designatorPlace, currentRot);
-                        TolkHelper.Speak(announcement);
-                    }
-                }
-                handled = true;
-            }
-            // Shift+Arrow keys - auto-select to wall (for zone designators)
-            else if (shiftHeld && isZoneDesignator)
-            {
-                IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
-                Map map = Find.CurrentMap;
-                Rot4 direction = Rot4.Invalid;
-
-                if (key == KeyCode.UpArrow)
-                    direction = Rot4.North;
-                else if (key == KeyCode.DownArrow)
-                    direction = Rot4.South;
-                else if (key == KeyCode.LeftArrow)
-                    direction = Rot4.West;
-                else if (key == KeyCode.RightArrow)
-                    direction = Rot4.East;
-
-                if (direction != Rot4.Invalid)
-                {
-                    AutoSelectToWall(currentPosition, direction, map, activeDesignator);
-                    handled = true;
+                    ShapePlacementState.SetSecondPoint(currentPosition);
                 }
             }
-            // Space key - unified handling for all designator types
-            // Behavior depends on whether ShapePlacementState is active and what shape is selected
-            else if (key == KeyCode.Space)
+            // Manual mode or ShapePlacementState inactive - single cell designation
+            else
             {
-                // Cooldown to prevent rapid toggling
-                if (Time.time - lastSpaceTime < SpaceCooldown)
-                    return;
-
-                lastSpaceTime = Time.time;
-
-                IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
-
-                // Check if we're in shape placement mode with a non-Manual shape
-                // This applies to ALL designator types (build, orders, zones)
-                if (ShapePlacementState.IsActive && ShapePlacementState.CurrentShape != ShapeType.Manual)
+                // For build/place designators (buildings, install)
+                if (isPlaceDesignator)
                 {
-                    // Two-point placement workflow - same for all designator types
-                    if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingFirstCorner)
-                    {
-                        ShapePlacementState.SetFirstCorner(currentPosition);
-                    }
-                    else if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingSecondCorner)
-                    {
-                        ShapePlacementState.SetSecondCorner(currentPosition);
-                    }
-                }
-                // Manual mode or ShapePlacementState inactive - single cell designation
-                else
-                {
-                    // For build/place designators (buildings, install)
-                    if (isPlaceDesignator)
-                    {
-                        AcceptanceReport report = activeDesignator.CanDesignateCell(currentPosition);
+                    AcceptanceReport report = activeDesignator.CanDesignateCell(currentPosition);
 
-                        if (report.Accepted)
+                    if (report.Accepted)
+                    {
+                        try
                         {
-                            try
+                            activeDesignator.DesignateSingleCell(currentPosition);
+                            activeDesignator.Finalize(true);
+
+                            string label = activeDesignator.Label;
+                            TolkHelper.Speak($"{label} placed at {currentPosition.x}, {currentPosition.z}");
+
+                            // If in ArchitectState mode, clear selected cells for next placement
+                            if (inArchitectMode)
                             {
-                                activeDesignator.DesignateSingleCell(currentPosition);
-                                activeDesignator.Finalize(true);
-
-                                string label = activeDesignator.Label;
-                                TolkHelper.Speak($"{label} placed at {currentPosition.x}, {currentPosition.z}");
-
-                                // If in ArchitectState mode, clear selected cells for next placement
-                                if (inArchitectMode)
-                                {
-                                    ArchitectState.SelectedCells.Clear();
-                                }
-                                else
-                                {
-                                    // For gizmo-activated placement (like Reinstall), exit after placement
-                                    Find.DesignatorManager.Deselect();
-                                }
+                                ArchitectState.ClearSelectedCells();
                             }
-                            catch (System.Exception ex)
+                            else
                             {
-                                TolkHelper.Speak($"Error placing: {ex.Message}", SpeechPriority.High);
-                                Log.Error($"Error in single cell designation: {ex}");
+                                // For gizmo-activated placement (like Reinstall), exit after placement
+                                Find.DesignatorManager.Deselect();
                             }
                         }
-                        else
+                        catch (System.Exception ex)
                         {
-                            string reason = report.Reason ?? "Cannot place here";
-                            TolkHelper.Speak($"Invalid: {reason}");
+                            TolkHelper.Speak($"Error placing: {ex.Message}", SpeechPriority.High);
+                            Log.Error($"Error in single cell designation: {ex}");
                         }
                     }
-                    // For zone designators
-                    else if (isZoneDesignator && inArchitectMode)
+                    else
                     {
-                        // Toggle cell in the selection list
-                        ArchitectState.ToggleCell(currentPosition);
-                    }
-                    // For orders (Hunt, Haul, etc.) and cells designators (Mine)
-                    else if ((isOrderDesignator || isCellsDesignator) && inArchitectMode)
-                    {
-                        // Toggle cell in the selection list
-                        ArchitectState.ToggleCell(currentPosition);
+                        string reason = report.Reason ?? "Cannot place here";
+                        TolkHelper.Speak($"Invalid: {reason}");
                     }
                 }
-
-                handled = true;
-            }
-            // Enter key - confirm and execute designation
-            // Unified handling for all designator types with shape support
-            else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-            {
-                // If in shape placement previewing phase, execute the designation and enter viewing mode
-                // This works for ALL designator types (build, orders, zones)
-                if (ShapePlacementState.IsActive && ShapePlacementState.CurrentPhase == PlacementPhase.Previewing)
+                // For zone designators
+                else if (isZoneDesignator && inArchitectMode)
                 {
-                    // Save the current shape before placing (for restore after undo)
-                    ShapeType currentShape = ShapePlacementState.CurrentShape;
-                    // Pass silent: true because ViewingModeState.Enter will announce the placement
-                    var result = ShapePlacementState.PlaceDesignations(silent: true);
-                    if (result.PlacedCount > 0)
-                    {
-                        ViewingModeState.Enter(result, activeDesignator, currentShape);
-                    }
+                    // Toggle cell in the selection list
+                    ArchitectState.ToggleCell(currentPosition);
+                }
+                // For orders (Hunt, Haul, etc.) and cells designators (Mine)
+                else if ((isOrderDesignator || isCellsDesignator) && inArchitectMode)
+                {
+                    // Toggle cell in the selection list
+                    ArchitectState.ToggleCell(currentPosition);
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Handles Enter key input for confirming and executing designations.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleEnterKey(Designator activeDesignator, bool inArchitectMode, bool isPlaceDesignator, bool isZoneDesignator, bool isOrderDesignator, bool isCellsDesignator)
+        {
+            // If in shape placement previewing phase, execute the designation and enter viewing mode
+            // This works for ALL designator types (build, orders, zones)
+            if (ShapePlacementState.IsActive && ShapePlacementState.CurrentPhase == PlacementPhase.Previewing)
+            {
+                // Save the current shape before placing (for restore after undo)
+                ShapeType currentShape = ShapePlacementState.CurrentShape;
+                // Pass silent: true because ViewingModeState.Enter will announce the placement
+                var result = ShapePlacementState.PlaceDesignations(silent: true);
+
+                // Check if this is a zone deletion that needs confirmation
+                if (result.NeedsFullDeletionConfirmation)
+                {
+                    // Show confirmation dialog for zone deletion
+                    ShowZoneDeletionConfirmation(result, activeDesignator, currentShape);
+                    return true;
+                }
+                else if (result.PlacedCount > 0)
+                {
+                    ViewingModeState.Enter(result, activeDesignator, currentShape);
                     // Reset shape placement state after placing
                     ShapePlacementState.Reset();
-                    handled = true;
                 }
-                // If in shape placement mode but corners not yet set, give guidance
-                else if (ShapePlacementState.IsActive && ShapePlacementState.CurrentShape != ShapeType.Manual)
+                else
                 {
-                    if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingFirstCorner)
+                    // No placements - give appropriate feedback based on designator type
+                    // Stay in shape placement mode so user can try again (like Escape when corners are set)
+                    bool isDeleteDesignator = ShapeHelper.IsDeleteDesignator(activeDesignator);
+                    if (isDeleteDesignator)
                     {
-                        TolkHelper.Speak("Place first point with Space");
+                        TolkHelper.Speak("No zone cells in selection. Try again.");
                     }
-                    else if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingSecondCorner)
+                    else
                     {
-                        TolkHelper.Speak("Place second point with Space");
+                        TolkHelper.Speak("No valid cells in selection. Try again.");
                     }
-                    handled = true;
+                    // Clear selection but stay in placement mode (don't exit entirely)
+                    ShapePlacementState.ClearSelectionAndStay(silent: true);
                 }
-                // For place designators (build, reinstall) not in shape mode
-                else if (isPlaceDesignator)
+                return true;
+            }
+            // If in shape placement mode but corners not yet set, give guidance
+            else if (ShapePlacementState.IsActive && ShapePlacementState.CurrentShape != ShapeType.Manual)
+            {
+                if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingFirstCorner)
                 {
-                    // Normal exit - placement completed
-                    TolkHelper.Speak("Placement completed");
-                    if (ShapePlacementState.IsActive)
-                    {
-                        ShapePlacementState.Reset();
-                    }
+                    TolkHelper.Speak("Place first point with Space");
+                }
+                else if (ShapePlacementState.CurrentPhase == PlacementPhase.SettingSecondCorner)
+                {
+                    TolkHelper.Speak("Place second point with Space");
+                }
+                return true;
+            }
+            // For place designators (build, reinstall) not in shape mode
+            else if (isPlaceDesignator)
+            {
+                // Normal exit - placement completed
+                TolkHelper.Speak("Placement completed");
+                if (ShapePlacementState.IsActive)
+                {
+                    ShapePlacementState.Reset();
+                }
+                if (inArchitectMode)
+                    ArchitectState.Reset();
+                else
+                    Find.DesignatorManager.Deselect();
+                return true;
+            }
+            // For zone designators (not in shape mode) - execute from selected cells
+            else if (isZoneDesignator && inArchitectMode)
+            {
+                Map map = Find.CurrentMap;
+                ExecuteZonePlacement(activeDesignator, map);
+                return true;
+            }
+            // For orders and cells designators in architect mode (not in shape mode)
+            else if (inArchitectMode && (isOrderDesignator || isCellsDesignator))
+            {
+                // Execute the placement from selected cells
+                ArchitectState.ExecutePlacement(Find.CurrentMap);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Handles Escape key input for cancelling shape placement or exiting placement mode.
+        /// </summary>
+        /// <returns>True if the key was handled, false otherwise.</returns>
+        private static bool HandleEscapeKey(bool inArchitectMode)
+        {
+            // If shape placement is active, check what to do based on points and stack
+            if (ShapePlacementState.IsActive)
+            {
+                // Case 1: Points are set - clear them and stay in placement mode
+                if (ShapePlacementState.HasFirstPoint)
+                {
+                    // Clear points via previewHelper, stay in placement mode
+                    // This resets to SettingFirstCorner phase
+                    // Use silent=true so we control the announcement here
+                    ShapePlacementState.ClearSelectionAndStay(silent: true);
+                    TolkHelper.Speak("Selection cleared");
+                }
+                // Case 2: No points set, but we came from viewing mode - return to it
+                else if (ShapePlacementState.HasViewingModeOnStack)
+                {
+                    ShapePlacementState.Reset();
+                    // Re-activate viewing mode with existing segments intact
+                    ViewingModeState.Reactivate();
+                }
+                // Case 3: No points set, no viewing mode on stack - exit architect entirely
+                else
+                {
+                    TolkHelper.Speak("Placement cancelled");
+                    ShapePlacementState.Reset();
                     if (inArchitectMode)
                         ArchitectState.Reset();
                     else
                         Find.DesignatorManager.Deselect();
-                    handled = true;
-                }
-                // For zone designators (not in shape mode) - execute from selected cells
-                else if (isZoneDesignator && inArchitectMode)
-                {
-                    Map map = Find.CurrentMap;
-                    ExecuteZonePlacement(activeDesignator, map);
-                    handled = true;
-                }
-                // For orders and cells designators in architect mode (not in shape mode)
-                else if (inArchitectMode && (isOrderDesignator || isCellsDesignator))
-                {
-                    // Execute the placement from selected cells
-                    ArchitectState.ExecutePlacement(Find.CurrentMap);
-                    handled = true;
                 }
             }
-            // Escape key - cancel shape placement, rectangle, or cancel placement
-            else if (key == KeyCode.Escape)
+            else
             {
-                // If shape placement is active, check what to do based on corners and stack
-                if (ShapePlacementState.IsActive)
-                {
-                    // Case 1: Corners are set - clear them and stay in placement mode
-                    if (ShapePlacementState.HasFirstCorner)
-                    {
-                        // Clear corners via previewHelper, stay in placement mode
-                        // This resets to SettingFirstCorner phase
-                        // Use silent=true so we control the announcement here
-                        ShapePlacementState.ClearSelectionAndStay(silent: true);
-                        TolkHelper.Speak("Selection cleared");
-                    }
-                    // Case 2: No corners set, but we came from viewing mode - return to it
-                    else if (ShapePlacementState.HasViewingModeOnStack)
-                    {
-                        ShapePlacementState.Reset();
-                        // Re-activate viewing mode with existing segments intact
-                        ViewingModeState.Reactivate();
-                    }
-                    // Case 3: No corners set, no viewing mode on stack - exit architect entirely
-                    else
-                    {
-                        TolkHelper.Speak("Placement cancelled");
-                        ShapePlacementState.Reset();
-                        if (inArchitectMode)
-                            ArchitectState.Reset();
-                        else
-                            Find.DesignatorManager.Deselect();
-                    }
-                }
+                TolkHelper.Speak("Placement cancelled");
+                if (inArchitectMode)
+                    ArchitectState.Cancel();
                 else
-                {
-                    TolkHelper.Speak("Placement cancelled");
-                    if (inArchitectMode)
-                        ArchitectState.Cancel();
-                    else
-                        Find.DesignatorManager.Deselect();
-                }
-                handled = true;
+                    Find.DesignatorManager.Deselect();
             }
-
-            if (handled)
-            {
-                Event.current.Use();
-            }
+            return true;
         }
 
         /// <summary>
@@ -562,42 +646,44 @@ namespace RimWorldAccess
         // Note: IsZoneDesignator moved to ShapeHelper.IsZoneDesignator()
 
         /// <summary>
-        /// Auto-selects cells in a direction until hitting a wall or impassable terrain.
+        /// Shows a confirmation dialog when a zone shrink operation would delete the entire zone.
+        /// This action cannot be undone with Escape in viewing mode.
         /// </summary>
-        private static void AutoSelectToWall(IntVec3 startPosition, Rot4 direction, Map map, Designator designator)
+        private static void ShowZoneDeletionConfirmation(PlacementResult pendingResult, Designator designator, ShapeType currentShape)
         {
-            try
-            {
-                List<IntVec3> lineCells = new List<IntVec3>();
-                IntVec3 currentCell = startPosition + direction.FacingCell;
+            string zoneName = pendingResult.ZonePendingDeletion?.label ?? "this zone";
+            string message = $"This will delete the entire zone ({zoneName}). " +
+                           "This action cannot be undone with Escape in viewing mode.\n\n" +
+                           "To delete zones, you can also use the delete option in the gizmo menu (G).";
 
-                // Move in the direction until we hit a wall or go out of bounds
-                while (currentCell.InBounds(map) && designator.CanDesignateCell(currentCell).Accepted)
+            // Announce the dialog for screen readers
+            TolkHelper.Speak($"Delete Zone confirmation. {message}");
+
+            Dialog_MessageBox dialog = new Dialog_MessageBox(
+                message,
+                "Delete Zone",
+                () =>
                 {
-                    lineCells.Add(currentCell);
-                    currentCell += direction.FacingCell;
-                }
+                    // User confirmed deletion
+                    var result = ShapePlacementState.ExecuteConfirmedZoneDeletion(pendingResult, silent: true);
+                    TolkHelper.Speak($"Zone {zoneName} deleted.");
 
-                // Add all cells to selection
-                int addedCount = 0;
-                foreach (IntVec3 cell in lineCells)
+                    // Exit the entire build/zone interface - deletion cannot be undone
+                    ShapePlacementState.Reset();
+                    ArchitectState.Reset();
+                    Find.DesignatorManager.Deselect();
+                },
+                "Cancel",
+                () =>
                 {
-                    if (!ArchitectState.SelectedCells.Contains(cell))
-                    {
-                        ArchitectState.SelectedCells.Add(cell);
-                        addedCount++;
-                    }
-                }
+                    // User cancelled - stay in shape placement mode
+                    TolkHelper.Speak("Deletion cancelled. Still in shape placement mode.");
+                },
+                null,  // title
+                true   // buttonADestructive
+            );
 
-                string directionName = direction.ToStringHuman();
-                TolkHelper.Speak($"Selected {addedCount} cells to {directionName}. Total: {ArchitectState.SelectedCells.Count}");
-                Log.Message($"Auto-select to wall: {addedCount} cells in direction {directionName}");
-            }
-            catch (System.Exception ex)
-            {
-                TolkHelper.Speak($"Error auto-selecting: {ex.Message}", SpeechPriority.High);
-                Log.Error($"AutoSelectToWall error: {ex}");
-            }
+            Find.WindowStack.Add(dialog);
         }
 
         /// <summary>

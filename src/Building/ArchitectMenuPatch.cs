@@ -373,24 +373,11 @@ namespace RimWorldAccess
         /// <summary>
         /// Checks if a designator is a zone/area/cell-based designator.
         /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
-        /// Uses reflection to check the type hierarchy since we can't directly reference RimWorld types.
+        /// Delegates to ShapeHelper for the type hierarchy check.
         /// </summary>
         private static bool IsZoneDesignator(Designator designator)
         {
-            if (designator == null)
-                return false;
-
-            // Check if this designator's type hierarchy includes "Designator_Cells"
-            // This covers all multi-cell designators: zones, areas, roofs, etc.
-            System.Type type = designator.GetType();
-            while (type != null)
-            {
-                if (type.Name == "Designator_Cells")
-                    return true;
-                type = type.BaseType;
-            }
-
-            return false;
+            return ShapeHelper.IsCellsDesignator(designator) || ShapeHelper.IsZoneDesignator(designator);
         }
 
         /// <summary>
