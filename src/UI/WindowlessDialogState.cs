@@ -335,7 +335,13 @@ namespace RimWorldAccess
 
             if (!string.IsNullOrEmpty(message))
             {
-                announcement += message + ". ";
+                announcement += message;
+                // Only add period if message doesn't already end with punctuation
+                if (!message.EndsWith(".") && !message.EndsWith("!") && !message.EndsWith("?"))
+                {
+                    announcement += ".";
+                }
+                announcement += " ";
             }
 
             // Subtract 1 from count since element 0 is the description, not an action

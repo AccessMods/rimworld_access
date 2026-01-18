@@ -33,6 +33,9 @@ namespace RimWorldAccess
         // These use DesignationManager to undo, not Thing.Destroy()
         private static List<List<IntVec3>> cellSegments = new List<List<IntVec3>>();
 
+        // Track shape type per segment (for shape-aware announcements)
+        private static List<ShapeType> segmentShapeTypes = new List<ShapeType>();
+
         // Track obstacle cells for segment logic (knowing which cells failed)
         // Navigation is handled by ScannerState's temporary category
         private static List<IntVec3> obstacleCells = new List<IntVec3>();
@@ -190,6 +193,7 @@ namespace RimWorldAccess
                 ScannerState.SaveFocus();
                 segments.Clear();
                 cellSegments.Clear();
+                segmentShapeTypes.Clear();
                 obstacleCells.Clear();
                 createdZones.Clear();
                 orderTargets.Clear();
@@ -220,6 +224,9 @@ namespace RimWorldAccess
                     CollectOrderTargets(result.PlacedCells, designator);
                 }
             }
+
+            // Track shape type for this segment
+            segmentShapeTypes.Add(shapeType);
 
             // Add any new obstacles (skip for delete designators since removing cells can't have obstacles)
             if (!isDeleteDesignator && result.ObstacleCells != null)
@@ -342,7 +349,9 @@ namespace RimWorldAccess
         {
             int totalPlaced = PlacedCount;
             int segCount = SegmentCount;
-            string segmentInfo = segCount > 1 ? $" ({segCount} segments)" : "";
+            // Use shape type counts for multi-segment, empty for single segment
+            string shapeInfo = FormatShapeTypeCounts();
+            string segmentInfo = !string.IsNullOrEmpty(shapeInfo) ? $" ({shapeInfo})" : "";
 
             if (isOrderDesignator)
             {
@@ -1020,6 +1029,52 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Formats the shape type counts for announcements.
+        /// Returns empty string for single segment (don't announce for single segment).
+        /// Examples: "2 lines, 1 rectangle" or "1 line, 2 filled rectangles"
+        /// </summary>
+        private static string FormatShapeTypeCounts()
+        {
+            if (segmentShapeTypes.Count == 0) return "";
+            if (segmentShapeTypes.Count == 1) return ""; // Don't announce for single segment
+
+            var shapeCounts = segmentShapeTypes.GroupBy(s => s)
+                .Select(g => new { Shape = g.Key, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .ToList();
+
+            var parts = new List<string>();
+            foreach (var item in shapeCounts)
+            {
+                string shapeName = GetShapeDisplayName(item.Shape);
+                if (item.Count == 1)
+                    parts.Add($"1 {shapeName}");
+                else
+                    parts.Add($"{item.Count} {Find.ActiveLanguageWorker.Pluralize(shapeName, item.Count)}");
+            }
+
+            return string.Join(", ", parts);
+        }
+
+        /// <summary>
+        /// Gets a display name for a shape type.
+        /// </summary>
+        private static string GetShapeDisplayName(ShapeType shape)
+        {
+            switch (shape)
+            {
+                case ShapeType.Manual: return "manual placement";
+                case ShapeType.Line: return "line";
+                case ShapeType.AngledLine: return "angled line";
+                case ShapeType.FilledRectangle: return "filled rectangle";
+                case ShapeType.EmptyRectangle: return "empty rectangle";
+                case ShapeType.FilledOval: return "filled oval";
+                case ShapeType.EmptyOval: return "empty oval";
+                default: return "shape";
+            }
+        }
+
+        /// <summary>
         /// Builds a summary of order targets grouped by type.
         /// Examples: "Now hunting: 1 tiger, 2 lions" or "Mining: 12 compacted steel, 5 jade"
         /// </summary>
@@ -1360,9 +1415,8 @@ namespace RimWorldAccess
         /// <summary>
         /// Exits viewing mode and confirms all placements.
         /// Also exits architect/placement mode entirely.
-        /// Note: We do NOT call RestoreFocus() here because users expect to stay
-        /// at their current position after confirming (near their placed buildings).
-        /// RestoreFocus() is only appropriate for cancel/undo operations.
+        /// Note: The cursor stays where the user left it - we never move it against
+        /// their will when exiting viewing mode.
         /// </summary>
         public static void Confirm()
         {
@@ -1484,6 +1538,14 @@ namespace RimWorldAccess
             if (currentSegCount == 0)
                 return;
 
+            // Capture the shape type before removing (for announcement)
+            ShapeType removedShapeType = ShapeType.Manual;
+            if (segmentShapeTypes.Count > 0)
+            {
+                removedShapeType = segmentShapeTypes[segmentShapeTypes.Count - 1];
+                segmentShapeTypes.RemoveAt(segmentShapeTypes.Count - 1);
+            }
+
             // Remove the last segment using centralized helper
             int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
             int removedCount = RemoveSegmentItems(lastIndex);
@@ -1497,6 +1559,9 @@ namespace RimWorldAccess
             // Determine item type with proper pluralization
             string itemType = GetItemTypeForCount(removedCount);
 
+            // Get shape display name for the removed segment
+            string removedShapeName = GetShapeDisplayName(removedShapeType);
+
             // Announce what happened
             // For zone shrink (delete designator), undoing RE-ADDS cells, so say "Restored" not "Removed"
             string action = isDeleteDesignator ? "Restored" : "Removed";
@@ -1505,12 +1570,15 @@ namespace RimWorldAccess
 
             if (remainingSegments > 0)
             {
-                TolkHelper.Speak($"{action} {removedCount} {itemType}. {remainingCount} remaining in {remainingSegments} segments.", SpeechPriority.Normal);
+                // Use shape type counts for remaining segments
+                string shapeInfo = FormatShapeTypeCounts();
+                string remainingInfo = !string.IsNullOrEmpty(shapeInfo) ? $" in {shapeInfo}" : $" in {remainingSegments} segments";
+                TolkHelper.Speak($"{action} {removedCount} {itemType} ({removedShapeName}). {remainingCount} remaining{remainingInfo}.", SpeechPriority.Normal);
             }
             else
             {
                 // No segments left - stay in viewing mode, user presses = to add more
-                TolkHelper.Speak($"{action} {removedCount} {itemType}. No segments remaining.", SpeechPriority.Normal);
+                TolkHelper.Speak($"{action} {removedCount} {itemType} ({removedShapeName}). No segments remaining.", SpeechPriority.Normal);
             }
 
             Log.Message($"[ViewingModeState] Removed last segment ({removedCount} items), {remainingSegments} segments remaining");
@@ -1537,7 +1605,9 @@ namespace RimWorldAccess
             // Announce return to viewing mode
             int totalPlaced = PlacedCount;
             string itemType = isBuildDesignator ? "blueprints" : "designations";
-            string segmentInfo = segCount > 1 ? $" ({segCount} segments)" : "";
+            // Use shape type counts for multi-segment
+            string shapeInfo = FormatShapeTypeCounts();
+            string segmentInfo = !string.IsNullOrEmpty(shapeInfo) ? $" ({shapeInfo})" : "";
             TolkHelper.Speak($"Back to viewing mode. {totalPlaced} {itemType}{segmentInfo}.", SpeechPriority.Normal);
 
             Log.Message($"[ViewingModeState] Returned from shape placement, {segCount} segments");
@@ -1644,7 +1714,7 @@ namespace RimWorldAccess
             else
             {
                 // No segments left, fully reset
-                RestoreFocus();
+                // Note: We do NOT restore cursor position - keep it where the user left it
                 Reset();
             }
 
@@ -1675,8 +1745,7 @@ namespace RimWorldAccess
             string allWord = removedCount == 1 ? "" : "all ";
             TolkHelper.Speak($"Removed {allWord}{removedCount} {itemType}", SpeechPriority.Normal);
 
-            // Restore scanner focus
-            RestoreFocus();
+            // Note: We do NOT restore cursor position - keep it where the user left it
 
             // Save the designator and shape before reset
             Designator savedDesignator = activeDesignator;
@@ -1702,6 +1771,17 @@ namespace RimWorldAccess
         {
             if (!isActive)
                 return;
+
+            // If no segments remain, just exit immediately without showing dialog
+            if (SegmentCount == 0)
+            {
+                TolkHelper.Speak("Exited preview.", SpeechPriority.Normal);
+                Reset();
+                ShapePlacementState.Reset();
+                ArchitectState.Reset();
+                Log.Message("[ViewingModeState] Exited via Escape with no segments remaining");
+                return;
+            }
 
             // Determine dialog message based on designator type
             string dialogMessage;
@@ -1730,8 +1810,7 @@ namespace RimWorldAccess
                     string allWord = removedCount == 1 ? "" : "all ";
                     TolkHelper.Speak($"Removed {allWord}{removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
 
-                    // Restore focus and exit completely
-                    RestoreFocus();
+                    // Exit completely (don't restore cursor - keep it where user left it)
                     Reset();
 
                     // Also exit architect/placement mode entirely
@@ -1923,6 +2002,7 @@ namespace RimWorldAccess
             isDeleteDesignator = false;
             segments.Clear();
             cellSegments.Clear();
+            segmentShapeTypes.Clear();
             obstacleCells.Clear();
             detectedEnclosures.Clear();
             detectedRegionCount = 0;
@@ -2160,25 +2240,14 @@ namespace RimWorldAccess
         #region Focus Management
 
         /// <summary>
-        /// Saves the current cursor position for later restoration.
+        /// Saves the current cursor position.
+        /// Note: This is saved for reference but NOT restored when exiting - the cursor
+        /// should stay where the user left it, not be moved against their will.
         /// </summary>
         private static void SaveFocus()
         {
             savedCursorPosition = MapNavigationState.CurrentCursorPosition;
             Log.Message($"[ViewingModeState] Saved cursor position: {savedCursorPosition}");
-        }
-
-        /// <summary>
-        /// Restores the cursor position saved when entering viewing mode.
-        /// </summary>
-        private static void RestoreFocus()
-        {
-            if (savedCursorPosition.IsValid)
-            {
-                MapNavigationState.CurrentCursorPosition = savedCursorPosition;
-                Find.CameraDriver?.JumpToCurrentMapLoc(savedCursorPosition);
-                Log.Message($"[ViewingModeState] Restored cursor position: {savedCursorPosition}");
-            }
         }
 
         #endregion
