@@ -1498,27 +1498,19 @@ namespace RimWorldAccess
             string itemType = GetItemTypeForCount(removedCount);
 
             // Announce what happened
+            // For zone shrink (delete designator), undoing RE-ADDS cells, so say "Restored" not "Removed"
+            string action = isDeleteDesignator ? "Restored" : "Removed";
             int remainingCount = PlacedCount;
             int remainingSegments = SegmentCount;
 
             if (remainingSegments > 0)
             {
-                TolkHelper.Speak($"Removed {removedCount} {itemType}. {remainingCount} remaining in {remainingSegments} segments.", SpeechPriority.Normal);
+                TolkHelper.Speak($"{action} {removedCount} {itemType}. {remainingCount} remaining in {remainingSegments} segments.", SpeechPriority.Normal);
             }
             else
             {
-                // No segments left - go back to placement mode
-                TolkHelper.Speak($"Removed {removedCount} {itemType}. Returning to placement.", SpeechPriority.Normal);
-
-                Designator savedDesignator = activeDesignator;
-                ShapeType savedShape = usedShapeType;
-
-                Reset();
-
-                if (savedDesignator != null && savedShape != ShapeType.Manual)
-                {
-                    ShapePlacementState.Enter(savedDesignator, savedShape);
-                }
+                // No segments left - stay in viewing mode, user presses = to add more
+                TolkHelper.Speak($"{action} {removedCount} {itemType}. No segments remaining.", SpeechPriority.Normal);
             }
 
             Log.Message($"[ViewingModeState] Removed last segment ({removedCount} items), {remainingSegments} segments remaining");
