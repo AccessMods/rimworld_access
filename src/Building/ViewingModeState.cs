@@ -564,8 +564,8 @@ namespace RimWorldAccess
                 if (thing.def != null && !thing.def.CanOverlapZones)
                 {
                     // Try multiple label sources to get a meaningful name
-                    // Use LabelShort to exclude condition percentages (e.g., "(61%)") for proper grouping
-                    string label = thing.LabelShort;
+                    // Use LabelNoParenthesis to exclude condition percentages (e.g., "(61%)") for proper grouping
+                    string label = thing.LabelNoParenthesis;
                     if (string.IsNullOrEmpty(label))
                     {
                         label = thing.def?.label;
@@ -843,11 +843,11 @@ namespace RimWorldAccess
 
             foreach (var obstacle in obstacles)
             {
-                // Use the thing's LabelShort for proper grouping (excludes condition percentages)
+                // Use the thing's LabelNoParenthesis for proper grouping (excludes condition percentages)
                 string label;
                 if (obstacle.Thing != null)
                 {
-                    label = obstacle.Thing.LabelShort ?? obstacle.Thing.def?.label ?? "obstacle";
+                    label = obstacle.Thing.LabelNoParenthesis ?? obstacle.Thing.def?.label ?? "obstacle";
                 }
                 else
                 {
@@ -1585,32 +1585,20 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Returns to viewing mode from shape placement when user presses Escape at SettingFirstCorner.
-        /// Called when there are still segments on the stack.
+        /// Returns to placement mode from viewing mode.
+        /// Called when user wants to exit viewing and return to shape placement.
         /// </summary>
         public static void ReturnFromShapePlacement()
         {
-            // Only valid if we have segments preserved via isAddingMore flag
-            int segCount = SegmentCount;
-            if (!isAddingMore || segCount == 0)
-            {
-                Log.Warning("[ViewingModeState] ReturnFromShapePlacement called but no segments to return to");
+            if (!isActive)
                 return;
-            }
 
-            // Re-activate viewing mode
-            isActive = true;
-            isAddingMore = false;
+            TolkHelper.Speak("Returned to placement mode", SpeechPriority.Normal);
 
-            // Announce return to viewing mode
-            int totalPlaced = PlacedCount;
-            string itemType = isBuildDesignator ? "blueprints" : "designations";
-            // Use shape type counts for multi-segment
-            string shapeInfo = FormatShapeTypeCounts();
-            string segmentInfo = !string.IsNullOrEmpty(shapeInfo) ? $" ({shapeInfo})" : "";
-            TolkHelper.Speak($"Back to viewing mode. {totalPlaced} {itemType}{segmentInfo}.", SpeechPriority.Normal);
+            isActive = false;  // Exit viewing mode
 
-            Log.Message($"[ViewingModeState] Returned from shape placement, {segCount} segments");
+            // Return to shape placement mode with current shape and designator
+            ShapePlacementState.Enter(activeDesignator, usedShapeType, fromViewingMode: true);
         }
 
         /// <summary>
@@ -2296,6 +2284,12 @@ namespace RimWorldAccess
 
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
+                    // Don't intercept Enter if gizmo navigation or windowless float menu is active
+                    // They need Enter to execute the selected gizmo or menu option
+                    if (GizmoNavigationState.IsActive || WindowlessFloatMenuState.IsActive)
+                    {
+                        return false;  // Let the active menu handle it
+                    }
                     // Enter - finalize all placements
                     Confirm();
                     return true;

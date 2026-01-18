@@ -189,6 +189,9 @@ namespace RimWorldAccess
         /// </summary>
         public static void EnterPlacementMode(Designator designator, ThingDef material = null)
         {
+            // Close gizmo navigation when entering placement mode
+            GizmoNavigationState.Close();
+
             currentMode = ArchitectMode.PlacementMode;
             selectedDesignator = designator;
             selectedMaterial = material;

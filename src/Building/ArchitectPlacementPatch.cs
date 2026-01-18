@@ -66,10 +66,26 @@ namespace RimWorldAccess
             if (Event.current.type != EventType.KeyDown)
                 return;
 
-            // Don't process input when shape selection menu or viewing mode is active
-            // Those menus handle their own input and should receive all keys
-            if (ShapeSelectionMenuState.IsActive || ViewingModeState.IsActive)
+            // Don't process when shape selection menu is active
+            // Don't process when viewing mode is active UNLESS ShapePlacementState is also active
+            // (user is placing a door from viewing mode gizmo - ViewingModeState yields Space to us)
+            if (ShapeSelectionMenuState.IsActive)
                 return;
+
+            if (ViewingModeState.IsActive && !ShapePlacementState.IsActive)
+                return;
+
+            // Don't let placement mode steal Enter from gizmo navigation
+            // Gizmo navigation needs Enter key to execute selected gizmo
+            if (GizmoNavigationState.IsActive)
+            {
+                if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                {
+                    // Don't consume - let UnifiedKeyboardPatch route to GizmoNavigationState
+                    return;
+                }
+                // For other keys, let placement mode handle them normally
+            }
 
             // Check we have a valid map
             if (Find.CurrentMap == null)
@@ -174,6 +190,13 @@ namespace RimWorldAccess
             {
                 if (supportsShapes && inArchitectMode)
                 {
+                    // Check if only Manual shape is available - nothing to cycle through
+                    if (availableShapes.Count == 1 && availableShapes[0] == ShapeType.Manual)
+                    {
+                        TolkHelper.Speak("No shapes available.");
+                        return true;
+                    }
+
                     // Cancel any active shape placement before opening menu
                     if (ShapePlacementState.IsActive)
                     {
@@ -187,7 +210,7 @@ namespace RimWorldAccess
                     }
                     else
                     {
-                        // Only one shape - activate it directly
+                        // Only one non-Manual shape - activate it directly
                         ShapePlacementState.Enter(activeDesignator, availableShapes[0]);
                     }
                     return true;
@@ -210,10 +233,47 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Handles R key input for rotating buildings.
+        /// If the building is not rotatable, announces that it can't be rotated.
         /// </summary>
         /// <returns>True if the key was handled, false otherwise.</returns>
         private static bool HandleRotateKey(Designator activeDesignator, bool inArchitectMode)
         {
+            // Check if the building can be rotated before attempting rotation
+            // Some buildings like doors auto-detect their orientation and cannot be manually rotated
+            bool canRotate = true;
+            string buildingLabel = null;
+
+            if (activeDesignator is Designator_Build buildDesignator)
+            {
+                if (buildDesignator.PlacingDef is ThingDef thingDef)
+                {
+                    canRotate = thingDef.rotatable;
+                    buildingLabel = thingDef.label;
+                }
+            }
+            else if (activeDesignator is Designator_Place designatorPlace)
+            {
+                if (designatorPlace.PlacingDef is ThingDef thingDef)
+                {
+                    canRotate = thingDef.rotatable;
+                    buildingLabel = thingDef.label;
+                }
+            }
+
+            // If not rotatable, announce and return
+            if (!canRotate)
+            {
+                string name = buildingLabel ?? activeDesignator.Label ?? "This";
+                // Capitalize first letter for better announcement
+                if (!string.IsNullOrEmpty(name))
+                {
+                    name = char.ToUpper(name[0]) + name.Substring(1);
+                }
+                TolkHelper.Speak($"{name} can't be rotated.");
+                return true;
+            }
+
+            // Building is rotatable - proceed with rotation
             if (inArchitectMode)
             {
                 ArchitectState.RotateBuilding();
@@ -305,16 +365,14 @@ namespace RimWorldAccess
                             string label = activeDesignator.Label;
                             TolkHelper.Speak($"{label} placed at {currentPosition.x}, {currentPosition.z}");
 
-                            // If in ArchitectState mode, clear selected cells for next placement
+                            // Clear selected cells for next placement (both architect and gizmo modes)
+                            // User presses Enter to confirm and exit placement mode
                             if (inArchitectMode)
                             {
                                 ArchitectState.ClearSelectedCells();
                             }
-                            else
-                            {
-                                // For gizmo-activated placement (like Reinstall), exit after placement
-                                Find.DesignatorManager.Deselect();
-                            }
+                            // For gizmo placement, stay in placement mode like architect mode
+                            // User presses Enter to confirm and exit
                         }
                         catch (System.Exception ex)
                         {

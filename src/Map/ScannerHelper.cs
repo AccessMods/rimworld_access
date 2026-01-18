@@ -41,7 +41,7 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = thing.LabelShort ?? thing.def.label ?? "Unknown";
+                Label = thing.LabelNoParenthesis ?? thing.def.label ?? "Unknown";
             }
         }
 
@@ -64,7 +64,7 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = Thing.LabelShort ?? Thing.def.label ?? "Unknown";
+                Label = Thing.LabelNoParenthesis ?? Thing.def.label ?? "Unknown";
             }
         }
 
@@ -106,7 +106,7 @@ namespace RimWorldAccess
 
             if (designation.target.HasThing && designation.target.Thing != null)
             {
-                Label = $"{designation.target.Thing.LabelShort} ({defLabel})";
+                Label = $"{designation.target.Thing.LabelNoParenthesis} ({defLabel})";
             }
             else
             {
@@ -117,7 +117,7 @@ namespace RimWorldAccess
                     var edifice = Position.GetEdifice(map);
                     if (edifice != null)
                     {
-                        Label = $"{edifice.LabelShort} ({defLabel})";
+                        Label = $"{edifice.LabelNoParenthesis} ({defLabel})";
                     }
                     else
                     {

@@ -180,16 +180,91 @@ namespace RimWorldAccess
             string shapeName = ShapeHelper.GetShapeName(shape);
             string designatorLabel = ArchitectHelper.GetSanitizedLabel(designator);
 
+            // Build a comprehensive announcement with size, rotation, and key hints
+            string announcement = BuildEnterAnnouncement(designator, designatorLabel, shape, shapeName);
+            TolkHelper.Speak(announcement);
+
+            Log.Message($"[ShapePlacementState] Entered with shape {shape} for designator {designatorLabel}, viewingModeOnStack={fromViewingMode}");
+        }
+
+        /// <summary>
+        /// Builds the announcement for entering shape placement mode.
+        /// Includes item name, size info, rotation/facing info, and key hints.
+        /// </summary>
+        private static string BuildEnterAnnouncement(Designator designator, string designatorLabel, ShapeType shape, string shapeName)
+        {
+            List<string> parts = new List<string>();
+
+            // Item name and placement type
             if (shape == ShapeType.Manual)
             {
-                TolkHelper.Speak($"{designatorLabel} manual placement. Press Space to place.");
+                parts.Add($"Placing {designatorLabel}");
             }
             else
             {
-                TolkHelper.Speak($"{designatorLabel} {shapeName} placement. Move to first point and press Space.");
+                parts.Add($"{designatorLabel} {shapeName} placement");
             }
 
-            Log.Message($"[ShapePlacementState] Entered with shape {shape} for designator {designatorLabel}, viewingModeOnStack={fromViewingMode}");
+            // Add size and rotation info for build designators
+            if (designator is Designator_Place placeDesignator && placeDesignator.PlacingDef != null)
+            {
+                BuildableDef def = placeDesignator.PlacingDef;
+                IntVec2 size = def.Size;
+
+                // Size info
+                if (size.x == 1 && size.z == 1)
+                {
+                    parts.Add("Size: 1 tile");
+                }
+                else
+                {
+                    parts.Add($"Size: {size.x}x{size.z}");
+                }
+
+                // Rotation info - only include for rotatable buildings
+                // Non-rotatable buildings (like doors) auto-detect orientation when placed
+                bool isRotatable = def is ThingDef thingDef && thingDef.rotatable;
+                if (isRotatable)
+                {
+                    Rot4 rotation = Rot4.North;
+                    var rotField = HarmonyLib.AccessTools.Field(typeof(Designator_Place), "placingRot");
+                    if (rotField != null)
+                    {
+                        rotation = (Rot4)rotField.GetValue(placeDesignator);
+                    }
+                    parts.Add($"Facing {ArchitectState.GetRotationName(rotation)}");
+                }
+            }
+
+            // Key hints
+            if (shape == ShapeType.Manual)
+            {
+                // Check if this building can actually be rotated
+                // Some buildings like doors auto-detect their orientation and cannot be manually rotated
+                bool canRotate = false;
+                if (designator is Designator_Build buildDes)
+                {
+                    if (buildDes.PlacingDef is ThingDef thingDef)
+                    {
+                        canRotate = thingDef.rotatable;
+                    }
+                }
+
+                if (canRotate)
+                {
+                    parts.Add("Move to position and press Space to place, R to rotate, Escape to cancel");
+                }
+                else
+                {
+                    parts.Add("Move to position and press Space to place, Escape to cancel");
+                }
+            }
+            else
+            {
+                parts.Add("Move to first point and press Space");
+            }
+
+            return string.Join(". ", parts) + ".";
         }
 
         /// <summary>
@@ -413,24 +488,31 @@ namespace RimWorldAccess
                             List<Thing> thingsBefore = new List<Thing>(cell.GetThingList(map));
                             activeDesignator.DesignateSingleCell(cell);
                             List<Thing> thingsAfter = cell.GetThingList(map);
+                            bool blueprintAdded = false;
                             foreach (Thing thing in thingsAfter)
                             {
                                 if (!thingsBefore.Contains(thing) &&
                                     (thing.def.IsBlueprint || thing.def.IsFrame))
                                 {
                                     placedThisOperation.Add(thing);
+                                    blueprintAdded = true;
                                     break;
                                 }
+                            }
+
+                            if (blueprintAdded)
+                            {
+                                result.PlacedCells.Add(cell);
+                                result.PlacedCount++;
                             }
                         }
                         else
                         {
-                            // For Orders (Hunt, Haul) and Cells (Mine), just designate
+                            // For non-build designators, always count
                             activeDesignator.DesignateSingleCell(cell);
+                            result.PlacedCells.Add(cell);
+                            result.PlacedCount++;
                         }
-
-                        result.PlacedCells.Add(cell);
-                        result.PlacedCount++;
                     }
                     catch (System.Exception ex)
                     {

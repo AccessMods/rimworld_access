@@ -423,6 +423,18 @@ namespace RimWorldAccess
                 // 1. Designator (like Reinstall, Copy) - enters placement mode
                 if (selectedGizmo is Designator designator)
                 {
+                    // Check if this is a Designator_Build that needs material selection
+                    if (designator is Designator_Build buildDesignator)
+                    {
+                        BuildableDef buildable = buildDesignator.PlacingDef;
+                        if (ArchitectHelper.RequiresMaterialSelection(buildable))
+                        {
+                            // Handle material selection explicitly
+                            HandleBuildDesignatorMaterialSelection(buildDesignator, buildable);
+                            return;
+                        }
+                    }
+
                     // Check for zone expand/shrink designators - use accessible expansion mode
                     string designatorTypeName = designator.GetType().Name;
 
@@ -1674,6 +1686,57 @@ namespace RimWorldAccess
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Handles material selection for a Designator_Build gizmo.
+        /// Opens a windowless float menu with material options.
+        /// </summary>
+        private static void HandleBuildDesignatorMaterialSelection(Designator_Build buildDesignator, BuildableDef buildable)
+        {
+            // Create material options using the existing helper
+            List<FloatMenuOption> options = ArchitectHelper.CreateMaterialOptions(
+                buildable,
+                (material) => OnGizmoMaterialSelected(buildDesignator, buildable, material)
+            );
+
+            if (options.Count == 0)
+            {
+                TolkHelper.Speak($"No materials available for {buildable.label}");
+                return;
+            }
+
+            // Announce and open material selection menu
+            TolkHelper.Speak($"Select material for {buildable.label}");
+            WindowlessFloatMenuState.Open(options, false);
+
+            // Close gizmo navigation - material selection will handle the rest
+            Close();
+        }
+
+        /// <summary>
+        /// Callback when a material is selected for a gizmo's Designator_Build.
+        /// Sets the material on the designator and selects it directly.
+        /// DesignatorManagerPatch will automatically route to accessible placement.
+        /// </summary>
+        private static void OnGizmoMaterialSelected(Designator_Build designator, BuildableDef buildable, ThingDef material)
+        {
+            try
+            {
+                // Set the material on the designator
+                designator.SetStuffDef(material);
+
+                // Select the designator directly (like vanilla's FloatMenu callback does)
+                // DesignatorManagerPatch will automatically route to accessible placement
+                Find.DesignatorManager.Select(designator);
+
+                TolkHelper.Speak($"{material.LabelCap} selected");
+            }
+            catch (System.Exception ex)
+            {
+                ModLogger.Error($"Exception in gizmo material selection: {ex.Message}");
+                TolkHelper.Speak($"Error: {ex.Message}", SpeechPriority.High);
+            }
         }
     }
 }

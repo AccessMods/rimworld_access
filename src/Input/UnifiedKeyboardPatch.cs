@@ -3230,6 +3230,14 @@ namespace RimWorldAccess
             // ===== PRIORITY 7.05: Open gizmo navigation with G key (if pawn or building is selected) =====
             if (key == KeyCode.G)
             {
+                // Block gizmos during placement or viewing modes
+                if (ShapePlacementState.IsActive || ViewingModeState.IsActive)
+                {
+                    TolkHelper.Speak("Gizmos unavailable during placement or review");
+                    Event.current.Use();
+                    return;
+                }
+
                 // Only open gizmo navigation if we're in gameplay and no dialogs are open
                 if (Current.ProgramState == ProgramState.Playing &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
