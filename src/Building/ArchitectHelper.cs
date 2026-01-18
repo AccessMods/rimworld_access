@@ -221,6 +221,25 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Pluralizes a label while preserving parenthetical suffixes.
+        /// "sandstone grand stele (61%)" -> "sandstone grand steles (61%)"
+        /// </summary>
+        public static string PluralizePreservingParentheses(string label, int count)
+        {
+            if (string.IsNullOrEmpty(label) || count <= 1)
+                return label;
+
+            int parenIndex = label.IndexOf('(');
+            if (parenIndex <= 0)
+                return Find.ActiveLanguageWorker.Pluralize(label, count);
+
+            string baseNoun = label.Substring(0, parenIndex).TrimEnd();
+            string suffix = label.Substring(parenIndex);
+            string pluralNoun = Find.ActiveLanguageWorker.Pluralize(baseNoun, count);
+            return $"{pluralNoun} {suffix}";
+        }
+
+        /// <summary>
         /// Gets the default or most commonly available material for a buildable.
         /// </summary>
         public static ThingDef GetDefaultMaterial(BuildableDef buildable)

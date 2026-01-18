@@ -380,7 +380,7 @@ namespace RimWorldAccess
         /// - "50 by 12 stockpile zone created." (new zone)
         /// - "50 by 12 stockpile zone expanded." (adding to existing zone)
         /// - "50 by 12 stockpile zone created, 11 cells blocked by sandstones." (contiguous - no split warning)
-        /// - "50 by 12 stockpile zone created, 11 cells blocked by 3 walls. Warning: This will create 3 separate zones. Press Escape to cancel."
+        /// - "50 by 12 stockpile zone created, 11 cells blocked by 3 walls. Warning: This will create 3 separate zones."
         /// For delete/shrink: "Removed 50 cells from zone."
         /// </summary>
         private static string BuildZoneDesignatorAnnouncement(Designator designator, int totalPlaced, string segmentInfo)
@@ -438,7 +438,7 @@ namespace RimWorldAccess
                 // Obstacles on the edge don't cause splits - only obstacles that break contiguity do
                 if (detectedRegionCount > 1)
                 {
-                    parts.Add($"Warning: This will create {detectedRegionCount} separate zones. Press Escape to cancel");
+                    parts.Add($"Warning: This will create {detectedRegionCount} separate zones");
                 }
             }
             else if (totalPlaced > 0)
@@ -555,7 +555,8 @@ namespace RimWorldAccess
                 if (thing.def != null && !thing.def.CanOverlapZones)
                 {
                     // Try multiple label sources to get a meaningful name
-                    string label = thing.LabelNoCount;
+                    // Use LabelShort to exclude condition percentages (e.g., "(61%)") for proper grouping
+                    string label = thing.LabelShort;
                     if (string.IsNullOrEmpty(label))
                     {
                         label = thing.def?.label;
@@ -603,8 +604,14 @@ namespace RimWorldAccess
                 return TerrainPrefix + (terrain.label ?? "terrain");
             }
 
-            // If we still can't identify the obstacle, use a clear fallback
-            // This shouldn't happen often, but if it does, "blocked cell" is clearer than "obstacle"
+            // If we still can't identify the obstacle, report the terrain
+            // This catches cases like low fertility terrain blocking growing zones
+            if (terrain != null)
+            {
+                return TerrainPrefix + (terrain.label ?? "unknown terrain");
+            }
+
+            // True fallback - should be very rare
             return "blocked cell";
         }
 
@@ -636,7 +643,7 @@ namespace RimWorldAccess
                 // "Placed X of Y wooden walls (cost), Z blocked by [obstacle list]."
                 // Combined into one sentence for conciseness
                 string pluralLabel = totalPlaced > 1
-                    ? Find.ActiveLanguageWorker.Pluralize(designatorLabel, totalPlaced)
+                    ? ArchitectHelper.PluralizePreservingParentheses(designatorLabel, totalPlaced)
                     : designatorLabel;
 
                 string costInfo = GetCostInfo();
@@ -655,7 +662,7 @@ namespace RimWorldAccess
             {
                 // "Placed X wooden walls (cost)."
                 string pluralLabel = totalPlaced > 1
-                    ? Find.ActiveLanguageWorker.Pluralize(designatorLabel, totalPlaced)
+                    ? ArchitectHelper.PluralizePreservingParentheses(designatorLabel, totalPlaced)
                     : designatorLabel;
 
                 string costInfo = GetCostInfo();
@@ -784,21 +791,22 @@ namespace RimWorldAccess
             foreach (Thing thing in things)
             {
                 // Skip plants, filth, and other minor things
+                // Use LabelShort to exclude condition percentages (e.g., "(61%)") for proper grouping
                 if (thing is Building || thing is Pawn)
                 {
-                    return thing.LabelNoCount ?? thing.def?.label ?? "obstacle";
+                    return thing.LabelShort ?? thing.def?.label ?? "obstacle";
                 }
 
                 // Check for blueprints or frames
                 if (thing.def.IsBlueprint || thing.def.IsFrame)
                 {
-                    return thing.LabelNoCount ?? "blueprint";
+                    return thing.LabelShort ?? "blueprint";
                 }
 
                 // Check for items
                 if (thing.def.category == ThingCategory.Item)
                 {
-                    return thing.LabelNoCount ?? "item";
+                    return thing.LabelShort ?? "item";
                 }
             }
 
@@ -826,11 +834,11 @@ namespace RimWorldAccess
 
             foreach (var obstacle in obstacles)
             {
-                // Use the thing's LabelNoCount for proper grouping
+                // Use the thing's LabelShort for proper grouping (excludes condition percentages)
                 string label;
                 if (obstacle.Thing != null)
                 {
-                    label = obstacle.Thing.LabelNoCount ?? obstacle.Thing.def?.label ?? "obstacle";
+                    label = obstacle.Thing.LabelShort ?? obstacle.Thing.def?.label ?? "obstacle";
                 }
                 else
                 {
@@ -946,7 +954,7 @@ namespace RimWorldAccess
                 {
                     // Regular items get pluralized
                     label = kvp.Value > 1
-                        ? Find.ActiveLanguageWorker.Pluralize(key, kvp.Value)
+                        ? ArchitectHelper.PluralizePreservingParentheses(key, kvp.Value)
                         : key;
                 }
                 formattedParts.Add($"{kvp.Value} {label}");
@@ -1025,7 +1033,8 @@ namespace RimWorldAccess
 
             foreach (Thing thing in orderTargets)
             {
-                string label = thing.LabelNoCount ?? thing.def?.label ?? "Unknown";
+                // Use LabelShort to exclude condition percentages for proper grouping
+                string label = thing.LabelShort ?? thing.def?.label ?? "Unknown";
                 if (thingCounts.ContainsKey(label))
                     thingCounts[label]++;
                 else
@@ -1043,7 +1052,8 @@ namespace RimWorldAccess
 
                     if (edifice != null)
                     {
-                        label = edifice.LabelNoCount ?? edifice.def?.label ?? "Unknown";
+                        // Use LabelShort to exclude condition percentages for proper grouping
+                        label = edifice.LabelShort ?? edifice.def?.label ?? "Unknown";
                     }
                     else
                     {
@@ -1075,7 +1085,7 @@ namespace RimWorldAccess
                 if (kvp.Value >= threshold)
                 {
                     string label = kvp.Value > 1
-                        ? Find.ActiveLanguageWorker.Pluralize(kvp.Key, kvp.Value)
+                        ? ArchitectHelper.PluralizePreservingParentheses(kvp.Key, kvp.Value)
                         : kvp.Key;
                     significantParts.Add($"{kvp.Value} {label}");
                 }
@@ -1732,6 +1742,10 @@ namespace RimWorldAccess
                     RestoreFocus();
                     Reset();
 
+                    // Also exit architect/placement mode entirely
+                    ShapePlacementState.Reset();
+                    ArchitectState.Reset();
+
                     Log.Message($"[ViewingModeState] Exited via confirmation, removed {removedCount} items");
                 },
                 "Stay",
@@ -2053,7 +2067,7 @@ namespace RimWorldAccess
             }
 
             // Get the label before destroying
-            string thingLabel = blueprintToRemove.Label;
+            string thingLabel = blueprintToRemove.LabelShort;
 
             // Remove the blueprint from whichever segment contains it
             foreach (var segment in segments)

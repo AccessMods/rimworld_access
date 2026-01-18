@@ -505,7 +505,7 @@ namespace RimWorldAccess
                 // Check if it's a player-owned blueprint or frame
                 if (thing.Faction == Faction.OfPlayer && (thing is Frame || thing is Blueprint))
                 {
-                    string thingLabel = thing.Label;
+                    string thingLabel = thing.LabelShort;
                     thing.Destroy(DestroyMode.Cancel);
                     TolkHelper.Speak($"Cancelled {thingLabel}");
                     SoundDefOf.Designate_Cancel.PlayOneShotOnCamera();
