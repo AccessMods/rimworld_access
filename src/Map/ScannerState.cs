@@ -622,8 +622,7 @@ namespace RimWorldAccess
             }
             else
             {
-                // Get the actual thing (considering bulk index)
-                targetPos = currentItem.Position;
+                // Get the actual thing's LIVE position (considering bulk index)
                 if (currentItem.IsBulkGroup && currentBulkIndex < currentItem.BulkCount)
                 {
                     if (currentItem.BulkThings != null && currentBulkIndex < currentItem.BulkThings.Count)
@@ -631,14 +630,31 @@ namespace RimWorldAccess
                         Thing targetThing = currentItem.BulkThings[currentBulkIndex];
                         targetPos = targetThing.Position;
                     }
+                    else
+                    {
+                        targetPos = currentItem.Thing?.Position ?? currentItem.Position;
+                    }
+                }
+                else
+                {
+                    // Use live position from Thing if available (for moving targets like pawns)
+                    targetPos = currentItem.Thing?.Position ?? currentItem.Position;
                 }
             }
 
             var cursorPos = MapNavigationState.CurrentCursorPosition;
             var distance = (targetPos - cursorPos).LengthHorizontal;
-            var direction = currentItem.GetDirectionFrom(cursorPos);
+            // Use our calculated targetPos for direction, not item.Position which may be stale
+            var direction = GetDirectionFromCursor(targetPos);
 
-            TolkHelper.Speak($"{distance:F1} tiles, {direction}", SpeechPriority.Normal);
+            if (direction != null)
+            {
+                TolkHelper.Speak($"{distance:F1} tiles {direction}", SpeechPriority.Normal);
+            }
+            else
+            {
+                TolkHelper.Speak("here", SpeechPriority.Normal);
+            }
         }
 
         private static ScannerCategory GetCurrentCategory()
@@ -741,6 +757,31 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Calculates the compass direction from the cursor to a target position.
+        /// Returns null if the cursor is at or very close to the target.
+        /// </summary>
+        private static string GetDirectionFromCursor(IntVec3 targetPosition)
+        {
+            var cursorPos = MapNavigationState.CurrentCursorPosition;
+            IntVec3 offset = targetPosition - cursorPos;
+
+            if (offset.LengthHorizontal < 0.5f)
+                return null; // Same position
+
+            double angle = System.Math.Atan2(offset.x, offset.z) * (180.0 / System.Math.PI);
+            if (angle < 0) angle += 360;
+
+            if (angle >= 337.5 || angle < 22.5) return "North";
+            if (angle >= 22.5 && angle < 67.5) return "Northeast";
+            if (angle >= 67.5 && angle < 112.5) return "East";
+            if (angle >= 112.5 && angle < 157.5) return "Southeast";
+            if (angle >= 157.5 && angle < 202.5) return "South";
+            if (angle >= 202.5 && angle < 247.5) return "Southwest";
+            if (angle >= 247.5 && angle < 292.5) return "West";
+            return "Northwest";
+        }
+
         private static void AnnounceCurrentCategory()
         {
             var category = GetCurrentCategory();
@@ -772,8 +813,17 @@ namespace RimWorldAccess
                 var region = item.TerrainRegions[currentBulkIndex];
                 var cursorPos = MapNavigationState.CurrentCursorPosition;
                 var distance = (region.CenterPosition - cursorPos).LengthHorizontal;
+                var direction = GetDirectionFromCursor(region.CenterPosition);
 
-                string announcement = $"{item.Label}: {region.SizeDescription}, {distance:F1} tiles away";
+                string announcement;
+                if (direction != null)
+                {
+                    announcement = $"{item.Label}: {region.SizeDescription}, {distance:F1} tiles {direction}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {region.SizeDescription}, here";
+                }
 
                 if (item.RegionCount > 1)
                 {
@@ -788,8 +838,20 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Build announcement without position info
-            string basicAnnouncement = $"{item.Label} - {item.Distance:F1} tiles away";
+            // Get target position (use live position for things that might be moving)
+            IntVec3 targetPos = item.Thing != null ? item.Thing.Position : item.Position;
+            var itemDirection = GetDirectionFromCursor(targetPos);
+
+            // Build announcement with direction (use comma instead of hyphen to avoid "minus" reading)
+            string basicAnnouncement;
+            if (itemDirection != null)
+            {
+                basicAnnouncement = $"{item.Label}, {item.Distance:F1} tiles {itemDirection}";
+            }
+            else
+            {
+                basicAnnouncement = $"{item.Label}, here";
+            }
 
             // Add bulk count if this is a grouped item
             if (item.IsBulkGroup)
@@ -817,11 +879,19 @@ namespace RimWorldAccess
                     return;
 
                 var region = item.TerrainRegions[currentBulkIndex];
-                var regionCursorPos = MapNavigationState.CurrentCursorPosition;
-                var regionDistance = (region.CenterPosition - regionCursorPos).LengthHorizontal;
+                var regionDistance = (region.CenterPosition - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+                var regionDirection = GetDirectionFromCursor(region.CenterPosition);
                 int regionPosition = currentBulkIndex + 1;
 
-                string announcement = $"{item.Label}: {region.SizeDescription}, {regionDistance:F1} tiles away, region {regionPosition} of {item.RegionCount}";
+                string announcement;
+                if (regionDirection != null)
+                {
+                    announcement = $"{item.Label}: {region.SizeDescription}, {regionDistance:F1} tiles {regionDirection}, region {regionPosition} of {item.RegionCount}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {region.SizeDescription}, here, region {regionPosition} of {item.RegionCount}";
+                }
                 TolkHelper.Speak(announcement, SpeechPriority.Normal);
                 return;
             }
@@ -841,8 +911,9 @@ namespace RimWorldAccess
                     return;
 
                 var targetDesignation = item.BulkDesignations[currentBulkIndex];
-                var desCursorPos = MapNavigationState.CurrentCursorPosition;
-                var desDistance = (targetDesignation.target.Cell - desCursorPos).LengthHorizontal;
+                var desTargetPos = targetDesignation.target.Cell;
+                var desDistance = (desTargetPos - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+                var desDirection = GetDirectionFromCursor(desTargetPos);
                 var desPosition = currentBulkIndex + 1;
 
                 // Build label from the specific designation target
@@ -857,7 +928,14 @@ namespace RimWorldAccess
                     designationLabel = item.Label;
                 }
 
-                TolkHelper.Speak($"{designationLabel} - {desDistance:F1} tiles away, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                if (desDirection != null)
+                {
+                    TolkHelper.Speak($"{designationLabel}, {desDistance:F1} tiles {desDirection}, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                }
+                else
+                {
+                    TolkHelper.Speak($"{designationLabel}, here, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                }
                 return;
             }
 
@@ -869,14 +947,22 @@ namespace RimWorldAccess
             if (targetThing == null)
                 return;
 
-            var cursorPos = MapNavigationState.CurrentCursorPosition;
-            var distance = (targetThing.Position - cursorPos).LengthHorizontal;
+            var thingTargetPos = targetThing.Position;
+            var distance = (thingTargetPos - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+            var thingDirection = GetDirectionFromCursor(thingTargetPos);
             var position = currentBulkIndex + 1;
 
             // Build label from this specific thing, not the group label
             string thingLabel = targetThing.LabelShort ?? targetThing.def?.label ?? item.Label;
 
-            TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles away, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            if (thingDirection != null)
+            {
+                TolkHelper.Speak($"{thingLabel}, {distance:F1} tiles {thingDirection}, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            }
+            else
+            {
+                TolkHelper.Speak($"{thingLabel}, here, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            }
         }
 
         /// <summary>
