@@ -483,8 +483,13 @@ namespace RimWorldAccess
 
             if (currentItem.IsTerrain)
             {
-                // For terrain, check if we're navigating bulk terrain positions
-                if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
+                // For terrain regions, jump to the region center
+                if (currentItem.HasTerrainRegions && currentBulkIndex < currentItem.TerrainRegions.Count)
+                {
+                    targetPosition = currentItem.TerrainRegions[currentBulkIndex].CenterPosition;
+                }
+                // Legacy: bulk terrain positions
+                else if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
                 {
                     targetPosition = currentItem.BulkTerrainPositions[currentBulkIndex];
                 }
@@ -600,8 +605,13 @@ namespace RimWorldAccess
 
             if (currentItem.IsTerrain)
             {
-                // For terrain, check if we're navigating bulk terrain positions
-                if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
+                // For terrain regions, use region center
+                if (currentItem.HasTerrainRegions && currentBulkIndex < currentItem.TerrainRegions.Count)
+                {
+                    targetPos = currentItem.TerrainRegions[currentBulkIndex].CenterPosition;
+                }
+                // Legacy: bulk terrain positions
+                else if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
                 {
                     targetPos = currentItem.BulkTerrainPositions[currentBulkIndex];
                 }
@@ -616,8 +626,11 @@ namespace RimWorldAccess
                 targetPos = currentItem.Position;
                 if (currentItem.IsBulkGroup && currentBulkIndex < currentItem.BulkCount)
                 {
-                    Thing targetThing = currentItem.BulkThings[currentBulkIndex];
-                    targetPos = targetThing.Position;
+                    if (currentItem.BulkThings != null && currentBulkIndex < currentItem.BulkThings.Count)
+                    {
+                        Thing targetThing = currentItem.BulkThings[currentBulkIndex];
+                        targetPos = targetThing.Position;
+                    }
                 }
             }
 
@@ -753,17 +766,39 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Special handling for terrain with regions
+            if (item.HasTerrainRegions)
+            {
+                var region = item.TerrainRegions[currentBulkIndex];
+                var cursorPos = MapNavigationState.CurrentCursorPosition;
+                var distance = (region.CenterPosition - cursorPos).LengthHorizontal;
+
+                string announcement = $"{item.Label}: {region.SizeDescription}, {distance:F1} tiles away";
+
+                if (item.RegionCount > 1)
+                {
+                    int position = currentBulkIndex + 1;
+                    announcement += $", region {position} of {item.RegionCount}";
+                }
+
+                // Show total tile count across all regions
+                announcement += $", {item.TotalTileCount} tiles total";
+
+                TolkHelper.Speak(announcement, SpeechPriority.Normal);
+                return;
+            }
+
             // Build announcement without position info
-            string announcement = $"{item.Label} - {item.Distance:F1} tiles";
+            string basicAnnouncement = $"{item.Label} - {item.Distance:F1} tiles away";
 
             // Add bulk count if this is a grouped item
             if (item.IsBulkGroup)
             {
                 int position = currentBulkIndex + 1;
-                announcement += $", {position} of {item.BulkCount}";
+                basicAnnouncement += $", {position} of {item.BulkCount}";
             }
 
-            TolkHelper.Speak(announcement, SpeechPriority.Normal);
+            TolkHelper.Speak(basicAnnouncement, SpeechPriority.Normal);
         }
 
         private static void AnnounceCurrentBulkItem()
@@ -775,8 +810,24 @@ namespace RimWorldAccess
             if (currentBulkIndex < 0 || currentBulkIndex >= item.BulkCount)
                 return;
 
-            // For terrain bulk groups, we don't have individual things
-            if (item.IsTerrain)
+            // For terrain regions (adjacency-grouped)
+            if (item.HasTerrainRegions)
+            {
+                if (currentBulkIndex >= item.TerrainRegions.Count)
+                    return;
+
+                var region = item.TerrainRegions[currentBulkIndex];
+                var regionCursorPos = MapNavigationState.CurrentCursorPosition;
+                var regionDistance = (region.CenterPosition - regionCursorPos).LengthHorizontal;
+                int regionPosition = currentBulkIndex + 1;
+
+                string announcement = $"{item.Label}: {region.SizeDescription}, {regionDistance:F1} tiles away, region {regionPosition} of {item.RegionCount}";
+                TolkHelper.Speak(announcement, SpeechPriority.Normal);
+                return;
+            }
+
+            // For legacy terrain bulk groups (non-adjacent grouping)
+            if (item.IsTerrain && item.BulkTerrainPositions != null)
             {
                 var terrainPosition = currentBulkIndex + 1;
                 TolkHelper.Speak($"{item.Label} - {terrainPosition} of {item.BulkCount}", SpeechPriority.Normal);
@@ -806,7 +857,7 @@ namespace RimWorldAccess
                     designationLabel = item.Label;
                 }
 
-                TolkHelper.Speak($"{designationLabel} - {desDistance:F1} tiles, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                TolkHelper.Speak($"{designationLabel} - {desDistance:F1} tiles away, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
                 return;
             }
 
@@ -825,7 +876,7 @@ namespace RimWorldAccess
             // Build label from this specific thing, not the group label
             string thingLabel = targetThing.LabelShort ?? targetThing.def?.label ?? item.Label;
 
-            TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles away, {position} of {item.BulkCount}", SpeechPriority.Normal);
         }
 
         /// <summary>
