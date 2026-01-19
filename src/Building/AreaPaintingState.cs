@@ -270,9 +270,6 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Get dimensions before confirming (previewHelper.ConfirmShape resets state)
-            var (width, height) = ShapeHelper.GetDimensions(previewHelper.FirstCorner.Value, previewHelper.SecondCorner.Value);
-
             // Get confirmed cells from previewHelper (this resets the helper's state)
             var confirmedCells = previewHelper.ConfirmShape("[AreaPaintingState]");
 
@@ -284,8 +281,23 @@ namespace RimWorldAccess
                 addedCount++;
             }
 
-            // Override the previewHelper announcement with our own that includes staged count
-            TolkHelper.Speak($"{width} by {height}, {addedCount} cells added. Total: {stagedCells.Count}");
+            // Format shape size - uses "W by H" for regular rectangles, "N cells" for irregular shapes
+            string shapeSize = ShapeHelper.FormatShapeSize(confirmedCells);
+
+            // Build announcement based on shape type
+            // Regular: "5 by 7, 35 cells added. Total: 100"
+            // Irregular: "32 cells added. Total: 100" (no duplicate dimension info)
+            string announcement;
+            if (ShapeHelper.IsRegularRectangle(confirmedCells))
+            {
+                announcement = $"{shapeSize}, {addedCount} cells added. Total: {stagedCells.Count}";
+            }
+            else
+            {
+                announcement = $"{addedCount} cells added. Total: {stagedCells.Count}";
+            }
+
+            TolkHelper.Speak(announcement);
 
             Log.Message($"[AreaPaintingState] Shape confirmed: {addedCount} cells added, total staged: {stagedCells.Count}");
         }

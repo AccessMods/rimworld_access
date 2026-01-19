@@ -503,6 +503,70 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Checks if the cells form a regular rectangle (no holes or gaps).
+        /// A regular rectangle has cell count equal to bounding box area.
+        /// </summary>
+        public static bool IsRegularRectangle(IEnumerable<IntVec3> cells)
+        {
+            if (cells == null || !cells.Any())
+                return false;
+
+            int minX = cells.Min(c => c.x);
+            int maxX = cells.Max(c => c.x);
+            int minZ = cells.Min(c => c.z);
+            int maxZ = cells.Max(c => c.z);
+
+            int width = maxX - minX + 1;
+            int height = maxZ - minZ + 1;
+            int expectedCount = width * height;
+            int actualCount = cells.Count();
+
+            return actualCount == expectedCount;
+        }
+
+        /// <summary>
+        /// Formats shape size for announcements.
+        /// Uses "W by H" for regular rectangles, "N cells" for irregular shapes.
+        /// </summary>
+        public static string FormatShapeSize(IEnumerable<IntVec3> cells)
+        {
+            if (cells == null || !cells.Any())
+                return "0 cells";
+
+            int count = cells.Count();
+
+            if (count == 1)
+                return "1 cell";
+
+            if (IsRegularRectangle(cells))
+            {
+                int minX = cells.Min(c => c.x);
+                int maxX = cells.Max(c => c.x);
+                int minZ = cells.Min(c => c.z);
+                int maxZ = cells.Max(c => c.z);
+
+                int width = maxX - minX + 1;
+                int height = maxZ - minZ + 1;
+
+                return $"{width} by {height}";
+            }
+            else
+            {
+                return $"{count} cells";
+            }
+        }
+
+        /// <summary>
+        /// Formats shape size from two corner points.
+        /// Always uses dimensions since we don't know actual cells yet during drag.
+        /// </summary>
+        public static string FormatShapeSizeFromCorners(IntVec3 corner1, IntVec3 corner2)
+        {
+            var (width, height) = GetDimensions(corner1, corner2);
+            return $"{width} by {height}";
+        }
+
+        /// <summary>
         /// Checks if a shape type requires two points to define (vs. single point placement).
         /// </summary>
         /// <param name="shape">The shape type to check</param>

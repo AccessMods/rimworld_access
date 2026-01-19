@@ -452,6 +452,13 @@ namespace RimWorldAccess
                     // Zone shrink designator - route through normal designator flow
                     if (designatorTypeName == "Designator_ZoneDelete_Shrink")
                     {
+                        // Select the zone owner so GetSelectedZone() works in ShapePlacementState
+                        if (gizmoOwners.ContainsKey(selectedGizmo))
+                        {
+                            ISelectable owner = gizmoOwners[selectedGizmo];
+                            Find.Selector.ClearSelection();
+                            Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                        }
                         Close();
                         // Select the designator - DesignatorManagerPatch will route it to ShapePlacementState
                         Find.DesignatorManager.Select(designator);

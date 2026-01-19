@@ -572,16 +572,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Places blueprints for all cells in the current preview.
-        /// Kept for backwards compatibility - calls PlaceDesignations internally.
-        /// </summary>
-        /// <returns>A PlacementResult containing statistics and placed blueprints</returns>
-        public static PlacementResult PlaceBlueprints()
-        {
-            return PlaceDesignations();
-        }
-
-        /// <summary>
         /// Executes the zone deletion after user confirms via dialog.
         /// Called when PlacementResult.NeedsFullDeletionConfirmation was true and user clicked "Delete Zone".
         /// </summary>

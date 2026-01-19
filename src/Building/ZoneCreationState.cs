@@ -38,7 +38,6 @@ namespace RimWorldAccess
         private static List<IntVec3> selectedCells = new List<IntVec3>();
         private static Zone targetZone = null; // Zone being modified (expand or shrink mode)
         private static bool isShrinking = false; // true = shrink mode (selected cells will be removed)
-        private static string pendingAllowedAreaName = null; // Store name for allowed area creation
         private static ZoneSelectionMode selectionMode = ZoneSelectionMode.BoxSelection; // Default to box selection
 
         // Designator reference for shape validation
@@ -170,15 +169,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the pending name for an allowed area that will be created.
-        /// </summary>
-        public static void SetPendingAllowedAreaName(string name)
-        {
-            pendingAllowedAreaName = name;
-            Log.Message($"Set pending allowed area name: {name}");
-        }
-
-        /// <summary>
         /// Gets the available shapes for the current zone creation context.
         /// Returns shapes based on the designator's DrawStyleCategory if available.
         /// </summary>
@@ -211,22 +201,6 @@ namespace RimWorldAccess
 
             TolkHelper.Speak($"Creating {zoneName}. {instructions}");
             Log.Message($"Entered zone creation mode: {zoneName} with shape {currentShape}");
-        }
-
-        /// <summary>
-        /// Adds a cell to the selection if not already selected.
-        /// Used for individual cell selection (toggle mode during expansion).
-        /// </summary>
-        public static void AddCell(IntVec3 cell)
-        {
-            if (selectedCells.Contains(cell))
-            {
-                TolkHelper.Speak($"Already selected, {cell.x}, {cell.z}");
-                return;
-            }
-
-            selectedCells.Add(cell);
-            TolkHelper.Speak($"Selected, {cell.x}, {cell.z}");
         }
 
         /// <summary>
@@ -347,17 +321,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Removes a cell from the selection.
-        /// </summary>
-        public static void RemoveCell(IntVec3 cell)
-        {
-            if (selectedCells.Remove(cell))
-            {
-                TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}");
-            }
-        }
-
-        /// <summary>
         /// Checks if a cell is currently selected.
         /// </summary>
         public static bool IsCellSelected(IntVec3 cell)
@@ -410,8 +373,8 @@ namespace RimWorldAccess
 
             string shapeName = ShapeHelper.GetShapeName(currentShape);
             string instructions = $"{shapeName} mode: Press Space to set corners, Enter to confirm, Escape to cancel.";
-            TolkHelper.Speak($"Expanding {zone.label}. {selectedCells.Count} tiles currently selected. {instructions}");
-            Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing tiles with shape {currentShape}");
+            TolkHelper.Speak($"Expanding {zone.label}. {selectedCells.Count} cells currently selected. {instructions}");
+            Log.Message($"Entered expansion mode for zone: {zone.label}. Pre-selected {selectedCells.Count} existing cells with shape {currentShape}");
         }
 
         /// <summary>
@@ -776,13 +739,6 @@ namespace RimWorldAccess
                 return null;
             }
 
-            // Set the custom name if provided
-            string areaName = pendingAllowedAreaName;
-            if (!string.IsNullOrWhiteSpace(areaName))
-            {
-                allowedArea.SetLabel(areaName);
-            }
-
             // Add cells to the area
             foreach (IntVec3 cell in cells)
             {
@@ -792,7 +748,6 @@ namespace RimWorldAccess
                 }
             }
 
-            pendingAllowedAreaName = null;
             return allowedArea;
         }
 

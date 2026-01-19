@@ -158,51 +158,6 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Checks if a designator supports multi-cell designation (e.g., mining, plant cutting).
-        /// </summary>
-        public static bool SupportsMultiCellDesignation(Designator designator)
-        {
-            // Most cell-based designators support multiple cells
-            if (designator is Designator_Cells)
-                return true;
-
-            // Build designators can be placed on multiple cells if not a single-tile building
-            if (designator is Designator_Build buildDesignator)
-            {
-                // Buildings are typically placed one at a time
-                // But we can allow multiple placements in sequence
-                return false;
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Gets a user-friendly description of what a designator does.
-        /// </summary>
-        public static string GetDesignatorDescription(Designator designator)
-        {
-            if (!string.IsNullOrEmpty(designator.Desc))
-                return designator.Desc;
-
-            // Provide default descriptions for common designator types
-            if (designator is Designator_Mine)
-                return "Mine rock and minerals";
-            else if (designator is Designator_Build)
-                return "Construct buildings and structures";
-            else if (designator is Designator_PlantsHarvestWood)
-                return "Chop down trees for wood";
-            else if (designator is Designator_PlantsCut)
-                return "Cut plants";
-            else if (designator is Designator_Hunt)
-                return "Hunt animals for meat";
-            else if (designator is Designator_Tame)
-                return "Tame wild animals";
-
-            return designator.Label;
-        }
-
-        /// <summary>
         /// Gets the designator label with the "..." suffix stripped.
         /// RimWorld adds "..." to labels when no material is selected (e.g., "wall...").
         /// This suffix needs to be removed before pluralization to avoid "wall...s".
@@ -405,33 +360,16 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets skill requirements for a buildable as a formatted string.
+        /// Cleans up description text by removing newlines and collapsing whitespace.
         /// </summary>
-        private static string GetSkillRequirements(BuildableDef buildable)
+        private static string CleanupDescription(string description)
         {
-            if (buildable == null)
+            if (string.IsNullOrEmpty(description))
                 return "";
 
-            List<string> skillParts = new List<string>();
-
-            // Check construction skill requirement
-            if (buildable.constructionSkillPrerequisite > 0)
-            {
-                skillParts.Add($"Construction {buildable.constructionSkillPrerequisite}");
-            }
-
-            // Check artistic skill requirement
-            if (buildable.artisticSkillPrerequisite > 0)
-            {
-                skillParts.Add($"Artistic {buildable.artisticSkillPrerequisite}");
-            }
-
-            if (skillParts.Count > 0)
-            {
-                return "Skills: " + string.Join(", ", skillParts);
-            }
-
-            return "";
+            description = description.Replace("\n", " ").Replace("\r", " ");
+            description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
+            return description;
         }
 
         /// <summary>
@@ -441,18 +379,7 @@ namespace RimWorldAccess
         {
             if (buildable == null)
                 return "";
-
-            string description = buildable.description;
-            if (!string.IsNullOrEmpty(description))
-            {
-                // Clean up the description - remove newlines and excess whitespace
-                description = description.Replace("\n", " ").Replace("\r", " ");
-                description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
-
-                return description;
-            }
-
-            return "";
+            return CleanupDescription(buildable.description);
         }
 
         /// <summary>
@@ -462,18 +389,7 @@ namespace RimWorldAccess
         {
             if (designator == null)
                 return "";
-
-            string description = designator.Desc;
-            if (!string.IsNullOrEmpty(description))
-            {
-                // Clean up the description - remove newlines and excess whitespace
-                description = description.Replace("\n", " ").Replace("\r", " ");
-                description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
-
-                return description;
-            }
-
-            return "";
+            return CleanupDescription(designator.Desc);
         }
 
         /// <summary>

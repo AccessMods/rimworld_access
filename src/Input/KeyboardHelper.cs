@@ -89,7 +89,10 @@ namespace RimWorldAccess
                 // History tab
                 || HistoryState.IsActive
                 || HistoryStatisticsState.IsActive
-                || HistoryMessagesState.IsActive;
+                || HistoryMessagesState.IsActive
+                // Building placement modes
+                || ViewingModeState.IsActive
+                || ShapePlacementState.IsActive;
         }
     }
 }

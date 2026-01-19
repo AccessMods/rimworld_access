@@ -66,8 +66,36 @@ namespace RimWorldAccess
         public static int SegmentCount => segments.Count;
 
         /// <summary>
+        /// Gets the original cells from the last recorded segment.
+        /// Returns null if no segments exist.
+        /// </summary>
+        public static HashSet<IntVec3> LastSegmentOriginalCells
+        {
+            get
+            {
+                if (segments.Count == 0)
+                    return null;
+                return segments[segments.Count - 1].OriginalCells;
+            }
+        }
+
+        /// <summary>
+        /// Gets the target zone from the last recorded segment.
+        /// Returns null if no segments exist.
+        /// </summary>
+        public static Zone LastSegmentTargetZone
+        {
+            get
+            {
+                if (segments.Count == 0)
+                    return null;
+                return segments[segments.Count - 1].TargetZone;
+            }
+        }
+
+        /// <summary>
         /// Whether the most recent segment was an expansion of an existing zone (vs creating a new one).
-        /// Returns true if the last segment had a TargetZone, meaning we added cells to an existing zone.
+        /// Returns true only if cells were ACTUALLY added to the target zone (i.e., its cell count increased).
         /// </summary>
         public static bool WasZoneExpansion
         {
@@ -75,7 +103,22 @@ namespace RimWorldAccess
             {
                 if (segments.Count == 0)
                     return false;
-                return segments[segments.Count - 1].TargetZone != null;
+
+                ZoneUndoRecord lastSegment = segments[segments.Count - 1];
+
+                // No target zone means it was definitely a new zone creation
+                if (lastSegment.TargetZone == null)
+                    return false;
+
+                // Check if the target zone still exists
+                if (!Find.CurrentMap?.zoneManager?.AllZones?.Contains(lastSegment.TargetZone) ?? true)
+                    return false;
+
+                // Compare current cell count to original - expansion means cells were added
+                int originalCount = lastSegment.OriginalCells.Count;
+                int currentCount = lastSegment.TargetZone.Cells.Count();
+
+                return currentCount > originalCount;
             }
         }
 

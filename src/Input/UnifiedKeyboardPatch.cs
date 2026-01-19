@@ -3231,7 +3231,9 @@ namespace RimWorldAccess
             if (key == KeyCode.G)
             {
                 // Block gizmos during placement or viewing modes
-                if (ShapePlacementState.IsActive || ViewingModeState.IsActive)
+                // BUT allow G key if Confirm() was just called (JustConfirmed) - fixes timing issue
+                // where G key event processes before the Enter key's state changes take effect
+                if (ShapePlacementState.IsActive || (ViewingModeState.IsActive && !ViewingModeState.JustConfirmed))
                 {
                     TolkHelper.Speak("Gizmos unavailable during placement or review");
                     Event.current.Use();

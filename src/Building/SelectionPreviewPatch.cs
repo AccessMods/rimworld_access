@@ -99,20 +99,23 @@ namespace RimWorldAccess
             // Render viewing mode highlights (after shape placement)
             if (ViewingModeState.IsActive)
             {
-                // Highlight all obstacle cells in red
-                if (ViewingModeState.ObstacleCells != null && ViewingModeState.ObstacleCells.Count > 0)
-                {
-                    GenDraw.DrawFieldEdges(ViewingModeState.ObstacleCells, Color.red);
-                }
+                // Capture reference once to avoid state changes during render
+                var obstacleCells = ViewingModeState.ObstacleCells;
 
-                // Highlight current obstacle more prominently with yellow/bright color
-                // The current obstacle is tracked by ScannerState's temporary category
-                if (ScannerState.IsInTemporaryCategory())
+                // Highlight all obstacle cells in red
+                if (obstacleCells != null && obstacleCells.Count > 0)
                 {
-                    IntVec3 currentObstacle = ScannerState.GetCurrentItemPosition();
-                    if (currentObstacle.IsValid && ViewingModeState.ObstacleCells.Contains(currentObstacle))
+                    GenDraw.DrawFieldEdges(obstacleCells, Color.red);
+
+                    // Highlight current obstacle more prominently with yellow/bright color
+                    // The current obstacle is tracked by ScannerState's temporary category
+                    if (ScannerState.IsInTemporaryCategory())
                     {
-                        GenDraw.DrawFieldEdges(new List<IntVec3> { currentObstacle }, Color.yellow);
+                        IntVec3 currentObstacle = ScannerState.GetCurrentItemPosition();
+                        if (currentObstacle.IsValid && obstacleCells.Contains(currentObstacle))
+                        {
+                            GenDraw.DrawFieldEdges(new List<IntVec3> { currentObstacle }, Color.yellow);
+                        }
                     }
                 }
 

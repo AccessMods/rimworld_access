@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using HarmonyLib;
 using Verse;
 using RimWorld;
@@ -36,9 +35,9 @@ namespace RimWorldAccess
             }
 
             // Handle Designator_Place (Build, Install, etc.)
-            if (des is Designator_Place placeDesignator)
+            if (des is Designator_Place)
             {
-                RouteToAccessiblePlacement(placeDesignator);
+                RouteToAccessiblePlacement(des);
                 return;
             }
 
@@ -46,54 +45,22 @@ namespace RimWorldAccess
             // These support shape-based placement just like building designators
             if (ShapeHelper.IsZoneDesignator(des))
             {
-                RouteZoneToAccessiblePlacement(des);
+                RouteToAccessiblePlacement(des);
                 return;
             }
         }
 
         /// <summary>
-        /// Routes a gizmo-triggered placement designator to the accessible system.
+        /// Routes a designator to the accessible placement system.
         /// Always uses ShapePlacementState for consistent UX, even for single-cell buildings.
+        /// Works with both placement designators (Build, Install) and zone designators.
         /// </summary>
-        /// <param name="designator">The placement designator from the gizmo</param>
-        private static void RouteToAccessiblePlacement(Designator_Place designator)
+        /// <param name="designator">The designator to route</param>
+        private static void RouteToAccessiblePlacement(Designator designator)
         {
-            // Get the item name for announcement
-            string itemName = ArchitectHelper.GetSanitizedLabel(designator);
-
-            // Get available shapes - always use the first (default) shape
             var availableShapes = ShapeHelper.GetAvailableShapes(designator);
             ShapeType defaultShape = availableShapes.Count > 0 ? availableShapes[0] : ShapeType.Manual;
-            string shapeName = ShapeHelper.GetShapeName(defaultShape);
-
-            // Always enter ShapePlacementState for consistent UX
-            // Note: We don't use ArchitectState here as this is a standalone gizmo placement
             ShapePlacementState.Enter(designator, defaultShape);
-
-            // The Enter method handles the announcement, so we're done
-            Log.Message($"[DesignatorManagerPatch] Routed gizmo placement to ShapePlacementState: {itemName} with {shapeName}");
-        }
-
-        /// <summary>
-        /// Routes a zone designator (expand/shrink) to the accessible system.
-        /// Always uses ShapePlacementState for consistent UX, even when only Manual shape is available.
-        /// </summary>
-        /// <param name="designator">The zone designator</param>
-        private static void RouteZoneToAccessiblePlacement(Designator designator)
-        {
-            // Get the zone name for announcement
-            string zoneName = ArchitectHelper.GetSanitizedLabel(designator);
-
-            // Get available shapes - always use the first (default) shape
-            var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-            ShapeType defaultShape = availableShapes.Count > 0 ? availableShapes[0] : ShapeType.Manual;
-            string shapeName = ShapeHelper.GetShapeName(defaultShape);
-
-            // Always enter ShapePlacementState for consistent UX
-            ShapePlacementState.Enter(designator, defaultShape);
-
-            // The Enter method handles the announcement
-            Log.Message($"[DesignatorManagerPatch] Routed zone designator to ShapePlacementState: {zoneName} with {shapeName}");
         }
     }
 }

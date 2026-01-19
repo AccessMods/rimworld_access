@@ -139,8 +139,8 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
-            TolkHelper.Speak("Cancelled rename");
-            Log.Message("Cancelled zone rename");
+            TolkHelper.Speak("Rename cancelled");
+            Log.Message("Zone rename cancelled");
             Close();
         }
     }

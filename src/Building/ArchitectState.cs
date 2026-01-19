@@ -446,7 +446,7 @@ namespace RimWorldAccess
         {
             if (selectedDesignator == null || selectedCells.Count == 0)
             {
-                TolkHelper.Speak("No tiles selected");
+                TolkHelper.Speak("No cells selected");
                 Cancel();
                 return;
             }
@@ -457,8 +457,8 @@ namespace RimWorldAccess
                 selectedDesignator.DesignateMultiCell(selectedCells);
 
                 string toolName = selectedDesignator.Label;
-                TolkHelper.Speak($"{toolName} placed on {selectedCells.Count} tiles");
-                Log.Message($"Executed placement: {toolName} on {selectedCells.Count} tiles");
+                TolkHelper.Speak($"{toolName} placed on {selectedCells.Count} cells");
+                Log.Message($"Executed placement: {toolName} on {selectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {

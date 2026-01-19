@@ -61,12 +61,15 @@ namespace RimWorldAccess
             secondCorner = cell;
             previewCells = ShapeHelper.CalculateCells(currentShape, firstCorner.Value, cell);
 
-            var (width, height) = ShapeHelper.GetDimensions(firstCorner.Value, cell);
-            int cellCount = previewCells.Count;
+            string sizeText = ShapeHelper.FormatShapeSize(previewCells);
+            // For regular rectangles, add cell count; for irregular shapes it's already in the size text
+            string announcement = ShapeHelper.IsRegularRectangle(previewCells)
+                ? $"Second point, {sizeText}, {previewCells.Count} cells"
+                : $"Second point, {sizeText}";
 
-            TolkHelper.Speak($"Second point, {width} by {height}, {cellCount} cells");
+            TolkHelper.Speak(announcement);
             if (!string.IsNullOrEmpty(context))
-                Log.Message($"{context}: Second point at {cell}. {width}x{height}, {cellCount} cells");
+                Log.Message($"{context}: Second point at {cell}. {previewCells.Count} cells");
         }
 
         public void UpdatePreview(IntVec3 cursor)
@@ -83,10 +86,9 @@ namespace RimWorldAccess
                 PlayDragSound();
                 lastCellCount = cellCount;
 
-                var (width, height) = ShapeHelper.GetDimensions(firstCorner.Value, cursor);
-
-                // Always announce dimensions in W by H format
-                TolkHelper.Speak($"{width} by {height}", SpeechPriority.Low);
+                // During drag we use corners since we don't know actual cells yet
+                string sizeText = ShapeHelper.FormatShapeSizeFromCorners(firstCorner.Value, cursor);
+                TolkHelper.Speak(sizeText, SpeechPriority.Low);
             }
         }
 
@@ -99,9 +101,10 @@ namespace RimWorldAccess
             }
 
             var confirmedCells = new List<IntVec3>(previewCells);
-            var (width, height) = ShapeHelper.GetDimensions(firstCorner.Value, secondCorner.Value);
+            // FormatShapeSize returns "W by H" for regular rectangles, "N cells" for irregular shapes
+            string sizeText = ShapeHelper.FormatShapeSize(confirmedCells);
 
-            TolkHelper.Speak($"{width} by {height}, {confirmedCells.Count} cells confirmed");
+            TolkHelper.Speak($"{sizeText} confirmed");
             if (!string.IsNullOrEmpty(context))
                 Log.Message($"{context}: Confirmed {confirmedCells.Count} cells");
 
