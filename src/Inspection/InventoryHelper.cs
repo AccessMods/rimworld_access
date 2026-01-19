@@ -20,6 +20,12 @@ namespace RimWorldAccess
             public List<IntVec3> StorageLocations { get; set; }
             public List<Thing> Things { get; set; } // Actual thing references for actions like Install
             public bool IsMinifiedThing { get; set; } // True if these are uninstalled furniture
+            public Pawn CarrierPawn { get; set; } // Pawn carrying this item (null for storage items)
+
+            /// <summary>
+            /// True if this item is being carried by a pawn rather than stored in a stockpile/building
+            /// </summary>
+            public bool IsCarried => CarrierPawn != null;
 
             public InventoryItem(ThingDef def)
             {
@@ -28,10 +34,15 @@ namespace RimWorldAccess
                 StorageLocations = new List<IntVec3>();
                 Things = new List<Thing>();
                 IsMinifiedThing = false;
+                CarrierPawn = null;
             }
 
             public string GetDisplayLabel()
             {
+                if (IsCarried)
+                {
+                    return $"{Def.LabelCap} x{TotalQuantity} (carried by {CarrierPawn.LabelShort})";
+                }
                 return $"{Def.LabelCap} x{TotalQuantity}";
             }
         }
@@ -119,6 +130,38 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Collects all items carried by owned pawns (colonists and animals) on the current map.
+        /// Returns a dictionary mapping each Thing to its carrier Pawn.
+        /// </summary>
+        public static Dictionary<Thing, Pawn> GetAllPawnCarriedItems()
+        {
+            Map map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("InventoryHelper: Cannot get pawn-carried items - no current map");
+                return new Dictionary<Thing, Pawn>();
+            }
+
+            Dictionary<Thing, Pawn> carriedItems = new Dictionary<Thing, Pawn>();
+
+            // Get items from player faction pawns (colonists and animals)
+            foreach (Pawn pawn in map.mapPawns.PawnsInFaction(Faction.OfPlayer))
+            {
+                if (pawn.inventory?.innerContainer == null) continue;
+
+                foreach (Thing item in pawn.inventory.innerContainer)
+                {
+                    if (item != null)
+                    {
+                        carriedItems[item] = pawn;
+                    }
+                }
+            }
+
+            return carriedItems;
+        }
+
+        /// <summary>
         /// Aggregates items by ThingDef, summing quantities and tracking locations.
         /// For MinifiedThings (uninstalled furniture), uses the inner thing's def.
         /// </summary>
@@ -172,22 +215,80 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Aggregates pawn-carried items, keeping items from different pawns separate.
+        /// Each pawn+thingdef combination becomes a separate InventoryItem.
+        /// </summary>
+        public static List<InventoryItem> AggregatePawnCarriedItems(Dictionary<Thing, Pawn> carriedItems)
+        {
+            // Key: (ThingDef, Pawn) - keeps items from different pawns separate
+            Dictionary<(ThingDef, Pawn), InventoryItem> aggregated = new Dictionary<(ThingDef, Pawn), InventoryItem>();
+
+            foreach (var kvp in carriedItems)
+            {
+                Thing item = kvp.Key;
+                Pawn carrier = kvp.Value;
+
+                if (item?.def == null || carrier == null) continue;
+
+                // For MinifiedThings, use the inner thing's def for categorization
+                ThingDef defToUse = item.def;
+                bool isMinified = item is MinifiedThing;
+                if (isMinified)
+                {
+                    Thing innerThing = item.GetInnerIfMinified();
+                    if (innerThing?.def != null)
+                    {
+                        defToUse = innerThing.def;
+                    }
+                }
+
+                var key = (defToUse, carrier);
+                if (!aggregated.ContainsKey(key))
+                {
+                    aggregated[key] = new InventoryItem(defToUse)
+                    {
+                        CarrierPawn = carrier,
+                        IsMinifiedThing = isMinified
+                    };
+                }
+
+                InventoryItem invItem = aggregated[key];
+                invItem.TotalQuantity += item.stackCount;
+
+                // Store reference to actual thing
+                if (invItem.Things.Count < 10)
+                {
+                    invItem.Things.Add(item);
+                }
+
+                // For carried items, storage location is the carrier's position
+                if (invItem.StorageLocations.Count == 0)
+                {
+                    invItem.StorageLocations.Add(carrier.Position);
+                }
+            }
+
+            return aggregated.Values.ToList();
+        }
+
+        /// <summary>
         /// Groups inventory items by their categories, building a hierarchical tree
         /// </summary>
-        public static List<CategoryNode> BuildCategoryTree(Dictionary<ThingDef, InventoryItem> aggregatedItems)
+        /// <param name="aggregatedItems">Storage items aggregated by ThingDef</param>
+        /// <param name="pawnCarriedItems">Optional list of pawn-carried items (kept separate per pawn)</param>
+        public static List<CategoryNode> BuildCategoryTree(Dictionary<ThingDef, InventoryItem> aggregatedItems, List<InventoryItem> pawnCarriedItems = null)
         {
             // Build a dictionary of all categories that have items
             Dictionary<ThingCategoryDef, CategoryNode> categoryNodes = new Dictionary<ThingCategoryDef, CategoryNode>();
 
-            foreach (var kvp in aggregatedItems)
+            // Helper method to add an item to its categories
+            void AddItemToCategories(InventoryItem item)
             {
-                ThingDef thingDef = kvp.Key;
-                InventoryItem item = kvp.Value;
-
+                ThingDef thingDef = item.Def;
                 if (thingDef.thingCategories == null || thingDef.thingCategories.Count == 0)
                 {
-                    // Item has no category - skip it or add to "Uncategorized"
-                    continue;
+                    // Item has no category - skip it
+                    return;
                 }
 
                 // Add item to all its categories
@@ -214,6 +315,21 @@ namespace RimWorldAccess
                         categoryNodes[parentCategory].TotalItemCount++;
                         parentCategory = parentCategory.parent;
                     }
+                }
+            }
+
+            // Add storage items
+            foreach (var kvp in aggregatedItems)
+            {
+                AddItemToCategories(kvp.Value);
+            }
+
+            // Add pawn-carried items (if any)
+            if (pawnCarriedItems != null)
+            {
+                foreach (InventoryItem item in pawnCarriedItems)
+                {
+                    AddItemToCategories(item);
                 }
             }
 
