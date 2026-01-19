@@ -203,6 +203,17 @@ namespace RimWorldAccess
                 isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
                 isDeleteDesignator = ShapeHelper.IsDeleteDesignator(designator);
             }
+
+            // For zone designators, reset zone-specific state when adding more segments
+            // This ensures CollectCreatedZones() can properly track the actual zone(s) being modified
+            // (targetZone is only set if null in CollectCreatedZones, so we must clear it here)
+            if (isAddingMore && isZoneDesignator)
+            {
+                targetZone = null;
+                createdZones.Clear();
+                originalZoneCells.Clear();
+            }
+
             isAddingMore = false; // Reset the flag
 
             // Add this placement as a new segment
@@ -266,10 +277,11 @@ namespace RimWorldAccess
 
                 // For shrink operations, get targetZone and original cells from ZoneUndoTracker
                 // CollectCreatedZones can't find the zone for shrink (cells were removed)
+                // Use PreShrinkOriginalCells which persists independently of segments
                 if (isDeleteDesignator)
                 {
                     targetZone = ZoneUndoTracker.LastSegmentTargetZone;
-                    var origCells = ZoneUndoTracker.LastSegmentOriginalCells;
+                    var origCells = ZoneUndoTracker.PreShrinkOriginalCells;
                     if (origCells != null)
                     {
                         originalZoneCells = new HashSet<IntVec3>(origCells);
@@ -791,7 +803,9 @@ namespace RimWorldAccess
 
                     string itemType = ViewingModeSegmentManager.GetItemTypeForCount(removedCount, isBuildDesignator, isZoneDesignator);
                     string allWord = removedCount == 1 ? "" : "all ";
-                    TolkHelper.Speak($"Removed {allWord}{removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
+                    // For zone shrink (delete designator), undoing RE-ADDS cells, so say "Restored" not "Removed"
+                    string action = isDeleteDesignator ? "Restored" : "Removed";
+                    TolkHelper.Speak($"{action} {allWord}{removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
 
                     // Exit completely (don't restore cursor - keep it where user left it)
                     Reset();

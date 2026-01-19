@@ -55,6 +55,11 @@ namespace RimWorldAccess
         // Stack of completed segments for multi-step undo
         private static List<ZoneUndoRecord> segments = new List<ZoneUndoRecord>();
 
+        // Pre-shrink original cells - preserved independently for re-adding cells in shrink mode
+        // This is set during CaptureBeforeState for shrink operations and persists
+        // until Clear() is called, ensuring cells can always be re-added in viewing mode
+        private static HashSet<IntVec3> preShrinkOriginalCells = null;
+
         /// <summary>
         /// Whether there's a pending record being built.
         /// </summary>
@@ -92,6 +97,14 @@ namespace RimWorldAccess
                 return segments[segments.Count - 1].TargetZone;
             }
         }
+
+        /// <summary>
+        /// Gets the original cells captured before a shrink operation.
+        /// This is set during CaptureBeforeState for shrink operations and persists
+        /// independently of segments, ensuring cells can be re-added in viewing mode.
+        /// Returns null if not in a shrink operation or no cells were captured.
+        /// </summary>
+        public static HashSet<IntVec3> PreShrinkOriginalCells => preShrinkOriginalCells;
 
         /// <summary>
         /// Whether the most recent segment was an expansion of an existing zone (vs creating a new one).
@@ -143,6 +156,13 @@ namespace RimWorldAccess
                 foreach (IntVec3 cell in targetZone.Cells)
                 {
                     currentRecord.OriginalCells.Add(cell);
+                }
+
+                // For shrink operations, also store in preShrinkOriginalCells
+                // This persists independently of segments for re-adding cells in viewing mode
+                if (isShrink)
+                {
+                    preShrinkOriginalCells = new HashSet<IntVec3>(targetZone.Cells);
                 }
             }
 
@@ -255,6 +275,7 @@ namespace RimWorldAccess
         {
             currentRecord = null;
             segments.Clear();
+            preShrinkOriginalCells = null;
             Log.Message("[ZoneUndoTracker] Cleared all undo data");
         }
 
