@@ -257,6 +257,9 @@ namespace RimWorldAccess
                         case JumpMode.PresetDistance:
                             positionChanged = MapNavigationState.JumpPresetDistance(moveOffset, Find.CurrentMap);
                             break;
+                        case JumpMode.AdjacentToWall:
+                            positionChanged = MapNavigationState.JumpToAdjacentToWall(moveOffset, Find.CurrentMap);
+                            break;
                         default:
                             positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
                             break;
@@ -355,7 +358,8 @@ namespace RimWorldAccess
                 else
                 {
                     // Cursor at map boundary - optionally announce boundary
-                    if (!hasAnnouncedThisFrame)
+                    // Skip for AdjacentToWall jump mode as it handles its own announcements
+                    if (!hasAnnouncedThisFrame && !(isJump && MapNavigationState.CurrentJumpMode == JumpMode.AdjacentToWall))
                     {
                         TolkHelper.Speak("Map boundary");
                         hasAnnouncedThisFrame = true;
