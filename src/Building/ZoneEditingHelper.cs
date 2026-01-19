@@ -129,21 +129,6 @@ namespace RimWorldAccess
                 return new ZoneEditResult(false, "No zone selected for editing", SpeechPriority.Normal);
             }
 
-            // Validate we have a ZoneAdd designator for expanding
-            var zoneDesignator = activeDesignator as Designator_ZoneAdd;
-            if (zoneDesignator == null)
-            {
-                return new ZoneEditResult(false, "No zone to edit at this location", SpeechPriority.Normal);
-            }
-
-            // Check zone-type requirements (soil fertility for growing zones, etc.)
-            AcceptanceReport report = zoneDesignator.CanDesignateCell(cursorPos);
-            if (!report.Accepted)
-            {
-                string reason = !string.IsNullOrEmpty(report.Reason) ? report.Reason : "Cannot add cell here";
-                return new ZoneEditResult(false, reason, SpeechPriority.Normal);
-            }
-
             // Check if cell is already in a different zone
             Zone existingZone = map.zoneManager.ZoneAt(cursorPos);
             if (existingZone != null)
@@ -155,6 +140,8 @@ namespace RimWorldAccess
             }
 
             // For shrink mode, only allow re-adding cells that were originally in the zone
+            // In shrink mode, activeDesignator is Designator_ZoneDelete, so we can't use
+            // Designator_ZoneAdd validation - just add the cell directly
             if (isDeleteDesignator)
             {
                 if (!originalZoneCells.Contains(cursorPos))
@@ -178,6 +165,41 @@ namespace RimWorldAccess
                 {
                     return new ZoneEditResult(false, "Cell must be adjacent to the zone", SpeechPriority.Normal);
                 }
+
+                // All shrink mode checks passed - add the cell directly to targetZone
+                try
+                {
+                    targetZone.AddCell(cursorPos);
+
+                    // Track that we modified this zone
+                    if (!createdZones.Contains(targetZone))
+                    {
+                        createdZones.Add(targetZone);
+                    }
+
+                    string zoneName = targetZone.label ?? "zone";
+                    return new ZoneEditResult(true, $"Cell added to {zoneName}", SpeechPriority.Normal);
+                }
+                catch (System.Exception ex)
+                {
+                    Log.Error($"[ZoneEditingHelper] Error adding zone cell in shrink mode: {ex.Message}");
+                    return new ZoneEditResult(false, "Failed to add cell", SpeechPriority.Normal);
+                }
+            }
+
+            // Non-shrink mode: Validate we have a ZoneAdd designator for expanding
+            var zoneDesignator = activeDesignator as Designator_ZoneAdd;
+            if (zoneDesignator == null)
+            {
+                return new ZoneEditResult(false, "No zone to edit at this location", SpeechPriority.Normal);
+            }
+
+            // Check zone-type requirements (soil fertility for growing zones, etc.)
+            AcceptanceReport report = zoneDesignator.CanDesignateCell(cursorPos);
+            if (!report.Accepted)
+            {
+                string reason = !string.IsNullOrEmpty(report.Reason) ? report.Reason : "Cannot add cell here";
+                return new ZoneEditResult(false, reason, SpeechPriority.Normal);
             }
 
             // Check contiguity - cell must be cardinal adjacent to targetZone
