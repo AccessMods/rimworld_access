@@ -482,6 +482,11 @@ namespace RimWorldAccess
             {
                 Map map = Find.CurrentMap;
                 ExecuteZonePlacement(activeDesignator, map);
+                // Reset ShapePlacementState if it was active (Manual mode)
+                if (ShapePlacementState.IsActive)
+                {
+                    ShapePlacementState.Reset();
+                }
                 return true;
             }
             // For orders and cells designators in architect mode (not in shape mode)
@@ -758,7 +763,17 @@ namespace RimWorldAccess
 
             try
             {
-                // Use the designator's DesignateMultiCell method
+                // Clear zone selection before placement to ensure a NEW zone is created
+                // RimWorld's DesignateMultiCell checks Find.Selector.SelectedZone first -
+                // if a same-type zone is selected, it merges new cells into that zone.
+                // By clearing the selection, we force DesignateMultiCell to create a new zone.
+                Zone previouslySelected = Find.Selector.SelectedZone;
+                if (previouslySelected != null)
+                {
+                    Find.Selector.ClearSelection();
+                }
+
+                // Use the designator's standard DesignateMultiCell method
                 designator.DesignateMultiCell(ArchitectState.SelectedCells);
 
                 string label = designator.Label ?? "Zone";

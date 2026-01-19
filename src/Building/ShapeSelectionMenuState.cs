@@ -90,8 +90,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Announces the currently selected shape with position information.
-        /// Format: "{shape name}, {position}" e.g., "Empty Rectangle, 2 of 5"
+        /// Announces the currently selected shape with position information and description.
+        /// Format: "{shape name}, {position}. {description}" e.g., "Empty Rectangle, 2 of 5. Places only the border..."
         /// </summary>
         private static void AnnounceCurrentShape()
         {
@@ -101,12 +101,15 @@ namespace RimWorldAccess
             if (selectedIndex < 0 || selectedIndex >= availableShapes.Count)
                 return;
 
-            string shapeName = ShapeHelper.GetShapeName(availableShapes[selectedIndex]);
+            ShapeType currentShape = availableShapes[selectedIndex];
+            string shapeName = ShapeHelper.GetShapeName(currentShape);
+            string description = ShapeHelper.GetShapeDescription(currentShape);
             string position = MenuHelper.FormatPosition(selectedIndex, availableShapes.Count);
 
+            // Format: "Shape Name, position. Description"
             string announcement = string.IsNullOrEmpty(position)
-                ? shapeName
-                : $"{shapeName}, {position}";
+                ? $"{shapeName}. {description}"
+                : $"{shapeName}, {position}. {description}";
 
             TolkHelper.Speak(announcement);
         }

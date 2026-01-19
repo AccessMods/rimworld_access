@@ -410,6 +410,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Adds a cell to the selection if valid for the current designator.
+        /// For zone designators, enforces adjacency requirements.
         /// </summary>
         public static void ToggleCell(IntVec3 cell)
         {
@@ -418,16 +419,43 @@ namespace RimWorldAccess
 
             // Check if this designator can designate this cell
             AcceptanceReport report = selectedDesignator.CanDesignateCell(cell);
+            bool isZone = ShapeHelper.IsZoneDesignator(selectedDesignator);
 
             if (selectedCells.Contains(cell))
             {
-                // Remove cell
+                // Removing - check if it would disconnect the selection (for zones)
+                if (isZone && selectedCells.Count > 1 && WouldDisconnectSelection(cell))
+                {
+                    TolkHelper.Speak("Cannot remove, would disconnect selection");
+                    return;
+                }
                 selectedCells.Remove(cell);
                 TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}");
             }
             else if (report.Accepted)
             {
-                // Add cell
+                // For zone designators, additional validation
+                if (isZone)
+                {
+                    Map map = Find.CurrentMap;
+                    if (map != null)
+                    {
+                        // Check if cell is already in ANY zone (RimWorld's CanDesignateCell allows same-type zones)
+                        Zone existingZone = map.zoneManager.ZoneAt(cell);
+                        if (existingZone != null)
+                        {
+                            TolkHelper.Speak($"Cell is already in {existingZone.label}");
+                            return;
+                        }
+                    }
+
+                    // Enforce adjacency (except first cell)
+                    if (selectedCells.Count > 0 && !IsAdjacentToSelection(cell))
+                    {
+                        TolkHelper.Speak("Cell must be adjacent to selection");
+                        return;
+                    }
+                }
                 selectedCells.Add(cell);
                 TolkHelper.Speak($"Selected, {cell.x}, {cell.z}");
             }
@@ -437,6 +465,57 @@ namespace RimWorldAccess
                 string reason = report.Reason ?? "Cannot designate here";
                 TolkHelper.Speak($"Invalid: {reason}");
             }
+        }
+
+        /// <summary>
+        /// Checks if a cell is adjacent to any cell in the current selection.
+        /// </summary>
+        private static bool IsAdjacentToSelection(IntVec3 cell)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                IntVec3 neighbor = cell + GenAdj.CardinalDirections[i];
+                if (selectedCells.Contains(neighbor))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if removing a cell would disconnect the remaining selection.
+        /// Uses flood-fill algorithm.
+        /// </summary>
+        private static bool WouldDisconnectSelection(IntVec3 cellToRemove)
+        {
+            var remaining = new HashSet<IntVec3>(selectedCells);
+            remaining.Remove(cellToRemove);
+
+            if (remaining.Count == 0)
+                return false;
+
+            // Flood-fill from first remaining cell
+            var visited = new HashSet<IntVec3>();
+            var queue = new Queue<IntVec3>();
+            var startCell = remaining.First();
+
+            queue.Enqueue(startCell);
+            visited.Add(startCell);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                for (int i = 0; i < 4; i++)
+                {
+                    var neighbor = current + GenAdj.CardinalDirections[i];
+                    if (remaining.Contains(neighbor) && !visited.Contains(neighbor))
+                    {
+                        visited.Add(neighbor);
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+
+            return visited.Count < remaining.Count;
         }
 
         /// <summary>

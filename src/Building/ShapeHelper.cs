@@ -344,6 +344,34 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets a description explaining how a shape works for screen reader announcements.
+        /// </summary>
+        /// <param name="shape">The shape type</param>
+        /// <returns>Description of how the shape works</returns>
+        public static string GetShapeDescription(ShapeType shape)
+        {
+            switch (shape)
+            {
+                case ShapeType.Manual:
+                    return "Places one cell at a time. Press Space to place, then move and place again.";
+                case ShapeType.Line:
+                    return "Creates a straight horizontal or vertical line between two points. If your points are diagonal, the game picks whichever axis is longer.";
+                case ShapeType.AngledLine:
+                    return "Creates a diagonal line at any angle between your two points.";
+                case ShapeType.FilledRectangle:
+                    return "Fills all cells within a rectangular area defined by two opposite corners.";
+                case ShapeType.EmptyRectangle:
+                    return "Places only the border of a rectangle, leaving the interior empty. Good for walls and fences.";
+                case ShapeType.FilledOval:
+                    return "Fills an ellipse shape. At small sizes it looks like a rectangle. Rounded corners appear at 6 by 6 or larger.";
+                case ShapeType.EmptyOval:
+                    return "Places only the border of an ellipse. Creates a ring shape at 3 by 3 or larger. Smaller sizes look filled.";
+                default:
+                    return "";
+            }
+        }
+
+        /// <summary>
         /// Gets the shape name from a DrawStyleDef's label if available,
         /// otherwise falls back to the shape type name.
         /// </summary>

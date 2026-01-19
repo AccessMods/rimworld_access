@@ -153,19 +153,131 @@ namespace RimWorldAccess
         /// <summary>
         /// Toggles selection of a single cell (adds if not selected, removes if selected).
         /// Used in single tile selection mode.
+        /// Validates terrain requirements and adjacency before adding.
         /// </summary>
         public static void ToggleCell(IntVec3 cell)
         {
+            Map map = Find.CurrentMap;
+            if (map == null) return;
+
             if (selectedCells.Contains(cell))
             {
+                // Removing - check if it would disconnect the selection
+                if (selectedCells.Count > 1 && WouldDisconnectSelection(cell))
+                {
+                    TolkHelper.Speak("Cannot remove, would disconnect selection");
+                    return;
+                }
                 selectedCells.Remove(cell);
                 TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
             }
             else
             {
+                // Adding - validate the cell first
+                string error = ValidateCellForCreation(cell, map);
+                if (error != null)
+                {
+                    TolkHelper.Speak(error);
+                    return;
+                }
+
                 selectedCells.Add(cell);
                 TolkHelper.Speak($"Selected, {cell.x}, {cell.z}. Total: {selectedCells.Count}");
             }
+        }
+
+        /// <summary>
+        /// Validates a cell can be added to the zone selection during creation.
+        /// Reuses designator.CanDesignateCell() for terrain requirements.
+        /// Checks adjacency against selectedCells (not an existing zone).
+        /// </summary>
+        /// <param name="cell">The cell to validate</param>
+        /// <param name="map">The current map</param>
+        /// <returns>Error message if invalid, null if valid</returns>
+        private static string ValidateCellForCreation(IntVec3 cell, Map map)
+        {
+            // Check bounds
+            if (!cell.InBounds(map))
+                return "Cell is out of bounds";
+
+            // Check not already in a zone
+            Zone existingZone = map.zoneManager.ZoneAt(cell);
+            if (existingZone != null)
+                return $"Cell is already in {existingZone.label}";
+
+            // Check terrain requirements via designator (soil fertility, etc.)
+            if (currentDesignator != null)
+            {
+                var zoneDesignator = currentDesignator as Designator_ZoneAdd;
+                if (zoneDesignator != null)
+                {
+                    AcceptanceReport report = zoneDesignator.CanDesignateCell(cell);
+                    if (!report.Accepted)
+                    {
+                        return !string.IsNullOrEmpty(report.Reason)
+                            ? report.Reason
+                            : "Cannot place zone here";
+                    }
+                }
+            }
+
+            // Check adjacency to selectedCells (first cell is always allowed)
+            if (selectedCells.Count > 0)
+            {
+                bool isAdjacent = false;
+                for (int i = 0; i < 4; i++)
+                {
+                    IntVec3 neighbor = cell + GenAdj.CardinalDirections[i];
+                    if (selectedCells.Contains(neighbor))
+                    {
+                        isAdjacent = true;
+                        break;
+                    }
+                }
+                if (!isAdjacent)
+                    return "Cell must be adjacent to selection";
+            }
+
+            return null; // Valid
+        }
+
+        /// <summary>
+        /// Checks if removing a cell would disconnect the remaining selection.
+        /// Uses flood-fill (same algorithm as ZoneEditingHelper.WouldDisconnectZone).
+        /// </summary>
+        /// <param name="cellToRemove">The cell being considered for removal</param>
+        /// <returns>True if removing the cell would disconnect the selection</returns>
+        private static bool WouldDisconnectSelection(IntVec3 cellToRemove)
+        {
+            var remaining = new HashSet<IntVec3>(selectedCells);
+            remaining.Remove(cellToRemove);
+
+            if (remaining.Count == 0)
+                return false; // Removing last cell is fine
+
+            // Flood-fill from first remaining cell
+            var visited = new HashSet<IntVec3>();
+            var queue = new Queue<IntVec3>();
+            var startCell = remaining.First();
+
+            queue.Enqueue(startCell);
+            visited.Add(startCell);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                for (int i = 0; i < 4; i++)
+                {
+                    var neighbor = current + GenAdj.CardinalDirections[i];
+                    if (remaining.Contains(neighbor) && !visited.Contains(neighbor))
+                    {
+                        visited.Add(neighbor);
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+
+            return visited.Count < remaining.Count;
         }
 
         /// <summary>
