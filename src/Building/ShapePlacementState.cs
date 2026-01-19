@@ -198,7 +198,14 @@ namespace RimWorldAccess
             // Item name and placement type
             if (shape == ShapeType.Manual)
             {
-                parts.Add($"Placing {designatorLabel}");
+                if (ShapeHelper.IsOrderDesignator(designator) || ShapeHelper.IsCellsDesignator(designator))
+                {
+                    parts.Add($"{designatorLabel} manual mode");
+                }
+                else
+                {
+                    parts.Add($"Placing {designatorLabel}");
+                }
             }
             else
             {
@@ -232,31 +239,40 @@ namespace RimWorldAccess
                     {
                         rotation = (Rot4)rotField.GetValue(placeDesignator);
                     }
-                    parts.Add($"Facing {ArchitectState.GetRotationName(rotation)}");
+                    // Use shared method that includes building-specific info (bed head, cooler direction, etc.)
+                    string rotationInfo = ArchitectState.GetRotationAnnouncementForDef(def, rotation);
+                    parts.Add(rotationInfo);
                 }
             }
 
             // Key hints
             if (shape == ShapeType.Manual)
             {
-                // Check if this building can actually be rotated
-                // Some buildings like doors auto-detect their orientation and cannot be manually rotated
-                bool canRotate = false;
-                if (designator is Designator_Build buildDes)
+                if (ShapeHelper.IsOrderDesignator(designator) || ShapeHelper.IsCellsDesignator(designator))
                 {
-                    if (buildDes.PlacingDef is ThingDef thingDef)
-                    {
-                        canRotate = thingDef.rotatable;
-                    }
-                }
-
-                if (canRotate)
-                {
-                    parts.Add("Move to position and press Space to place, R to rotate, Escape to cancel");
+                    parts.Add("Move to targets, Space to select, Enter to confirm, Tab for shapes, Escape to cancel");
                 }
                 else
                 {
-                    parts.Add("Move to position and press Space to place, Escape to cancel");
+                    // Check if this building can actually be rotated
+                    // Some buildings like doors auto-detect their orientation and cannot be manually rotated
+                    bool canRotate = false;
+                    if (designator is Designator_Build buildDes)
+                    {
+                        if (buildDes.PlacingDef is ThingDef thingDef)
+                        {
+                            canRotate = thingDef.rotatable;
+                        }
+                    }
+
+                    if (canRotate)
+                    {
+                        parts.Add("Move to position and press Space to place, R to rotate, Escape to cancel");
+                    }
+                    else
+                    {
+                        parts.Add("Move to position and press Space to place, Escape to cancel");
+                    }
                 }
             }
             else

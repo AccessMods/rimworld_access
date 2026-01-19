@@ -48,6 +48,20 @@ namespace RimWorldAccess
                 RouteToAccessiblePlacement(des);
                 return;
             }
+
+            // Handle order designators (Hunt, Haul, Tame, etc.)
+            if (ShapeHelper.IsOrderDesignator(des))
+            {
+                RouteToAccessiblePlacement(des);
+                return;
+            }
+
+            // Handle cells designators (Mine, Cut Plants, etc.)
+            if (ShapeHelper.IsCellsDesignator(des))
+            {
+                RouteToAccessiblePlacement(des);
+                return;
+            }
         }
 
         /// <summary>
