@@ -109,28 +109,24 @@ namespace RimWorldAccess
             {
                 if (segmentIndex >= 0 && segmentIndex < cellSegments.Count)
                 {
-                    // Capture zone cell count before undo
-                    Zone undoTargetZone = ZoneUndoTracker.LastSegmentTargetZone;
-                    int cellCountBefore = undoTargetZone?.Cells.Count() ?? 0;
+                    // Get the count from the cell segment - this is what was actually placed
+                    // This handles both new zone creation (where LastSegmentTargetZone is null)
+                    // and zone expansion (where we want the actual cells placed, not zone diff)
+                    removedCount = cellSegments[segmentIndex].Count;
 
                     // Perform the undo
                     ZoneUndoTracker.UndoLastSegment(map);
-
-                    // Calculate actual cells restored (difference in cell count)
-                    int cellCountAfter = undoTargetZone?.Cells.Count() ?? 0;
-                    removedCount = System.Math.Abs(cellCountAfter - cellCountBefore);
                 }
                 else if (segmentIndex == -1)
                 {
-                    // For undo all, capture zone cell count before and after
-                    int cellCountBefore = targetZone?.Cells.Count() ?? 0;
+                    // For undo all, sum up all cell segments
+                    foreach (var segment in cellSegments)
+                    {
+                        removedCount += segment.Count;
+                    }
 
                     // Perform the undo
                     ZoneUndoTracker.UndoAll(map);
-
-                    // Calculate actual cells changed (difference in cell count)
-                    int cellCountAfter = targetZone?.Cells.Count() ?? 0;
-                    removedCount = System.Math.Abs(cellCountAfter - cellCountBefore);
                 }
             }
 
