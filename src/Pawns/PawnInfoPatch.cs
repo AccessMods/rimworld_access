@@ -83,6 +83,9 @@ namespace RimWorldAccess
             // Update map navigation cursor to match
             MapNavigationState.CurrentCursorPosition = pawnPosition;
 
+            // Switch to Cursor mode since user explicitly moved the cursor
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Cursor;
+
             // Announce
             string announcement = $"Jumped to {selectedPawn.LabelShort}";
             TolkHelper.Speak(announcement);

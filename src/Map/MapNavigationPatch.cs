@@ -296,6 +296,9 @@ namespace RimWorldAccess
                     // Move camera to center on new cursor position
                     __instance.JumpToCurrentMapLoc(newPosition);
 
+                    // Switch to Cursor mode - camera follows cursor, blocks pawn following
+                    MapNavigationState.CurrentCameraMode = CameraFollowMode.Cursor;
+
                     // Play terrain audio feedback
                     TerrainDef terrain = newPosition.GetTerrain(Find.CurrentMap);
                     TerrainAudioHelper.PlayTerrainAudio(terrain, 0.5f);
@@ -439,17 +442,23 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Postfix patch to prevent default camera dolly movement when we've handled arrow keys.
+        /// Postfix patch to prevent camera drift and default camera dolly movement.
+        /// In Cursor mode: always reset velocity to prevent drift from edge scrolling.
+        /// In Pawn mode: only reset velocity when arrow keys were pressed this frame.
         /// </summary>
         [HarmonyPostfix]
         public static void Postfix(CameraDriver __instance)
         {
-            // If we announced something this frame, it means we handled arrow key input
-            // The camera jump already happened in Prefix, but we need to ensure
-            // no residual dolly movement occurs
-            if (hasAnnouncedThisFrame)
+            // In Cursor mode, always reset velocity to prevent drift
+            // This blocks edge scrolling and any other accumulated velocity
+            if (MapNavigationState.CurrentCameraMode == CameraFollowMode.Cursor)
             {
-                // Reset velocity to prevent any accumulated movement
+                Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
+                Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
+            }
+            else if (hasAnnouncedThisFrame)
+            {
+                // In Pawn mode with arrow key usage, also reset for that frame
                 Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
                 Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
             }
@@ -492,15 +501,23 @@ namespace RimWorldAccess
                 return false;
             }
 
-            // Select the pawn (but don't jump camera - user can use Alt+C)
+            // Select the pawn and jump camera to follow
             if (Find.Selector != null)
             {
                 Find.Selector.ClearSelection();
                 Find.Selector.Select(selectedPawn);
             }
 
-            // Set flag for gizmo navigation
-            GizmoNavigationState.PawnJustSelected = true;
+            // Jump camera to pawn and enable Pawn Following mode
+            // NOTE: Cursor stays where it was - user can press Alt+C to move cursor to pawn
+            if (Find.CameraDriver != null)
+            {
+                Find.CameraDriver.JumpToCurrentMapLoc(selectedPawn.Position);
+            }
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
+
+            // NOTE: We do NOT set GizmoNavigationState.PawnJustSelected = true
+            // This ensures 'g' key always uses cursor position (not pawn selection)
 
             // Announce selection
             string currentTask = selectedPawn.GetJobReport();
@@ -537,15 +554,23 @@ namespace RimWorldAccess
                 return false;
             }
 
-            // Select the pawn (but don't jump camera - user can use Alt+C)
+            // Select the pawn and jump camera to follow
             if (Find.Selector != null)
             {
                 Find.Selector.ClearSelection();
                 Find.Selector.Select(selectedPawn);
             }
 
-            // Set flag for gizmo navigation
-            GizmoNavigationState.PawnJustSelected = true;
+            // Jump camera to pawn and enable Pawn Following mode
+            // NOTE: Cursor stays where it was - user can press Alt+C to move cursor to pawn
+            if (Find.CameraDriver != null)
+            {
+                Find.CameraDriver.JumpToCurrentMapLoc(selectedPawn.Position);
+            }
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
+
+            // NOTE: We do NOT set GizmoNavigationState.PawnJustSelected = true
+            // This ensures 'g' key always uses cursor position (not pawn selection)
 
             // Announce selection
             string currentTask = selectedPawn.GetJobReport();
@@ -555,6 +580,27 @@ namespace RimWorldAccess
             TolkHelper.Speak($"{selectedPawn.LabelShort} selected - {currentTask}");
 
             return false; // Block original method
+        }
+    }
+
+    /// <summary>
+    /// Blocks RimWorld's automatic pawn following when in Cursor mode.
+    /// </summary>
+    [HarmonyPatch(typeof(CameraMapConfig))]
+    [HarmonyPatch("ConfigFixedUpdate_60")]
+    public static class CameraMapConfigPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            if (Find.CurrentMap == null)
+                return true;
+
+            // Block pawn following in Cursor mode
+            if (MapNavigationState.CurrentCameraMode == CameraFollowMode.Cursor)
+                return false;
+
+            return true;
         }
     }
 }

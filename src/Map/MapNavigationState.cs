@@ -21,6 +21,16 @@ namespace RimWorldAccess
     }
 
     /// <summary>
+    /// Defines whether the camera follows the cursor or a selected pawn.
+    /// These modes are mutually exclusive.
+    /// </summary>
+    public enum CameraFollowMode
+    {
+        Cursor,  // Camera stays at cursor position, blocks RimWorld's pawn following
+        Pawn     // Camera follows selected pawn (enabled by comma/period cycling)
+    }
+
+    /// <summary>
     /// Maintains the state of map navigation for accessibility features.
     /// Tracks the current cursor position as the user navigates the map with arrow keys.
     /// Stores per-map cursor positions so switching between maps preserves cursor location.
@@ -36,6 +46,7 @@ namespace RimWorldAccess
         private static bool suppressMapNavigation = false;
         private static JumpMode currentJumpMode = JumpMode.PresetDistance;
         private static int presetJumpDistance = 5;
+        private static CameraFollowMode cameraFollowMode = CameraFollowMode.Cursor;
 
         // Pending restore position - used when returning from dialogs like trade
         // If set, Initialize() will use this position instead of the camera position
@@ -172,6 +183,17 @@ namespace RimWorldAccess
         /// Gets the current preset jump distance in tiles.
         /// </summary>
         public static int PresetJumpDistance => presetJumpDistance;
+
+        /// <summary>
+        /// Gets or sets the current camera follow mode.
+        /// Cursor mode: camera stays at cursor, blocks pawn following.
+        /// Pawn mode: camera follows selected pawn (after comma/period cycling).
+        /// </summary>
+        public static CameraFollowMode CurrentCameraMode
+        {
+            get => cameraFollowMode;
+            set => cameraFollowMode = value;
+        }
 
         /// <summary>
         /// Cycles to the next jump mode and announces it.
@@ -348,6 +370,7 @@ namespace RimWorldAccess
             initializedForMapId = -1;
             knownMapIds.Clear();
             hasAnnouncedMultiMapHint = false;
+            cameraFollowMode = CameraFollowMode.Cursor;
         }
 
         /// <summary>
