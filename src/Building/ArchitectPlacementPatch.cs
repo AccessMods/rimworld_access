@@ -827,80 +827,11 @@ namespace RimWorldAccess
         }
     }
 
-    /// <summary>
-    /// Harmony patch to modify map navigation announcements during architect placement.
-    /// Adds information about whether a cell can be designated.
-    /// </summary>
-    [HarmonyPatch(typeof(CameraDriver))]
-    [HarmonyPatch("Update")]
-    public static class ArchitectPlacementAnnouncementPatch
-    {
-        /// <summary>
-        /// Postfix patch to modify tile announcements during architect placement.
-        /// Adds "Selected" prefix for multi-cell designators, or validity info for build designators.
-        /// </summary>
-        [HarmonyPostfix]
-        [HarmonyPriority(Priority.Last)]
-        public static void Postfix(CameraDriver __instance)
-        {
-            // Check if an arrow key was just pressed
-            if (Find.CurrentMap == null || !MapNavigationState.IsInitialized)
-                return;
-
-            // Check if any arrow key is being held (use GetKey for key repeat support)
-            bool arrowKeyPressed = Input.GetKey(KeyCode.UpArrow) ||
-                                   Input.GetKey(KeyCode.DownArrow) ||
-                                   Input.GetKey(KeyCode.LeftArrow) ||
-                                   Input.GetKey(KeyCode.RightArrow);
-
-            if (!arrowKeyPressed)
-                return;
-
-            IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
-            Map map = Find.CurrentMap;
-
-            // Skip if in local map targeting mode (transport pod landing)
-            // We don't add extra announcements for targeting - the game handles this
-            if (Find.Targeter != null && Find.Targeter.IsTargeting)
-            {
-                return;
-            }
-
-            // Update shape preview on cursor movement (if in SettingSecondCorner phase)
-            if (ShapePlacementState.ShouldUpdatePreviewOnMove())
-            {
-                ShapePlacementState.UpdatePreview(currentPosition);
-            }
-
-            // Only continue for architect placement mode
-            if (!ArchitectState.IsInPlacementMode)
-                return;
-
-            Designator designator = ArchitectState.SelectedDesignator;
-
-            if (designator == null)
-                return;
-
-            // Get the last announced info
-            string lastInfo = MapNavigationState.LastAnnouncedInfo;
-
-            // For multi-cell designators (zones, etc.), show if cell is already selected
-            // Don't check placement validity here - only check when user presses Space to place
-            if (!(designator is Designator_Build))
-            {
-                if (ArchitectState.SelectedCells.Contains(currentPosition))
-                {
-                    if (!lastInfo.StartsWith("Selected"))
-                    {
-                        string modifiedInfo = "Selected, " + lastInfo;
-                        TolkHelper.Speak(modifiedInfo);
-                        MapNavigationState.LastAnnouncedInfo = modifiedInfo;
-                    }
-                }
-            }
-            // Note: Placement validity is checked when Space is pressed, not on cursor movement
-        }
-    }
+    // NOTE: ArchitectPlacementAnnouncementPatch was removed.
+    // Arrow key handling and preview updates are now handled atomically by
+    // MapArrowKeyHandler in OnGUI context (via UnifiedKeyboardPatch at Priority 10.5).
+    // This fixes the key repeat desync issue where Input.GetKeyDown() in the Prefix
+    // wouldn't fire on repeat frames but Input.GetKey() in this Postfix would.
 
     /// <summary>
     /// Harmony patch to intercept pause key (Space) during architect placement mode.

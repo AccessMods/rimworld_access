@@ -3609,6 +3609,35 @@ namespace RimWorldAccess
                 Event.current.Use();
             }
 
+            // ===== PRIORITY 10.5: Handle local map arrow key navigation =====
+            // Uses Event.current for OS key repeat support (unlike CameraDriver.Update() which uses Input.GetKeyDown)
+            if (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
+                key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+            {
+                // Skip if in world view
+                if (WorldRendererUtility.WorldRendered)
+                    return;
+
+                // Only during gameplay with valid map
+                if (Current.ProgramState != ProgramState.Playing || Find.CurrentMap == null)
+                    return;
+
+                // Skip if windows prevent camera motion
+                if (Find.WindowStack?.WindowsPreventCameraMotion == true)
+                    return;
+
+                // Skip if not initialized or suppressed
+                if (!MapNavigationState.IsInitialized || MapNavigationState.SuppressMapNavigation)
+                    return;
+
+                // Handle the arrow key via MapArrowKeyHandler
+                if (MapArrowKeyHandler.HandleArrowKey(key, Event.current.control, Event.current.shift))
+                {
+                    Event.current.Use();
+                }
+                return;
+            }
+
             // CATCH-ALL: If any accessibility menu is active, consume ALL remaining key events
             // This prevents ANY keys from leaking to the game when a menu has focus
             if (KeyboardHelper.IsAnyAccessibilityMenuActive() && Event.current.isKey)
