@@ -3030,6 +3030,27 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.527: Display gear info with Alt+G (if pawn is selected) =====
+            if (key == KeyCode.G && Event.current.alt)
+            {
+                // Only display gear if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode)
+                {
+                    // Display gear information
+                    GearState.DisplayGearInfo();
+
+                    // Prevent the default G key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 6.53: Unforbid all items on the map with Alt+F =====
             if (key == KeyCode.F && Event.current.alt)
             {

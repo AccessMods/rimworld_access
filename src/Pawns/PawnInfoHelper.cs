@@ -278,8 +278,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets gear information for the pawn.
-        /// Includes equipment, apparel, and inventory items.
+        /// Gets gear information for the pawn in sentence format.
+        /// Shows weapon being wielded and apparel being worn, with quality but no durability.
         /// </summary>
         public static string GetGearInfo(Pawn pawn)
         {
@@ -287,50 +287,49 @@ namespace RimWorldAccess
                 return "No pawn selected";
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"{pawn.LabelShort} Gear:");
+            sb.Append($"{pawn.LabelShort}'s Gear. ");
 
-            // Equipment (weapons)
+            // Weapon
             if (pawn.equipment != null && pawn.equipment.Primary != null)
             {
-                sb.AppendLine($"\nEquipment:");
-                sb.AppendLine($"  - {pawn.equipment.Primary.LabelCap}");
+                var weapon = pawn.equipment.Primary;
+                sb.Append($"Wielding: {weapon.LabelNoParenthesisCap.StripTags()}");
+                var qualityComp = weapon.TryGetComp<CompQuality>();
+                if (qualityComp != null)
+                {
+                    sb.Append($" ({qualityComp.Quality})");
+                }
+                sb.Append(". ");
+            }
+            else
+            {
+                sb.Append("Wielding: Nothing. ");
             }
 
             // Apparel
             if (pawn.apparel != null && pawn.apparel.WornApparel != null && pawn.apparel.WornApparel.Count > 0)
             {
-                sb.AppendLine($"\nApparel ({pawn.apparel.WornApparel.Count}):");
+                sb.Append("Wearing: ");
+                var apparelList = new List<string>();
                 foreach (var apparel in pawn.apparel.WornApparel)
                 {
-                    sb.AppendLine($"  - {apparel.LabelCap}");
-                }
-            }
-
-            // Inventory
-            if (pawn.inventory != null && pawn.inventory.innerContainer != null && pawn.inventory.innerContainer.Count > 0)
-            {
-                sb.AppendLine($"\nInventory ({pawn.inventory.innerContainer.Count} items):");
-                var groupedItems = pawn.inventory.innerContainer.GroupBy(t => t.def);
-                foreach (var group in groupedItems)
-                {
-                    int count = group.Sum(t => t.stackCount);
-                    if (count > 1)
+                    string apparelEntry = apparel.LabelNoParenthesisCap.StripTags();
+                    var qualityComp = apparel.TryGetComp<CompQuality>();
+                    if (qualityComp != null)
                     {
-                        sb.AppendLine($"  - {group.Key.label} x{count}");
+                        apparelEntry += $" ({qualityComp.Quality})";
                     }
-                    else
-                    {
-                        sb.AppendLine($"  - {group.First().LabelCap}");
-                    }
+                    apparelList.Add(apparelEntry);
                 }
+                sb.Append(string.Join(", ", apparelList));
+                sb.Append(".");
             }
-
-            if (sb.Length == $"{pawn.LabelShort} Gear:\n".Length)
+            else
             {
-                sb.AppendLine("No equipment, apparel, or inventory items");
+                sb.Append("Wearing: Nothing.");
             }
 
-            return sb.ToString().TrimEnd();
+            return sb.ToString();
         }
 
         /// <summary>
