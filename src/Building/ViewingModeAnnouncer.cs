@@ -581,34 +581,29 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    int totalInteriorObstacles = detectedEnclosures.Sum(e => e.ObstacleCount);
                     int totalGaps = detectedEnclosures.Sum(e => e.GapCount);
 
-                    // List sizes for each enclosure (uses dimensions for regular, cell count for irregular)
-                    var sizesList = new List<string>();
+                    // Build per-enclosure descriptions with individual contents
+                    var enclosureDescriptions = new List<string>();
                     foreach (var enc in detectedEnclosures)
                     {
-                        sizesList.Add(ShapeHelper.FormatShapeSize(enc.InteriorCells));
-                    }
-                    string enclosurePart = $"{detectedEnclosures.Count} enclosures formed: {string.Join(", ", sizesList)}";
+                        string size = ShapeHelper.FormatShapeSize(enc.InteriorCells);
+                        string description = size;
 
-                    // Add "containing X, Y, Z" if there are interior obstacles
-                    if (totalInteriorObstacles > 0)
-                    {
-                        // Gather all interior obstacles from all enclosures
-                        var allInteriorObstacles = new List<ScannerItem>();
-                        foreach (var enc in detectedEnclosures)
+                        // Add this enclosure's obstacles if any
+                        if (enc.Obstacles != null && enc.Obstacles.Count > 0)
                         {
-                            if (enc.Obstacles != null)
-                                allInteriorObstacles.AddRange(enc.Obstacles);
+                            string contents = FormatObstacleList(enc.Obstacles);
+                            if (!string.IsNullOrEmpty(contents))
+                            {
+                                description += $" containing {contents}";
+                            }
                         }
 
-                        string interiorSummary = FormatObstacleList(allInteriorObstacles);
-                        if (!string.IsNullOrEmpty(interiorSummary))
-                        {
-                            enclosurePart += $" containing {interiorSummary}";
-                        }
+                        enclosureDescriptions.Add(description);
                     }
+
+                    string enclosurePart = $"{detectedEnclosures.Count} enclosures formed: {string.Join(". ", enclosureDescriptions)}";
 
                     // Add gap warning at the end
                     if (totalGaps > 0)
@@ -621,12 +616,22 @@ namespace RimWorldAccess
                 }
             }
 
-            // Add navigation hint if there are obstacles or interior obstacles
+            // Add control hints
+            var hints = new List<string>();
+
+            // Obstacle navigation hint
             bool hasAnyObstacles = obstacleCells.Count > 0 || (detectedEnclosures != null && detectedEnclosures.Any(e => e.ObstacleCount > 0));
             if (hasAnyObstacles)
             {
-                parts.Add("Page Up/Down to navigate");
+                hints.Add("Page Up/Down to navigate obstacles");
             }
+
+            // Editing hints
+            hints.Add("Equals to add another shape");
+            hints.Add("Minus to undo last");
+            hints.Add("Enter to confirm");
+
+            parts.Add(string.Join(", ", hints));
 
             return $"Viewing mode. {string.Join(". ", parts)}.";
         }

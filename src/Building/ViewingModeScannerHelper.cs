@@ -142,16 +142,39 @@ namespace RimWorldAccess
                 allObstacles.Add(item);
             }
 
-            // Add interior obstacles from detected enclosures
+            // Add interior obstacles from detected enclosures with enclosure context
+            // First, count enclosures by size to handle duplicates
+            var sizeCounts = new Dictionary<string, int>();
+            var sizeCurrentIndex = new Dictionary<string, int>();
             foreach (var enclosure in detectedEnclosures)
             {
-                if (enclosure.Obstacles != null)
+                string size = ShapeHelper.FormatShapeSize(enclosure.InteriorCells);
+                if (!sizeCounts.ContainsKey(size))
                 {
+                    sizeCounts[size] = 0;
+                    sizeCurrentIndex[size] = 0;
+                }
+                sizeCounts[size]++;
+            }
+
+            // Now add obstacles with numbered enclosure labels when there are duplicates
+            foreach (var enclosure in detectedEnclosures)
+            {
+                if (enclosure.Obstacles != null && enclosure.Obstacles.Count > 0)
+                {
+                    string enclosureSize = ShapeHelper.FormatShapeSize(enclosure.InteriorCells);
+                    sizeCurrentIndex[enclosureSize]++;
+
+                    // Only number if there are multiple enclosures of the same size
+                    string enclosureLabel = sizeCounts[enclosureSize] > 1
+                        ? $"{enclosureSize} enclosure {sizeCurrentIndex[enclosureSize]}"
+                        : $"{enclosureSize} enclosure";
+
                     foreach (var obstacle in enclosure.Obstacles)
                     {
-                        // Create a new item with "Interior:" prefix
+                        // Create a new item with enclosure context
                         var item = new ScannerItem(obstacle.Thing, cursorPos);
-                        item.Label = $"Interior: {obstacle.Label}";
+                        item.Label = $"{obstacle.Label} in {enclosureLabel}";
                         allObstacles.Add(item);
                     }
                 }
