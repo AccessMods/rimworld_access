@@ -298,8 +298,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets extra information (cost and description) for a buildable.
-        /// Format: ": {cost} ({description})" matching tree view style.
+        /// Gets extra information (cost, skill requirement, and description) for a buildable.
+        /// Format: ": {cost}, requires Construction {level} ({description})" matching tree view style.
         /// </summary>
         private static string GetBuildableExtraInfo(BuildableDef buildable)
         {
@@ -307,22 +307,44 @@ namespace RimWorldAccess
                 return "";
 
             string costInfo = GetBriefCostInfo(buildable);
+            string skillInfo = GetSkillRequirement(buildable);
             string description = GetDescription(buildable);
 
-            // Build the formatted string: ": cost (description)"
-            if (!string.IsNullOrEmpty(costInfo) && !string.IsNullOrEmpty(description))
+            // Build list of info parts (cost, skill)
+            var infoParts = new List<string>();
+            if (!string.IsNullOrEmpty(costInfo))
+                infoParts.Add(costInfo);
+            if (!string.IsNullOrEmpty(skillInfo))
+                infoParts.Add(skillInfo);
+
+            string combinedInfo = string.Join(", ", infoParts);
+
+            // Build the formatted string: ": cost, skill (description)"
+            if (!string.IsNullOrEmpty(combinedInfo) && !string.IsNullOrEmpty(description))
             {
-                return $": {costInfo} ({description})";
+                return $": {combinedInfo} ({description})";
             }
-            else if (!string.IsNullOrEmpty(costInfo))
+            else if (!string.IsNullOrEmpty(combinedInfo))
             {
-                return $": {costInfo}";
+                return $": {combinedInfo}";
             }
             else if (!string.IsNullOrEmpty(description))
             {
                 return $" ({description})";
             }
 
+            return "";
+        }
+
+        /// <summary>
+        /// Gets the skill requirement for a buildable, if any.
+        /// </summary>
+        private static string GetSkillRequirement(BuildableDef buildable)
+        {
+            if (buildable is ThingDef thingDef && thingDef.constructionSkillPrerequisite > 0)
+            {
+                return $"requires Construction {thingDef.constructionSkillPrerequisite}";
+            }
             return "";
         }
 

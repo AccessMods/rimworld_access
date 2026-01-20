@@ -69,14 +69,23 @@ namespace RimWorldAccess
                 string summary = BuildOrderTargetSummary(designator, orderTargets, orderTargetCells);
                 int targetCount = orderTargets.Count + orderTargetCells.Count;
 
+                var hints = new List<string>();
+                if (targetCount > 0)
+                {
+                    hints.Add("Page Up/Down to navigate targets");
+                }
+                hints.Add("Equals to add another shape");
+                hints.Add("Minus to undo last");
+                hints.Add("Enter to confirm");
+                string hintsStr = string.Join(", ", hints);
+
                 if (!string.IsNullOrEmpty(summary))
                 {
-                    string navHint = targetCount > 0 ? " Use Page Up and Down to navigate targets." : "";
-                    return $"Viewing mode. {summary}{segmentInfo}.{navHint}";
+                    return $"Viewing mode. {summary}{segmentInfo}. {hintsStr}.";
                 }
                 else
                 {
-                    return $"Viewing mode. {totalPlaced} designations{segmentInfo}.";
+                    return $"Viewing mode. {totalPlaced} designations{segmentInfo}. {hintsStr}.";
                 }
             }
             else if (isZoneDesignator)
@@ -232,6 +241,7 @@ namespace RimWorldAccess
                     parts.Add($"No zone cells removed{segmentInfo}");
                 }
 
+                parts.Add("Equals to add another shape, Minus to undo last, Enter to confirm");
                 return $"Viewing mode. {string.Join(". ", parts)}.";
             }
 
@@ -301,11 +311,16 @@ namespace RimWorldAccess
                 }
             }
 
-            // Add navigation hint if there are obstacles
+            // Add control hints
+            var hints = new List<string>();
             if (obstacleCells.Count > 0)
             {
-                parts.Add("Page Up/Down to navigate obstacles");
+                hints.Add("Page Up/Down to navigate obstacles");
             }
+            hints.Add("Equals to add another shape");
+            hints.Add("Minus to undo last");
+            hints.Add("Enter to confirm");
+            parts.Add(string.Join(", ", hints));
 
             return $"Viewing mode. {string.Join(". ", parts)}.";
         }
