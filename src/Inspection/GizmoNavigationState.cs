@@ -1019,7 +1019,8 @@ namespace RimWorldAccess
                     label = cmd.defaultLabel;
                 if (string.IsNullOrEmpty(label))
                     label = "Unknown Command";
-                return label;
+                // Strip color tags (e.g., <color=#...>text</color>) from gizmo labels
+                return label.StripTags();
             }
 
             // Handle non-Command gizmos (status displays, bars, etc.)
@@ -1567,7 +1568,8 @@ namespace RimWorldAccess
                 string desc = cmd.Desc;
                 if (string.IsNullOrEmpty(desc))
                     desc = cmd.defaultDesc;
-                return desc ?? "";
+                // Strip color tags from descriptions
+                return (desc ?? "").StripTags();
             }
             return "";
         }

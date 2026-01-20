@@ -20,6 +20,7 @@ namespace RimWorldAccess
             // This prevents conflicts when other menus are open
             if (KeyboardHelper.IsAnyAccessibilityMenuActive() &&
                 !ZoneRenameState.IsActive &&
+                !StorageRenameState.IsActive &&
                 !PlaySettingsMenuState.IsActive &&
                 !StorageSettingsMenuState.IsActive &&
                 !PlantSelectionMenuState.IsActive &&
@@ -30,6 +31,13 @@ namespace RimWorldAccess
             if (ZoneRenameState.IsActive)
             {
                 HandleZoneRenameInput();
+                return;
+            }
+
+            // Handle storage rename text input (process both KeyDown and normal character input)
+            if (StorageRenameState.IsActive)
+            {
+                HandleStorageRenameInput();
                 return;
             }
 
@@ -332,6 +340,54 @@ namespace RimWorldAccess
                 if (character != '\0' && !char.IsControl(character))
                 {
                     ZoneRenameState.HandleCharacter(character);
+                    currentEvent.Use();
+                    return;
+                }
+            }
+        }
+
+        private static void HandleStorageRenameInput()
+        {
+            Event currentEvent = Event.current;
+
+            // Handle KeyDown events for special keys
+            if (currentEvent.type == EventType.KeyDown)
+            {
+                KeyCode key = currentEvent.keyCode;
+
+                // Check for special keys first
+                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    StorageRenameState.Confirm();
+                    currentEvent.Use();
+                    return;
+                }
+                else if (key == KeyCode.Escape)
+                {
+                    StorageRenameState.Cancel();
+                    currentEvent.Use();
+                    return;
+                }
+                else if (key == KeyCode.Backspace)
+                {
+                    StorageRenameState.HandleBackspace();
+                    currentEvent.Use();
+                    return;
+                }
+                else if (key == KeyCode.Tab)
+                {
+                    StorageRenameState.ReadCurrentText();
+                    currentEvent.Use();
+                    return;
+                }
+
+                // Handle character input from KeyDown event
+                char character = currentEvent.character;
+
+                // If there's a valid character, handle it
+                if (character != '\0' && !char.IsControl(character))
+                {
+                    StorageRenameState.HandleCharacter(character);
                     currentEvent.Use();
                     return;
                 }

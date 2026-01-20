@@ -34,10 +34,10 @@ namespace RimWorldAccess
             if (key == KeyCode.None)
                 return;
 
-            // ===== PRIORITY -1: Block ALL keys if zone rename is active =====
-            // Zone rename needs to capture text input, so block everything here
+            // ===== PRIORITY -1: Block ALL keys if text input mode is active =====
+            // Zone/storage rename needs to capture text input, so block everything here
             // StorageSettingsMenuPatch will handle the input
-            if (ZoneRenameState.IsActive)
+            if (ZoneRenameState.IsActive || StorageRenameState.IsActive)
             {
                 // Don't process any keys in this patch when renaming
                 return;
@@ -297,6 +297,22 @@ namespace RimWorldAccess
                 bool alt = Event.current.alt;
 
                 if (QuantityMenuState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.27: Handle shelf linking selection mode if active =====
+            // This is the custom storage linking mode activated from our gizmos
+            // Note: Confirmation dialog now uses Dialog_MessageBox, handled by MessageBoxAccessibilityPatch
+            if (ShelfLinkingState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (ShelfLinkingState.HandleInput(key, shift, ctrl, alt))
                 {
                     Event.current.Use();
                     return;

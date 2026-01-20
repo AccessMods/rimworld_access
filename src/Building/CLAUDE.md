@@ -25,6 +25,9 @@ Review results, undo segments, navigate obstacles via ScannerState.
 **Building Controls** - `BuildingComponentsHelper.cs`, `*ComponentState.cs`, `*ControlState.cs`
 Toggle flickable/refuel/door/forbid settings on buildings.
 
+**Storage Linking** - `ShelfLinkingState.cs`, `ShelfLinkingPatch.cs`, `ShelfLinkingHelper.cs`, `ShelfLinkingConfirmDialog.cs`
+Link storage buildings (shelves, bookcases) together without mouse-based multi-select. Two gizmos: "Link all in room" and "Link storage manually".
+
 ## Key Entry Point
 
 `DesignatorManagerPatch.Postfix` intercepts ALL designator selections and routes to ShapePlacementState.
@@ -57,3 +60,26 @@ designator.DesignateMultiCell(cells);
 ZoneUndoTracker.CaptureAfterState(map);
 ZoneUndoTracker.AddSegment();
 ```
+
+## Storage Linking
+
+Accessible gizmos for linking storage buildings without mouse-based multi-select.
+
+### Keyboard Shortcuts (Manual Selection Mode)
+- **Arrow Keys** - Navigate map cursor
+- **Space** - Toggle storage selection at cursor
+- **Enter** - Confirm and link all selected storage
+- **Escape** - Cancel selection mode
+
+### Gizmos Added to Building_Storage
+1. **Link all in room (X shelves, Y bookcases)** - Only on storage in enclosed rooms. Links all compatible storage in the room.
+2. **Link storage manually** - Always available. Enter selection mode to manually choose storage to link.
+
+### Confirmation Dialog
+When linking storage that's already in a different group, a confirmation dialog appears:
+- **Enter** - Confirm and move items to this group
+- **Escape** - Cancel
+
+### Priority in UnifiedKeyboardPatch
+- 0.26: ShelfLinkingConfirmDialog
+- 0.27: ShelfLinkingState

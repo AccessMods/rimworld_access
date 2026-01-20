@@ -346,6 +346,11 @@ namespace RimWorldAccess
                             tileInfo = "Selected, " + tileInfo;
                         }
                     }
+                    // If in shelf linking mode, announce when cursor is on selected storage
+                    else if (ShelfLinkingState.IsActive && ShelfLinkingState.IsStorageSelectedAt(newPosition))
+                    {
+                        tileInfo = "Selected, " + tileInfo;
+                    }
 
                     // Only announce if different from last announcement (avoids spam when hitting map edge)
                     if (tileInfo != MapNavigationState.LastAnnouncedInfo)

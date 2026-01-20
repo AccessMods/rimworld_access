@@ -228,6 +228,18 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
+            // Add storage group information for storage buildings
+            foreach (var building in buildings)
+            {
+                if (building is IStorageGroupMember storageMember && storageMember.Group != null)
+                {
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(storageMember.Group.RenamableLabel);
+                    addedSomething = true;
+                    break; // Only announce once per tile
+                }
+            }
+
             // Add roofed status (only if roofed, not unroofed)
             // Natural rock roof (overhead mountain) = "underground", constructed roof = "roofed"
             RoofDef roof = position.GetRoof(map);

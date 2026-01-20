@@ -50,6 +50,7 @@ namespace RimWorldAccess
                 || WorkMenuState.IsActive
                 || StorageSettingsMenuState.IsActive
                 || ZoneRenameState.IsActive
+                || StorageRenameState.IsActive
                 || PlantSelectionMenuState.IsActive
                 || GizmoNavigationState.IsActive
                 || TradeNavigationState.IsActive
