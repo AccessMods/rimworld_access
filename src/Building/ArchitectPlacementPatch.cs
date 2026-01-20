@@ -190,6 +190,14 @@ namespace RimWorldAccess
             {
                 if (supportsShapes && inArchitectMode)
                 {
+                    // Block Tab if placement is in progress with points set
+                    // User must press Escape to clear selection first
+                    if (ShapePlacementState.IsPlacementInProgress)
+                    {
+                        TolkHelper.Speak("Cannot change shape while placing. Press Escape to clear selection first.");
+                        return true;
+                    }
+
                     // Check if only Manual shape is available - nothing to cycle through
                     if (availableShapes.Count == 1 && availableShapes[0] == ShapeType.Manual)
                     {
@@ -219,6 +227,14 @@ namespace RimWorldAccess
             // Shift+Tab - quick switch to Manual mode (for any designator with shapes)
             else if (supportsShapes && inArchitectMode)
             {
+                // Block Shift+Tab if placement is in progress with points set
+                // User must press Escape to clear selection first
+                if (ShapePlacementState.IsPlacementInProgress)
+                {
+                    TolkHelper.Speak("Cannot change shape while placing. Press Escape to clear selection first.");
+                    return true;
+                }
+
                 // Reset to manual mode and cancel any shape in progress
                 if (ShapePlacementState.IsActive)
                 {
@@ -415,37 +431,47 @@ namespace RimWorldAccess
             {
                 // Save the current shape before placing (for restore after undo)
                 ShapeType currentShape = ShapePlacementState.CurrentShape;
-                // Pass silent: true because ViewingModeState.Enter will announce the placement
-                var result = ShapePlacementState.PlaceDesignations(silent: true);
 
-                // Check if this is a zone deletion that needs confirmation
-                if (result.NeedsFullDeletionConfirmation)
+                try
                 {
-                    // Show confirmation dialog for zone deletion
-                    ShowZoneDeletionConfirmation(result, activeDesignator, currentShape);
-                    return true;
-                }
-                else if (result.PlacedCount > 0)
-                {
-                    ViewingModeState.Enter(result, activeDesignator, currentShape);
-                    // Reset shape placement state after placing
-                    ShapePlacementState.Reset();
-                }
-                else
-                {
-                    // No placements - give appropriate feedback based on designator type
-                    // Stay in shape placement mode so user can try again (like Escape when corners are set)
-                    bool isDeleteDesignator = ShapeHelper.IsDeleteDesignator(activeDesignator);
-                    if (isDeleteDesignator)
+                    // Pass silent: true because ViewingModeState.Enter will announce the placement
+                    var result = ShapePlacementState.PlaceDesignations(silent: true);
+
+                    // Check if this is a zone deletion that needs confirmation
+                    if (result.NeedsFullDeletionConfirmation)
                     {
-                        TolkHelper.Speak("No zone cells in selection. Try again.");
+                        // Show confirmation dialog for zone deletion
+                        ShowZoneDeletionConfirmation(result, activeDesignator, currentShape);
+                        return true;
+                    }
+                    else if (result.PlacedCount > 0)
+                    {
+                        ViewingModeState.Enter(result, activeDesignator, currentShape);
+                        // Reset shape placement state after placing
+                        ShapePlacementState.Reset();
                     }
                     else
                     {
-                        TolkHelper.Speak("No valid cells in selection. Try again.");
+                        // No placements - give appropriate feedback based on designator type
+                        // Stay in shape placement mode so user can try again (like Escape when corners are set)
+                        bool isDeleteDesignator = ShapeHelper.IsDeleteDesignator(activeDesignator);
+                        if (isDeleteDesignator)
+                        {
+                            TolkHelper.Speak("No zone cells in selection. Try again.");
+                        }
+                        else
+                        {
+                            TolkHelper.Speak("No valid cells in selection. Try again.");
+                        }
+                        // Clear selection but stay in placement mode (don't exit entirely)
+                        ShapePlacementState.ClearSelectionAndStay(silent: true);
                     }
-                    // Clear selection but stay in placement mode (don't exit entirely)
-                    ShapePlacementState.ClearSelectionAndStay(silent: true);
+                }
+                catch (System.Exception ex)
+                {
+                    Log.Error($"[ArchitectPlacementPatch] Exception during placement: {ex}");
+                    TolkHelper.Speak("Placement failed. Clearing selection.");
+                    ShapePlacementState.Reset();
                 }
                 return true;
             }

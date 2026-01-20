@@ -144,6 +144,12 @@ namespace RimWorldAccess
         public static bool HasFirstPoint => previewHelper.HasFirstCorner;
 
         /// <summary>
+        /// Whether placement is in progress (active with points set).
+        /// Use this to guard against state corruption from external actions.
+        /// </summary>
+        public static bool IsPlacementInProgress => IsActive && HasFirstPoint;
+
+        /// <summary>
         /// Whether we're in preview mode (both points set).
         /// </summary>
         public static bool IsInPreviewMode => previewHelper.IsInPreviewMode;
