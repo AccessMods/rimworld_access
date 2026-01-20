@@ -5,6 +5,47 @@ using RimWorld;
 namespace RimWorldAccess
 {
     /// <summary>
+    /// Harmony patch on Designator.Deselected() to automatically clean up
+    /// accessibility state when the game truly deselects a designator.
+    ///
+    /// This fires when:
+    /// - User presses Escape to cancel
+    /// - User clicks elsewhere on the map
+    /// - Placement completes and the designator is done
+    ///
+    /// It does NOT reset state when switching between designators, because
+    /// DesignatorManagerPatch uses a flag to track when we're inside a Select() operation.
+    /// </summary>
+    [HarmonyPatch(typeof(Designator))]
+    [HarmonyPatch("Deselected")]
+    public static class DesignatorDeselectedPatch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            // Skip cleanup if we're in the middle of a Select() operation
+            // (i.e., switching to a new designator, not truly deselecting)
+            if (DesignatorManagerPatch.IsInSelectOperation)
+            {
+                return;
+            }
+
+            // Truly deselecting - clean up accessibility state
+            if (ShapePlacementState.CurrentPhase != PlacementPhase.Inactive)
+            {
+                Log.Message("[DesignatorDeselectedPatch] Cleaning up ShapePlacementState on true deselect");
+                ShapePlacementState.Reset();
+            }
+
+            if (ArchitectState.CurrentMode != ArchitectMode.Inactive)
+            {
+                Log.Message("[DesignatorDeselectedPatch] Cleaning up ArchitectState on true deselect");
+                ArchitectState.Reset();
+            }
+        }
+    }
+
+    /// <summary>
     /// Harmony patch on DesignatorManager.Select() to intercept ALL placements
     /// and route them through the accessible placement system.
     ///
@@ -21,6 +62,34 @@ namespace RimWorldAccess
     public static class DesignatorManagerPatch
     {
         /// <summary>
+        /// Flag indicating we're inside a Select() operation.
+        /// Used by DesignatorDeselectedPatch to distinguish between
+        /// switching designators vs truly deselecting.
+        /// </summary>
+        public static bool IsInSelectOperation { get; private set; } = false;
+
+        /// <summary>
+        /// Prefix patch that sets the flag before Select() runs.
+        /// This lets DesignatorDeselectedPatch know that Deselected() is being
+        /// called as part of switching to a new designator, not a true deselect.
+        /// </summary>
+        [HarmonyPrefix]
+        public static void Prefix()
+        {
+            IsInSelectOperation = true;
+        }
+
+        /// <summary>
+        /// Finalizer ensures the flag is cleared even if Select() throws an exception.
+        /// This prevents the flag from getting stuck in the true state.
+        /// </summary>
+        [HarmonyFinalizer]
+        public static void Finalizer()
+        {
+            IsInSelectOperation = false;
+        }
+
+        /// <summary>
         /// Postfix patch that intercepts designator selection and routes placement
         /// designators through the accessible system.
         /// </summary>
@@ -28,6 +97,9 @@ namespace RimWorldAccess
         [HarmonyPostfix]
         public static void Postfix(Designator des)
         {
+            // Clear the flag now that Select() is complete
+            IsInSelectOperation = false;
+
             // Skip if ShapePlacementState is already active
             if (ShapePlacementState.IsActive)
             {

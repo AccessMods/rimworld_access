@@ -104,8 +104,12 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Whether we're currently in placement mode on the map.
+        /// Defensive check: also verifies a designator is actually selected in the game.
+        /// This prevents stale state if the designator was deselected externally.
         /// </summary>
-        public static bool IsInPlacementMode => currentMode == ArchitectMode.PlacementMode;
+        public static bool IsInPlacementMode =>
+            currentMode == ArchitectMode.PlacementMode &&
+            Find.DesignatorManager?.SelectedDesignator != null;
 
         /// <summary>
         /// Gets the current selection mode (BoxSelection or SingleTile).
@@ -573,9 +577,18 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Resets the architect state completely.
+        /// Idempotent: safe to call multiple times, early exits if already inactive.
         /// </summary>
         public static void Reset()
         {
+            // Early exit if already inactive - prevents redundant work and logging
+            if (currentMode == ArchitectMode.Inactive)
+            {
+                return;
+            }
+
+            // Set mode to Inactive FIRST before calling Deselect()
+            // This prevents infinite loops with DesignatorManagerDeselectPatch
             currentMode = ArchitectMode.Inactive;
             selectedCategory = null;
             selectedDesignator = null;

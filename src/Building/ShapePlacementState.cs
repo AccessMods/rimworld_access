@@ -109,8 +109,12 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Whether shape placement is currently active.
+        /// Defensive check: also verifies a designator is actually selected in the game.
+        /// This prevents stale state if the designator was deselected externally.
         /// </summary>
-        public static bool IsActive => currentPhase != PlacementPhase.Inactive;
+        public static bool IsActive =>
+            currentPhase != PlacementPhase.Inactive &&
+            Find.DesignatorManager?.SelectedDesignator != null;
 
         /// <summary>
         /// The current phase of the placement workflow.
@@ -750,9 +754,18 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Resets all state variables to their initial values.
+        /// Idempotent: safe to call multiple times, early exits if already inactive.
         /// </summary>
         public static void Reset()
         {
+            // Early exit if already inactive - prevents redundant work and logging
+            if (currentPhase == PlacementPhase.Inactive)
+            {
+                return;
+            }
+
+            // Set phase to Inactive FIRST before any other cleanup
+            // This prevents infinite loops with DesignatorManagerDeselectPatch
             currentPhase = PlacementPhase.Inactive;
             currentShape = ShapeType.Manual;
             previewHelper.FullReset();

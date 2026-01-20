@@ -237,6 +237,21 @@ namespace RimWorldAccess
                 // Let arrow keys pass through for world navigation
             }
 
+            // ===== DEFENSIVE STATE CLEANUP =====
+            // If placement state has stale internal values but no designator is selected,
+            // clean up the state. This is belt-and-suspenders with the defensive IsActive properties.
+            if (ShapePlacementState.CurrentPhase != PlacementPhase.Inactive ||
+                ArchitectState.CurrentMode == ArchitectMode.PlacementMode)
+            {
+                if (Find.DesignatorManager?.SelectedDesignator == null)
+                {
+                    Log.Message("[UnifiedKeyboardPatch] Detected stale placement state, cleaning up");
+                    ShapePlacementState.Reset();
+                    ArchitectState.Reset();
+                    // State was stale, cleaned up - continue with normal flow
+                }
+            }
+
             // ===== PRIORITY 0.17: Shape Selection Menu =====
             if (ShapeSelectionMenuState.IsActive)
             {
