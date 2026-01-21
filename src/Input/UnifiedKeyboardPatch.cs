@@ -107,6 +107,61 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY -0.2: Scanner search text input =====
+            // Must run before all other handlers to capture letter keys that would otherwise
+            // be intercepted by route planner (R), notifications (L), settlement browser (S), etc.
+            if (ScannerSearchState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Enter: confirm search
+                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    ScannerSearchState.ConfirmSearch();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Escape: cancel search
+                if (key == KeyCode.Escape)
+                {
+                    ScannerSearchState.CancelSearch();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Backspace: delete last character
+                if (key == KeyCode.Backspace)
+                {
+                    ScannerSearchState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Letter keys (A-Z): add to search buffer
+                if (key >= KeyCode.A && key <= KeyCode.Z && !ctrl && !alt)
+                {
+                    char c = shift ? (char)('A' + (key - KeyCode.A)) : (char)('a' + (key - KeyCode.A));
+                    ScannerSearchState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9): add to search buffer
+                if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Alpha0));
+                    ScannerSearchState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Space/PageUp/PageDown/Home/End/Arrow keys: let pass through to game
+                // Space is needed for placing designators while search is active
+            }
+
             // ===== PRIORITY -0.25: Handle Info Card dialog if active =====
             // Info Card is a modal dialog that should take precedence over most other handlers
             if (InfoCardState.IsActive)
@@ -2331,6 +2386,7 @@ namespace RimWorldAccess
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
                 {
                     // Z key activates search (no modifiers) when search is not active
+                    // Text input when search IS active is handled by the early handler at priority -0.2
                     if (key == KeyCode.Z && !shift && !ctrl && !alt && !ScannerSearchState.IsActive)
                     {
                         ScannerSearchState.Activate(onWorldMap);
@@ -2338,50 +2394,6 @@ namespace RimWorldAccess
                         Event.current.keyCode = KeyCode.None;
                         Event.current.Use();
                         return;
-                    }
-
-                    // When search is active, capture letter keys
-                    if (ScannerSearchState.IsActive)
-                    {
-                        // Letter keys (A-Z) go to search
-                        if (key >= KeyCode.A && key <= KeyCode.Z && !shift && !ctrl && !alt)
-                        {
-                            char c = (char)('a' + (key - KeyCode.A));
-                            ScannerSearchState.HandleCharacter(c);
-                            // Block RimWorld's keybinding system from seeing this key
-                            Event.current.keyCode = KeyCode.None;
-                            Event.current.Use();
-                            return;
-                        }
-
-                        // Backspace removes last character
-                        if (key == KeyCode.Backspace && !shift && !ctrl && !alt)
-                        {
-                            ScannerSearchState.HandleBackspace();
-                            Event.current.keyCode = KeyCode.None;
-                            Event.current.Use();
-                            return;
-                        }
-
-                        // Enter confirms search (keeps filter active)
-                        if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt)
-                        {
-                            ScannerSearchState.ConfirmSearch();
-                            Event.current.keyCode = KeyCode.None;
-                            Event.current.Use();
-                            return;
-                        }
-
-                        // Escape cancels search (reverts to previous state)
-                        if (key == KeyCode.Escape && !shift && !ctrl && !alt)
-                        {
-                            ScannerSearchState.CancelSearch();
-                            Event.current.keyCode = KeyCode.None;
-                            Event.current.Use();
-                            return;
-                        }
-
-                        // All other keys (Space, arrows, PageUp/Down, Home, End) pass through to scanner/navigation
                     }
                 }
             }
@@ -3220,6 +3232,30 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.56: Toggle forbid status on items at cursor with F key =====
+            if (key == KeyCode.F && !Event.current.shift && !Event.current.control && !Event.current.alt)
+            {
+                // Only toggle forbid if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. A valid map with initialized navigation
+                // 3. No windows are preventing camera motion (means a dialog is open)
+                // 4. Not in zone creation mode
+                // 5. No accessibility menu is active (they use letter keys for typeahead)
+                // 6. Scanner search is not active (uses letter keys for filtering)
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    MapNavigationState.IsInitialized &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive() &&
+                    !ScannerSearchState.IsActive)
+                {
+                    ToggleForbidAtCursor();
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 6.55: Open work menu with F1 key =====
             if (key == KeyCode.F1)
             {
@@ -3882,6 +3918,72 @@ namespace RimWorldAccess
 
             Log.Message($"Unforbid all: {unforbiddenCount} items unforbidden");
         }
+
+        #region Forbid Toggle at Cursor
+
+        private static float lastForbidToggleTime = 0f;
+        private const float ForbidToggleCooldown = 0.3f;
+
+        /// <summary>
+        /// Toggles forbid/unforbid on items at the current cursor position.
+        /// </summary>
+        private static void ToggleForbidAtCursor()
+        {
+            // Cooldown to prevent accidental double-presses
+            if (Time.time - lastForbidToggleTime < ForbidToggleCooldown)
+                return;
+            lastForbidToggleTime = Time.time;
+
+            IntVec3 position = MapNavigationState.CurrentCursorPosition;
+            Map map = Find.CurrentMap;
+
+            List<Thing> allThings = position.GetThingList(map);
+            List<Thing> forbiddableItems = new List<Thing>();
+
+            foreach (Thing thing in allThings)
+            {
+                CompForbiddable forbiddable = thing.TryGetComp<CompForbiddable>();
+                if (forbiddable != null)
+                {
+                    forbiddableItems.Add(thing);
+                }
+            }
+
+            if (forbiddableItems.Count == 0)
+            {
+                TolkHelper.Speak("Nothing to forbid or unforbid at this location");
+                return;
+            }
+
+            // Determine if we should forbid or unforbid
+            // If any item is unforbidden, forbid all. If all are forbidden, unforbid all.
+            bool shouldForbid = forbiddableItems.Any(t => !t.TryGetComp<CompForbiddable>().Forbidden);
+
+            int toggledCount = 0;
+            string firstItemName = null;
+
+            foreach (Thing item in forbiddableItems)
+            {
+                if (firstItemName == null)
+                    firstItemName = item.LabelShort;
+                item.SetForbidden(shouldForbid, warnOnFail: false);
+                toggledCount++;
+            }
+
+            string announcement;
+            if (toggledCount == 1)
+            {
+                announcement = shouldForbid ? $"{firstItemName} forbidden" : $"{firstItemName} no longer forbidden";
+            }
+            else
+            {
+                announcement = shouldForbid ? $"{toggledCount} items forbidden" : $"{toggledCount} items no longer forbidden";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        #endregion
 
 }
 }
