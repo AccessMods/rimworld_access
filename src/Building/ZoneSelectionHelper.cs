@@ -198,18 +198,18 @@ namespace RimWorldAccess
         /// </summary>
         /// <param name="designator">The active zone designator</param>
         /// <param name="cursorPosition">Current cursor position</param>
-        /// <returns>Announcement string like "will expand Stockpile 1" or "will create new"</returns>
+        /// <returns>Announcement string like "will expand existing zone." or "will create new zone."</returns>
         public static string GetZoneModeAnnouncement(Designator designator, IntVec3 cursorPosition)
         {
             ZoneSelectionResult preview = PreviewZoneAtCell(designator, cursorPosition);
 
             if (preview.IsExpansion && preview.TargetZone != null)
             {
-                return $"will expand {preview.TargetZone.label}";
+                return "will expand existing zone.";
             }
             else
             {
-                return "will create new";
+                return "will create new zone.";
             }
         }
     }
