@@ -378,6 +378,15 @@ namespace RimWorldAccess
         private static Dictionary<string, List<RoadSegment>> cachedRoadSegments = null;
         private static PlanetTile lastCacheOrigin = PlanetTile.Invalid;
 
+        // Saved focus state for temporary category operations
+        private static int savedCategoryIndex = -1;
+        private static int savedSubcategoryIndex = -1;
+        private static int savedItemIndex = -1;
+        private static int savedInstanceIndex = -1;
+
+        // Temporary category tracking
+        private static WorldScannerCategory temporaryCategory = null;
+
         /// <summary>
         /// Toggles auto-jump mode on/off.
         /// </summary>
@@ -386,6 +395,91 @@ namespace RimWorldAccess
             autoJumpMode = !autoJumpMode;
             string status = autoJumpMode ? "enabled" : "disabled";
             TolkHelper.Speak($"Auto-jump mode {status}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Saves the current scanner focus state for later restoration.
+        /// Used when temporarily switching to a search category.
+        /// </summary>
+        public static void SaveFocus()
+        {
+            savedCategoryIndex = currentCategoryIndex;
+            savedSubcategoryIndex = currentSubcategoryIndex;
+            savedItemIndex = currentItemIndex;
+            savedInstanceIndex = currentInstanceIndex;
+        }
+
+        /// <summary>
+        /// Restores the previously saved scanner focus state.
+        /// Call this after removing a temporary category to return to the previous position.
+        /// </summary>
+        public static void RestoreFocus()
+        {
+            if (savedCategoryIndex >= 0)
+            {
+                currentCategoryIndex = savedCategoryIndex;
+                currentSubcategoryIndex = savedSubcategoryIndex;
+                currentItemIndex = savedItemIndex;
+                currentInstanceIndex = savedInstanceIndex;
+
+                // Reset saved state
+                savedCategoryIndex = -1;
+                savedSubcategoryIndex = -1;
+                savedItemIndex = -1;
+                savedInstanceIndex = -1;
+
+                // Validate indices in case the category list changed
+                ValidateIndices();
+            }
+        }
+
+        /// <summary>
+        /// Creates a temporary category with the given name and items, and selects it.
+        /// Only one temporary category can exist at a time.
+        /// </summary>
+        /// <param name="name">The name for the temporary category</param>
+        /// <param name="items">The items to include in the category</param>
+        public static void CreateTemporaryCategory(string name, List<WorldScannerItem> items)
+        {
+            // Remove any existing temporary category first
+            RemoveTemporaryCategory();
+
+            // Create the new temporary category with a single subcategory
+            temporaryCategory = new WorldScannerCategory(name);
+            var subcategory = new WorldScannerSubcategory($"{name}-All");
+            subcategory.Items.AddRange(items);
+            temporaryCategory.Subcategories.Add(subcategory);
+
+            // Add to the categories list
+            categories.Add(temporaryCategory);
+
+            // Select the temporary category
+            currentCategoryIndex = categories.Count - 1;
+            currentSubcategoryIndex = 0;
+            currentItemIndex = 0;
+            currentInstanceIndex = 0;
+        }
+
+        /// <summary>
+        /// Removes the temporary category if one exists.
+        /// Call RestoreFocus() after this to return to the previous scanner position.
+        /// </summary>
+        public static void RemoveTemporaryCategory()
+        {
+            if (temporaryCategory != null)
+            {
+                categories.Remove(temporaryCategory);
+                temporaryCategory = null;
+            }
+        }
+
+        /// <summary>
+        /// Checks if the scanner is currently focused on a temporary category.
+        /// </summary>
+        public static bool IsInTemporaryCategory()
+        {
+            return temporaryCategory != null && currentCategoryIndex >= 0 && currentCategoryIndex < categories.Count &&
+                   categories[currentCategoryIndex] == temporaryCategory;
         }
 
         /// <summary>
@@ -1688,6 +1782,14 @@ namespace RimWorldAccess
             cachedBiomeRegions = null;
             cachedRoadSegments = null;
             lastCacheOrigin = PlanetTile.Invalid;
+            temporaryCategory = null;
+            savedCategoryIndex = -1;
+            savedSubcategoryIndex = -1;
+            savedItemIndex = -1;
+            savedInstanceIndex = -1;
+
+            // Clear any active search
+            ScannerSearchState.ClearSearchSilent();
         }
     }
 }

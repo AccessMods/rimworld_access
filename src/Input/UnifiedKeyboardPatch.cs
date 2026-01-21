@@ -2306,6 +2306,86 @@ namespace RimWorldAccess
                 return;
             }
 
+            // ===== PRIORITY 4.745: Handle scanner search (Z key activates, letters go to buffer) =====
+            // Z key activates search; when search is active, letter keys filter items
+            // Works during placement mode (architect build or designator from gizmos)
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                bool onWorldMap = WorldNavigationState.IsActive;
+                bool onMap = MapNavigationState.IsInitialized && !onWorldMap;
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Check placement mode (search should work during placement)
+                bool inPlacementMode = ArchitectState.IsInPlacementMode ||
+                    ViewingModeState.IsActive ||
+                    ShapePlacementState.IsActive ||
+                    (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null);
+
+                // Determine if search should be allowed
+                // Allow search when: on map/world AND (no blocking menus OR in placement mode)
+                bool menuBlocksSearch = KeyboardHelper.IsAnyAccessibilityMenuActive() && !inPlacementMode;
+
+                if ((onMap || onWorldMap) && !menuBlocksSearch &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
+                {
+                    // Z key activates search (no modifiers) when search is not active
+                    if (key == KeyCode.Z && !shift && !ctrl && !alt && !ScannerSearchState.IsActive)
+                    {
+                        ScannerSearchState.Activate(onWorldMap);
+                        // Block RimWorld's keybinding system from seeing this key
+                        Event.current.keyCode = KeyCode.None;
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // When search is active, capture letter keys
+                    if (ScannerSearchState.IsActive)
+                    {
+                        // Letter keys (A-Z) go to search
+                        if (key >= KeyCode.A && key <= KeyCode.Z && !shift && !ctrl && !alt)
+                        {
+                            char c = (char)('a' + (key - KeyCode.A));
+                            ScannerSearchState.HandleCharacter(c);
+                            // Block RimWorld's keybinding system from seeing this key
+                            Event.current.keyCode = KeyCode.None;
+                            Event.current.Use();
+                            return;
+                        }
+
+                        // Backspace removes last character
+                        if (key == KeyCode.Backspace && !shift && !ctrl && !alt)
+                        {
+                            ScannerSearchState.HandleBackspace();
+                            Event.current.keyCode = KeyCode.None;
+                            Event.current.Use();
+                            return;
+                        }
+
+                        // Enter confirms search (keeps filter active)
+                        if ((key == KeyCode.Return || key == KeyCode.KeypadEnter) && !shift && !ctrl && !alt)
+                        {
+                            ScannerSearchState.ConfirmSearch();
+                            Event.current.keyCode = KeyCode.None;
+                            Event.current.Use();
+                            return;
+                        }
+
+                        // Escape cancels search (reverts to previous state)
+                        if (key == KeyCode.Escape && !shift && !ctrl && !alt)
+                        {
+                            ScannerSearchState.CancelSearch();
+                            Event.current.keyCode = KeyCode.None;
+                            Event.current.Use();
+                            return;
+                        }
+
+                        // All other keys (Space, arrows, PageUp/Down, Home, End) pass through to scanner/navigation
+                    }
+                }
+            }
+
             // ===== PRIORITY 4.75: Handle scanner keys (always available during map navigation) =====
             // Only process scanner keys if in gameplay with map navigation initialized
             // IMPORTANT: Don't process scanner keys when any accessibility menu is active,

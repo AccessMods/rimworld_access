@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using RimWorld;
 using UnityEngine;
@@ -158,12 +159,21 @@ namespace RimWorldAccess
             currentSubcategoryIndex = 0;
             currentItemIndex = 0;
             currentBulkIndex = 0;
+
+            // Also clear saved focus since it's no longer valid
+            savedCategoryIndex = -1;
+            savedSubcategoryIndex = -1;
+            savedItemIndex = -1;
+            savedBulkIndex = -1;
+
+            // Clear any active search
+            ScannerSearchState.ClearSearchSilent();
         }
 
         /// <summary>
         /// Refreshes the scanner item list based on current cursor position.
         /// Called automatically by navigation methods.
-        /// Preserves any temporary category that may be active.
+        /// If there's an active search filter, updates the filter with fresh items.
         /// </summary>
         private static void RefreshItems()
         {
@@ -180,11 +190,69 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Save temporary category before refresh
+            var cursorPos = MapNavigationState.CurrentCursorPosition;
+
+            // Check if there's an active search filter that needs refreshing
+            if (ScannerSearchState.HasActiveFilter)
+            {
+                // Remember if user was in the filter category before refresh
+                bool wasInFilterCategory = IsInTemporaryCategory();
+                int previousItemIndex = currentItemIndex;
+
+                // Get fresh filtered items
+                var filteredItems = ScannerSearchState.RefreshMapFilter(map, cursorPos);
+                if (filteredItems != null)
+                {
+                    // Collect regular items first
+                    categories = ScannerHelper.CollectMapItems(map, cursorPos);
+
+                    // Update the temporary category with fresh filtered items
+                    if (filteredItems.Count > 0)
+                    {
+                        temporaryCategory = new ScannerCategory(ScannerSearchState.GetFilterCategoryName());
+                        var subcategory = new ScannerSubcategory($"{ScannerSearchState.GetFilterCategoryName()}-All");
+                        subcategory.Items.AddRange(filteredItems);
+                        temporaryCategory.Subcategories.Add(subcategory);
+                        categories.Add(temporaryCategory);
+
+                        // If user was in filter category, keep them there
+                        if (wasInFilterCategory)
+                        {
+                            currentCategoryIndex = categories.Count - 1; // Temp category is at end
+                            currentSubcategoryIndex = 0;
+                            // Try to preserve item index, clamping to valid range
+                            currentItemIndex = Math.Min(previousItemIndex, filteredItems.Count - 1);
+                            currentBulkIndex = 0;
+                        }
+                    }
+                    else
+                    {
+                        // No matches - remove temporary category
+                        temporaryCategory = null;
+
+                        // If user was in filter category, restore their previous focus
+                        if (wasInFilterCategory)
+                        {
+                            RestoreFocus();
+                        }
+                    }
+
+                    if (categories.Count == 0)
+                    {
+                        TolkHelper.Speak("No items found on map", SpeechPriority.High);
+                        return;
+                    }
+
+                    ValidateIndices();
+                    return;
+                }
+            }
+
+            // No active filter - standard refresh
+            // Save temporary category before refresh (for non-filter temporary categories)
             var savedTemporaryCategory = temporaryCategory;
 
             // Collect items
-            var cursorPos = MapNavigationState.CurrentCursorPosition;
             categories = ScannerHelper.CollectMapItems(map, cursorPos);
 
             // Re-add temporary category if it existed
