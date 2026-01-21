@@ -886,6 +886,55 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets location context for a position (zone/named storage, or room).
+        /// Used by scanner announcements for mobile entities (pawns, animals).
+        /// </summary>
+        /// <param name="position">The position to check</param>
+        /// <param name="map">The map to check on</param>
+        /// <returns>Location context string like "(in Stockpile zone 1)" or null if no meaningful location</returns>
+        public static string GetLocationContext(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Priority 1: Check for zone OR named storage (mutually exclusive - can't have both)
+            // RimWorld enforces that ISlotGroupParent things (shelves) and zones cannot overlap
+            Zone zone = position.GetZone(map);
+            if (zone != null)
+            {
+                return $"(in {zone.label})";
+            }
+
+            // Check for named storage group (shelves, etc.) - only if no zone (mutually exclusive)
+            List<Thing> things = position.GetThingList(map);
+            foreach (var thing in things)
+            {
+                if (thing is IStorageGroupMember storage && storage.Group != null)
+                {
+                    string groupName = storage.Group.RenamableLabel;
+                    if (!string.IsNullOrEmpty(groupName))
+                    {
+                        return $"(at {groupName})";
+                    }
+                }
+            }
+
+            // Priority 2: Check for indoor room with a meaningful role
+            Room room = position.GetRoom(map);
+            if (room != null && room.ProperRoom && !room.PsychologicallyOutdoors)
+            {
+                string roomLabel = room.GetRoomRoleLabel();
+                if (!string.IsNullOrEmpty(roomLabel))
+                {
+                    return $"(in {roomLabel})";
+                }
+            }
+
+            // No meaningful location context
+            return null;
+        }
+
+        /// <summary>
         /// Gets information about designations/orders at a tile.
         /// Returns a comma-separated list of active designations.
         /// </summary>

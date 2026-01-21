@@ -921,6 +921,16 @@ namespace RimWorldAccess
                 basicAnnouncement = $"{item.Label}, here";
             }
 
+            // Add location context for pawns (colonists, NPCs, animals)
+            if (item.Thing is Pawn)
+            {
+                string locationContext = TileInfoHelper.GetLocationContext(targetPos, Find.CurrentMap);
+                if (!string.IsNullOrEmpty(locationContext))
+                {
+                    basicAnnouncement += $" {locationContext}";
+                }
+            }
+
             // Add bulk count if this is a grouped item
             if (item.IsBulkGroup)
             {
