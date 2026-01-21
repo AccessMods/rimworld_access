@@ -181,14 +181,19 @@ namespace RimWorldAccess
         /// <summary>
         /// Handles Tab key input for shape selection.
         /// Tab opens shape selection menu, Shift+Tab switches to manual mode.
+        /// Works for designators selected via architect menu OR via gizmos (e.g., zone expand/shrink).
         /// </summary>
         /// <returns>True if the key was handled, false otherwise.</returns>
         private static bool HandleTabKey(Designator activeDesignator, bool shiftHeld, bool supportsShapes, bool inArchitectMode, List<ShapeType> availableShapes)
         {
+            // Allow shape selection when we have an active designator that supports shapes,
+            // whether it was selected via architect menu (inArchitectMode) or via gizmo (activeDesignator != null)
+            bool canUseShapes = supportsShapes && activeDesignator != null;
+
             // Tab key - open shape selection menu (for any designator that supports shapes)
             if (!shiftHeld)
             {
-                if (supportsShapes && inArchitectMode)
+                if (canUseShapes)
                 {
                     // Block Tab if placement is in progress with points set
                     // User must press Escape to clear selection first
@@ -225,7 +230,7 @@ namespace RimWorldAccess
                 }
             }
             // Shift+Tab - quick switch to Manual mode (for any designator with shapes)
-            else if (supportsShapes && inArchitectMode)
+            else if (canUseShapes)
             {
                 // Block Shift+Tab if placement is in progress with points set
                 // User must press Escape to clear selection first
@@ -235,10 +240,17 @@ namespace RimWorldAccess
                     return true;
                 }
 
+                // Check if already in manual mode
+                if (ShapePlacementState.IsActive && ShapePlacementState.CurrentShape == ShapeType.Manual)
+                {
+                    TolkHelper.Speak("Already in manual mode.");
+                    return true;
+                }
+
                 // Reset to manual mode and cancel any shape in progress
                 if (ShapePlacementState.IsActive)
                 {
-                    ShapePlacementState.Cancel();
+                    ShapePlacementState.Reset(); // Use Reset instead of Cancel to avoid announcement
                 }
                 ShapePlacementState.Enter(activeDesignator, ShapeType.Manual);
                 return true;
@@ -403,10 +415,22 @@ namespace RimWorldAccess
                     }
                 }
                 // For zone designators
-                else if (isZoneDesignator && inArchitectMode)
+                else if (isZoneDesignator)
                 {
-                    // Toggle cell in the selection list
-                    ArchitectState.ToggleCell(currentPosition);
+                    if (inArchitectMode)
+                    {
+                        // Toggle cell in the selection list (architect menu mode)
+                        ArchitectState.ToggleCell(currentPosition);
+                    }
+                    else
+                    {
+                        // Gizmo mode (e.g., expand/shrink from zone gizmo)
+                        // Use GizmoZoneEditState for proper zone cell toggling with
+                        // connectivity checks, adjacency enforcement, and state tracking
+                        // (same behavior as viewing mode's Space key)
+                        GizmoZoneEditState.EnsureInitialized(activeDesignator);
+                        GizmoZoneEditState.ToggleZoneCellAtCursor();
+                    }
                 }
                 // For orders (Hunt, Haul, etc.) and cells designators (Mine)
                 else if ((isOrderDesignator || isCellsDesignator) && inArchitectMode)
@@ -513,6 +537,25 @@ namespace RimWorldAccess
                 {
                     ShapePlacementState.Reset();
                 }
+                return true;
+            }
+            // For zone designators in gizmo mode (not architect mode) - confirm and exit
+            else if (isZoneDesignator && !inArchitectMode)
+            {
+                // In gizmo mode, changes are applied immediately via GizmoZoneEditState
+                // Enter just confirms and exits editing mode
+                TolkHelper.Speak("Zone editing completed");
+
+                // Reset states
+                if (ShapePlacementState.IsActive)
+                {
+                    ShapePlacementState.Reset();
+                }
+                if (GizmoZoneEditState.IsActive)
+                {
+                    GizmoZoneEditState.Reset();
+                }
+                Find.DesignatorManager.Deselect();
                 return true;
             }
             // For orders and cells designators in architect mode (not in shape mode)

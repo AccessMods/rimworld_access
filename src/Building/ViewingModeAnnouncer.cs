@@ -35,6 +35,7 @@ namespace RimWorldAccess
         /// <param name="detectedRegionCount">Number of disconnected regions detected</param>
         /// <param name="detectedEnclosures">List of detected enclosures</param>
         /// <param name="placedCells">List of all placed cells (for zone size calculation)</param>
+        /// <param name="lastSegmentCells">List of cells from the most recent segment only (for expansion announcements)</param>
         /// <param name="placedBlueprints">List of all placed blueprints</param>
         /// <param name="wasZoneExpansion">Whether this was an expansion of existing zone</param>
         /// <param name="targetZone">The target zone being edited (if any)</param>
@@ -54,6 +55,7 @@ namespace RimWorldAccess
             int detectedRegionCount,
             List<Enclosure> detectedEnclosures,
             List<IntVec3> placedCells,
+            List<IntVec3> lastSegmentCells,
             List<Thing> placedBlueprints,
             bool wasZoneExpansion,
             Zone targetZone,
@@ -65,9 +67,18 @@ namespace RimWorldAccess
 
             if (isOrderDesignator)
             {
-                // Build order-specific announcement with target summary
-                string summary = BuildOrderTargetSummary(designator, orderTargets, orderTargetCells);
+                // Build order-specific announcement with clear shape and target info
+                // Format: "Hunt order in 7 by 4 area, targeting 2 deer, 1 fox"
+                string targetSummary = BuildOrderTargetList(designator, orderTargets, orderTargetCells);
                 int targetCount = orderTargets.Count + orderTargetCells.Count;
+                string designatorLabel = designator?.Label ?? "Order";
+
+                // Use shape-aware formatting for the cells (dimensions when possible)
+                string shapeSize = "";
+                if (placedCells != null && placedCells.Count > 0)
+                {
+                    shapeSize = ShapeHelper.FormatShapeSize(placedCells);
+                }
 
                 var hints = new List<string>();
                 if (targetCount > 0)
@@ -79,43 +90,59 @@ namespace RimWorldAccess
                 hints.Add("Enter to confirm");
                 string hintsStr = string.Join(", ", hints);
 
-                if (!string.IsNullOrEmpty(summary))
+                // Build the announcement with clear structure
+                string mainPart;
+                if (!string.IsNullOrEmpty(shapeSize) && !string.IsNullOrEmpty(targetSummary))
                 {
-                    return $"Viewing mode. {summary}{segmentInfo}. {hintsStr}.";
+                    // "Hunt order on 7 by 4, targeting 2 deer and 1 fox"
+                    mainPart = $"{designatorLabel} order on {shapeSize}, targeting {targetSummary}";
+                }
+                else if (!string.IsNullOrEmpty(targetSummary))
+                {
+                    // No shape info, just targets: "Hunt order targeting 2 deer and 1 fox"
+                    mainPart = $"{designatorLabel} order targeting {targetSummary}";
+                }
+                else if (!string.IsNullOrEmpty(shapeSize))
+                {
+                    // Shape but no targets: "Hunt order on 7 by 4"
+                    mainPart = $"{designatorLabel} order on {shapeSize}";
                 }
                 else
                 {
-                    return $"Viewing mode. {totalPlaced} designations{segmentInfo}. {hintsStr}.";
+                    // Fallback
+                    mainPart = $"{totalPlaced} {designatorLabel} designations";
                 }
+
+                return $"Viewing mode. {mainPart}{segmentInfo}. {hintsStr}.";
             }
             else if (isZoneDesignator)
             {
                 // Build zone-specific announcement with obstacle info and split warning
                 return BuildZoneDesignatorAnnouncement(
                     designator, totalPlaced, segmentInfo, isDeleteDesignator,
-                    obstacleCells, detectedRegionCount, placedCells, wasZoneExpansion,
-                    targetZone, createdZones);
+                    obstacleCells, detectedRegionCount, placedCells, lastSegmentCells,
+                    wasZoneExpansion, targetZone, createdZones);
             }
             else
             {
                 // Build announcement for build designators with smooth flowing sentences
                 return BuildBuildDesignatorAnnouncement(
                     designator, totalPlaced, segmentInfo, isBuildDesignator,
-                    obstacleCells, detectedEnclosures, placedBlueprints);
+                    obstacleCells, detectedEnclosures, placedBlueprints, placedCells);
             }
         }
 
         /// <summary>
-        /// Builds a summary of order targets grouped by type.
-        /// Examples: "Now hunting: 1 tiger, 2 lions" or "Mining: 12 compacted steel, 5 jade"
+        /// Builds a list of order targets grouped by type, without the designator prefix.
+        /// Uses 1% threshold to group small categories under "and N others".
+        /// Examples: "2 deer, 1 fox" or "12 compacted steel, 5 jade, and 3 more items in 2 smaller groups"
         /// </summary>
         /// <param name="designator">The order designator</param>
         /// <param name="orderTargets">List of things designated</param>
         /// <param name="orderTargetCells">List of cells designated</param>
-        /// <returns>The summary string</returns>
-        public static string BuildOrderTargetSummary(Designator designator, List<Thing> orderTargets, List<IntVec3> orderTargetCells)
+        /// <returns>The target list string (without designator label)</returns>
+        public static string BuildOrderTargetList(Designator designator, List<Thing> orderTargets, List<IntVec3> orderTargetCells)
         {
-            string designatorLabel = designator?.Label ?? "Order";
             Map map = Find.CurrentMap;
 
             // Count things by kind/def
@@ -186,13 +213,38 @@ namespace RimWorldAccess
                 }
             }
 
-            string result = $"{designatorLabel}: {string.Join(", ", significantParts)}";
+            // Format list with "and" before last item: "3 oak trees, 2 poplar trees, and 1 birch tree"
+            string result;
+            if (significantParts.Count == 0)
+            {
+                result = "";
+            }
+            else if (significantParts.Count == 1)
+            {
+                result = significantParts[0];
+            }
+            else if (significantParts.Count == 2)
+            {
+                result = $"{significantParts[0]} and {significantParts[1]}";
+            }
+            else
+            {
+                result = string.Join(", ", significantParts.Take(significantParts.Count - 1))
+                    + ", and " + significantParts[significantParts.Count - 1];
+            }
 
             if (smallGroupCount > 0)
             {
                 string itemWord = smallGroupItems == 1 ? "item" : "items";
                 string groupWord = smallGroupCount == 1 ? "group" : "groups";
-                result += $", and {smallGroupItems} more {itemWord} in {smallGroupCount} smaller {groupWord}";
+                if (significantParts.Count > 0)
+                {
+                    result += $", and {smallGroupItems} more {itemWord} in {smallGroupCount} smaller {groupWord}";
+                }
+                else
+                {
+                    result = $"{smallGroupItems} {itemWord} in {smallGroupCount} {groupWord}";
+                }
             }
 
             return result;
@@ -208,7 +260,7 @@ namespace RimWorldAccess
         /// Uses dimensions instead of cell counts for clarity.
         /// Examples:
         /// - "50 by 12 stockpile zone created." (new zone)
-        /// - "50 by 12 stockpile zone expanded." (adding to existing zone)
+        /// - "4 by 3 stockpile zone expanded." (adding to existing zone - uses last segment size)
         /// - "50 by 12 stockpile zone created, 11 cells blocked by sandstones." (contiguous - no split warning)
         /// - "50 by 12 stockpile zone created, 11 cells blocked by 3 walls. Warning: This will create 3 separate zones."
         /// For delete/shrink: "Removed 50 cells from zone."
@@ -221,6 +273,7 @@ namespace RimWorldAccess
             List<IntVec3> obstacleCells,
             int detectedRegionCount,
             List<IntVec3> placedCells,
+            List<IntVec3> lastSegmentCells,
             bool wasZoneExpansion,
             Zone targetZone,
             HashSet<Zone> createdZones)
@@ -231,10 +284,15 @@ namespace RimWorldAccess
             if (isDeleteDesignator)
             {
                 // For shrink, we're removing cells, not creating zones
+                // Use shape-aware formatting (dimensions when possible)
                 if (totalPlaced > 0)
                 {
-                    string cellWord = totalPlaced == 1 ? "cell" : "cells";
-                    parts.Add($"Removed {totalPlaced} {cellWord} from zone{segmentInfo}");
+                    // Use lastSegmentCells for the most recent removal, fall back to placedCells
+                    var cellsForSize = lastSegmentCells != null && lastSegmentCells.Count > 0
+                        ? lastSegmentCells
+                        : placedCells;
+                    string sizeString = ShapeHelper.FormatShapeSize(cellsForSize);
+                    parts.Add($"Removed {sizeString} from zone{segmentInfo}");
                 }
                 else
                 {
@@ -291,8 +349,12 @@ namespace RimWorldAccess
                 }
                 else if (wasZoneExpansion)
                 {
-                    // Single zone expansion
-                    string sizeString = ShapeHelper.FormatShapeSize(placedCells);
+                    // Single zone expansion - use lastSegmentCells to announce only the newly added shape
+                    // (not all cells from all segments combined)
+                    var cellsForSize = lastSegmentCells != null && lastSegmentCells.Count > 0
+                        ? lastSegmentCells
+                        : placedCells;
+                    string sizeString = ShapeHelper.FormatShapeSize(cellsForSize);
                     parts.Add($"{zoneName} zone expanded by {sizeString}{blockedPart}{segmentInfo}");
                 }
                 else
@@ -501,8 +563,8 @@ namespace RimWorldAccess
         /// Builds the announcement specifically for build designators.
         /// Produces smooth flowing sentences combining placement, obstacles, and enclosure info.
         /// Examples:
-        /// - "Placed 28 wooden walls (140 wood). 7 by 9 enclosure formed containing 2 poplar trees, 1 cougar (dead), and 1 limestone chunk, but has 1 gap."
-        /// - "Placed 24 of 28 wooden walls (120 wood). 4 walls blocked by 2 compacted steel and 2 granite boulders."
+        /// - "Placed 7 by 4 wooden walls (140 wood). 7 by 9 enclosure formed containing 2 poplar trees, 1 cougar (dead), and 1 limestone chunk, but has 1 gap."
+        /// - "Placed 6 by 4 of 28 wooden walls (120 wood). 4 walls blocked by 2 compacted steel and 2 granite boulders."
         /// </summary>
         public static string BuildBuildDesignatorAnnouncement(
             Designator designator,
@@ -511,7 +573,8 @@ namespace RimWorldAccess
             bool isBuildDesignator,
             List<IntVec3> obstacleCells,
             List<Enclosure> detectedEnclosures,
-            List<Thing> placedBlueprints)
+            List<Thing> placedBlueprints,
+            List<IntVec3> placedCells)
         {
             var parts = new List<string>();
 
@@ -526,11 +589,16 @@ namespace RimWorldAccess
             // Get blocking obstacle summary
             string blockingObstacleSummary = GetBlockingObstacleSummary(obstacleCells);
 
+            // Get shape-aware size string for placed cells (e.g., "7 by 4" instead of "28")
+            string placedSizeStr = placedCells != null && placedCells.Count > 0
+                ? ShapeHelper.FormatShapeSize(placedCells)
+                : totalPlaced.ToString();
+
             // Build the main placement sentence
             if (obstacleCells.Count > 0 && totalPlaced > 0)
             {
-                // "Placed X of Y wooden walls (cost), Z blocked by [obstacle list]."
-                // Combined into one sentence for conciseness
+                // "Placed 7 by 4 of 28 wooden walls (cost), Z blocked by [obstacle list]."
+                // Uses shape dimensions for placed count, total count for intended
                 string pluralLabel = totalPlaced > 1
                     ? ArchitectHelper.PluralizePreservingParentheses(designatorLabel, totalPlaced)
                     : designatorLabel;
@@ -545,17 +613,17 @@ namespace RimWorldAccess
                 {
                     blockedPart = $", {obstacleCells.Count} blocked";
                 }
-                parts.Add($"Placed {totalPlaced} of {totalIntended} {pluralLabel}{costInfo}{blockedPart}{segmentInfo}");
+                parts.Add($"Placed {placedSizeStr} of {totalIntended} {pluralLabel}{costInfo}{blockedPart}{segmentInfo}");
             }
             else if (totalPlaced > 0)
             {
-                // "Placed X wooden walls (cost)."
+                // "Placed 7 by 4 wooden walls (cost)." - uses shape dimensions
                 string pluralLabel = totalPlaced > 1
                     ? ArchitectHelper.PluralizePreservingParentheses(designatorLabel, totalPlaced)
                     : designatorLabel;
 
                 string costInfo = GetCostInfo(placedBlueprints);
-                parts.Add($"Placed {totalPlaced} {pluralLabel}{costInfo}{segmentInfo}");
+                parts.Add($"Placed {placedSizeStr} {pluralLabel}{costInfo}{segmentInfo}");
             }
             else
             {

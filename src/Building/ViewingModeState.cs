@@ -186,6 +186,13 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Always update designator type flags from the current designator
+            // This ensures correct announcements even when adding more shapes
+            isBuildDesignator = ShapeHelper.IsBuildDesignator(designator);
+            isOrderDesignator = ShapeHelper.IsOrderDesignator(designator);
+            isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
+            isDeleteDesignator = ShapeHelper.IsDeleteDesignator(designator);
+
             // First time entering - save cursor and initialize
             // But if we're adding more shapes, keep existing segments
             if (!isActive && !isAddingMore)
@@ -198,10 +205,6 @@ namespace RimWorldAccess
                 createdZones.Clear();
                 orderTargets.Clear();
                 orderTargetCells.Clear();
-                isBuildDesignator = ShapeHelper.IsBuildDesignator(designator);
-                isOrderDesignator = ShapeHelper.IsOrderDesignator(designator);
-                isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
-                isDeleteDesignator = ShapeHelper.IsDeleteDesignator(designator);
             }
 
             // For zone designators, reset zone-specific state when adding more segments
@@ -287,6 +290,16 @@ namespace RimWorldAccess
                         originalZoneCells = new HashSet<IntVec3>(origCells);
                     }
                 }
+                else
+                {
+                    // For expand operations, get original cells from ZoneUndoTracker
+                    // This prevents removing cells that existed before expansion (only newly added cells can be removed)
+                    var origCells = ZoneUndoTracker.PreExpandOriginalCells;
+                    if (origCells != null)
+                    {
+                        originalZoneCells = new HashSet<IntVec3>(origCells);
+                    }
+                }
             }
 
             // Create temporary scanner category for obstacles or targets
@@ -309,6 +322,14 @@ namespace RimWorldAccess
                 CleanupStaleZoneReferences();
             }
 
+            // Get the last segment's cells for expansion announcements
+            // For zone expansion, we want to announce only the newly added shape's dimensions
+            List<IntVec3> lastSegmentCells = null;
+            if (!isBuildDesignator && cellSegments.Count > 0)
+            {
+                lastSegmentCells = cellSegments[cellSegments.Count - 1];
+            }
+
             // Build the announcement using the announcer
             string announcement = ViewingModeAnnouncer.BuildEntryAnnouncement(
                 designator,
@@ -324,6 +345,7 @@ namespace RimWorldAccess
                 detectedRegionCount,
                 detectedEnclosures,
                 PlacedCells,
+                lastSegmentCells,
                 PlacedBlueprints,
                 ZoneUndoTracker.WasZoneExpansion,
                 targetZone,
@@ -619,7 +641,6 @@ namespace RimWorldAccess
             // Announce what happened
             // For zone shrink (delete designator), undoing RE-ADDS cells, so say "Restored" not "Removed"
             string action = isDeleteDesignator ? "Restored" : "Removed";
-            int remainingCount = PlacedCount;
             int remainingSegments = SegmentCount;
 
             if (remainingSegments > 0)
@@ -627,7 +648,22 @@ namespace RimWorldAccess
                 // Use shape type counts for remaining segments
                 string shapeInfo = ViewingModeAnnouncer.FormatShapeTypeCounts(segmentShapeTypes);
                 string remainingInfo = !string.IsNullOrEmpty(shapeInfo) ? $" in {shapeInfo}" : $" in {remainingSegments} segments";
-                TolkHelper.Speak($"{action} {sizeString} ({removedShapeName}). {remainingCount} remaining{remainingInfo}.", SpeechPriority.Normal);
+
+                // Format remaining size using shape-aware formatting (dimensions when possible)
+                string remainingSizeString;
+                if (isZoneDesignator)
+                {
+                    var remainingCells = PlacedCells;
+                    remainingSizeString = ShapeHelper.FormatShapeSize(remainingCells);
+                }
+                else
+                {
+                    int remainingCount = PlacedCount;
+                    string itemType = ViewingModeSegmentManager.GetItemTypeForCount(remainingCount, isBuildDesignator, isZoneDesignator);
+                    remainingSizeString = $"{remainingCount} {itemType}";
+                }
+
+                TolkHelper.Speak($"{action} {sizeString} ({removedShapeName}). {remainingSizeString} remaining{remainingInfo}.", SpeechPriority.Normal);
             }
             else
             {
@@ -802,10 +838,31 @@ namespace RimWorldAccess
             // If no segments remain, just exit immediately without showing dialog
             if (SegmentCount == 0)
             {
-                TolkHelper.Speak("Exited preview.", SpeechPriority.Normal);
+                // Use appropriate message based on designator type
+                if (isZoneDesignator)
+                {
+                    TolkHelper.Speak("Zone editing cancelled.", SpeechPriority.Normal);
+                }
+                else
+                {
+                    TolkHelper.Speak("Placement cancelled.", SpeechPriority.Normal);
+                }
+
                 Reset();
                 ShapePlacementState.Reset();
-                ArchitectState.Reset();
+                GizmoZoneEditState.Reset();
+
+                // ArchitectState.Reset() returns early if not in architect mode,
+                // so explicitly deselect the designator for gizmo mode
+                if (ArchitectState.CurrentMode == ArchitectMode.Inactive)
+                {
+                    Find.DesignatorManager?.Deselect();
+                }
+                else
+                {
+                    ArchitectState.Reset();
+                }
+
                 Log.Message("[ViewingModeState] Exited via Escape with no segments remaining");
                 return;
             }
@@ -838,14 +895,28 @@ namespace RimWorldAccess
                     string allWord = removedCount == 1 ? "" : "all ";
                     // For zone shrink (delete designator), undoing RE-ADDS cells, so say "Restored" not "Removed"
                     string action = isDeleteDesignator ? "Restored" : "Removed";
-                    TolkHelper.Speak($"{action} {allWord}{removedCount} {itemType}. Exited preview.", SpeechPriority.Normal);
+
+                    // Use appropriate exit message based on designator type
+                    string exitMessage = isZoneDesignator ? "Zone editing cancelled." : "Placement cancelled.";
+                    TolkHelper.Speak($"{action} {allWord}{removedCount} {itemType}. {exitMessage}", SpeechPriority.Normal);
 
                     // Exit completely (don't restore cursor - keep it where user left it)
                     Reset();
 
                     // Also exit architect/placement mode entirely
                     ShapePlacementState.Reset();
-                    ArchitectState.Reset();
+                    GizmoZoneEditState.Reset();
+
+                    // ArchitectState.Reset() returns early if not in architect mode,
+                    // so explicitly deselect the designator for gizmo mode
+                    if (ArchitectState.CurrentMode == ArchitectMode.Inactive)
+                    {
+                        Find.DesignatorManager?.Deselect();
+                    }
+                    else
+                    {
+                        ArchitectState.Reset();
+                    }
 
                     Log.Message($"[ViewingModeState] Exited via confirmation, removed {removedCount} items");
                 },

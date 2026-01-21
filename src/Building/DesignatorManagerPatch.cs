@@ -42,6 +42,13 @@ namespace RimWorldAccess
                 Log.Message("[DesignatorDeselectedPatch] Cleaning up ArchitectState on true deselect");
                 ArchitectState.Reset();
             }
+
+            // Clean up gizmo zone edit state
+            if (GizmoZoneEditState.IsActive)
+            {
+                Log.Message("[DesignatorDeselectedPatch] Cleaning up GizmoZoneEditState on true deselect");
+                GizmoZoneEditState.Reset();
+            }
         }
     }
 

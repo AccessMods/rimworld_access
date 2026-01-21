@@ -207,18 +207,21 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Builds the announcement for entering shape placement mode.
-        /// Includes item name, size info, rotation/facing info, and key hints.
+        /// Includes mode, shape selection, item name, size info, rotation/facing info, and key hints.
+        /// Format: "Shape mode. {Shape} selected. {Item info}. {Hints}."
         /// </summary>
         private static string BuildEnterAnnouncement(Designator designator, string designatorLabel, ShapeType shape, string shapeName)
         {
             List<string> parts = new List<string>();
 
-            // Item name and placement type
+            // Mode and shape selection - clear separation for screen reader clarity
             if (shape == ShapeType.Manual)
             {
+                // Manual mode announcement
+                parts.Add("Manual mode");
                 if (ShapeHelper.IsOrderDesignator(designator) || ShapeHelper.IsCellsDesignator(designator) || ShapeHelper.IsZoneDesignator(designator))
                 {
-                    parts.Add($"{designatorLabel} manual mode");
+                    parts.Add(designatorLabel);
                 }
                 else
                 {
@@ -227,7 +230,10 @@ namespace RimWorldAccess
             }
             else
             {
-                parts.Add($"{designatorLabel} {shapeName} placement");
+                // Shape mode announcement with clear separation
+                parts.Add("Shape mode");
+                parts.Add($"{shapeName} selected");
+                parts.Add(designatorLabel);
             }
 
             // Add zone expand/create info for zone designators
@@ -467,6 +473,19 @@ namespace RimWorldAccess
                     ZoneSelectionResult selectionResult = ZoneSelectionHelper.SelectZoneAtCell(activeDesignator, referenceCell);
                     Zone targetZone = selectionResult.TargetZone;
 
+                    // For expand operations (not delete, and we have a target zone), filter cells to
+                    // only those that are adjacent to the existing zone or to already-valid cells
+                    // This prevents creating disconnected zones when using the expand gizmo
+                    if (!isDeleteDesignator && targetZone != null && selectionResult.IsExpansion)
+                    {
+                        validCells = FilterCellsForExpansion(validCells, targetZone, map);
+                        if (validCells.Count == 0)
+                        {
+                            Log.Message("[ShapePlacementState] No cells adjacent to zone for expansion");
+                            return null;
+                        }
+                    }
+
                     // For shrink operations, check if this would delete the entire zone
                     if (isDeleteDesignator && targetZone != null)
                     {
@@ -501,6 +520,70 @@ namespace RimWorldAccess
             }
 
             return null; // Continue with normal flow
+        }
+
+        /// <summary>
+        /// Filters cells to only include those that form a contiguous expansion of the target zone.
+        /// Uses flood-fill starting from cells adjacent to the existing zone.
+        /// </summary>
+        private static List<IntVec3> FilterCellsForExpansion(List<IntVec3> candidateCells, Zone targetZone, Map map)
+        {
+            if (candidateCells.Count == 0 || targetZone == null)
+                return candidateCells;
+
+            HashSet<IntVec3> zoneCells = new HashSet<IntVec3>(targetZone.Cells);
+            HashSet<IntVec3> candidateSet = new HashSet<IntVec3>(candidateCells);
+            HashSet<IntVec3> validExpansionCells = new HashSet<IntVec3>();
+
+            // Find all candidate cells that are directly adjacent to the existing zone
+            Queue<IntVec3> queue = new Queue<IntVec3>();
+            foreach (IntVec3 cell in candidateCells)
+            {
+                foreach (IntVec3 dir in GenAdj.CardinalDirections)
+                {
+                    IntVec3 neighbor = cell + dir;
+                    if (zoneCells.Contains(neighbor))
+                    {
+                        // This candidate cell is adjacent to the zone
+                        if (validExpansionCells.Add(cell))
+                        {
+                            queue.Enqueue(cell);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Flood-fill to include candidate cells that are adjacent to valid expansion cells
+            while (queue.Count > 0)
+            {
+                IntVec3 current = queue.Dequeue();
+                foreach (IntVec3 dir in GenAdj.CardinalDirections)
+                {
+                    IntVec3 neighbor = current + dir;
+                    if (candidateSet.Contains(neighbor) && validExpansionCells.Add(neighbor))
+                    {
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+
+            // Return filtered list preserving original order
+            List<IntVec3> result = new List<IntVec3>();
+            foreach (IntVec3 cell in candidateCells)
+            {
+                if (validExpansionCells.Contains(cell))
+                {
+                    result.Add(cell);
+                }
+            }
+
+            if (result.Count < candidateCells.Count)
+            {
+                Log.Message($"[ShapePlacementState] Filtered expansion from {candidateCells.Count} to {result.Count} cells (must be adjacent to zone)");
+            }
+
+            return result;
         }
 
         /// <summary>

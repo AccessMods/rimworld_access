@@ -101,6 +101,18 @@ namespace RimWorldAccess
                 return result;
             }
 
+            // FIRST check if there's already a selected zone of the correct type
+            // This handles the gizmo expand case where the zone is already selected
+            Zone alreadySelectedZone = Find.Selector.SelectedZone;
+            if (alreadySelectedZone != null && alreadySelectedZone.GetType() == zoneTypeToPlace)
+            {
+                // Already have a matching zone selected (from gizmo) - use it
+                result.IsExpansion = true;
+                result.TargetZone = alreadySelectedZone;
+                Log.Message($"[ZoneSelectionHelper] Using already-selected zone {alreadySelectedZone.label} for expansion");
+                return result;
+            }
+
             Zone zoneAtCell = map.zoneManager.ZoneAt(referenceCell);
 
             // Check if zone exists and matches the type we're trying to place

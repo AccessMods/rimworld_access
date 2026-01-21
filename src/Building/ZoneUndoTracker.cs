@@ -60,6 +60,11 @@ namespace RimWorldAccess
         // until Clear() is called, ensuring cells can always be re-added in viewing mode
         private static HashSet<IntVec3> preShrinkOriginalCells = null;
 
+        // Pre-expand original cells - preserved independently to prevent deleting original cells in expand mode
+        // This is set during CaptureBeforeState for expand operations and persists
+        // until Clear() is called, preventing removal of cells that existed before expansion
+        private static HashSet<IntVec3> preExpandOriginalCells = null;
+
         /// <summary>
         /// Whether there's a pending record being built.
         /// </summary>
@@ -105,6 +110,14 @@ namespace RimWorldAccess
         /// Returns null if not in a shrink operation or no cells were captured.
         /// </summary>
         public static HashSet<IntVec3> PreShrinkOriginalCells => preShrinkOriginalCells;
+
+        /// <summary>
+        /// Gets the original cells captured before an expand operation.
+        /// This is set during CaptureBeforeState for expand operations and persists
+        /// independently of segments, preventing removal of cells that existed before expansion.
+        /// Returns null if not in an expand operation or no cells were captured.
+        /// </summary>
+        public static HashSet<IntVec3> PreExpandOriginalCells => preExpandOriginalCells;
 
         /// <summary>
         /// Whether the most recent segment was an expansion of an existing zone (vs creating a new one).
@@ -163,6 +176,12 @@ namespace RimWorldAccess
                 if (isShrink)
                 {
                     preShrinkOriginalCells = new HashSet<IntVec3>(targetZone.Cells);
+                }
+                else
+                {
+                    // For expand operations, store in preExpandOriginalCells
+                    // This prevents removing cells that existed before expansion
+                    preExpandOriginalCells = new HashSet<IntVec3>(targetZone.Cells);
                 }
             }
 
@@ -276,6 +295,7 @@ namespace RimWorldAccess
             currentRecord = null;
             segments.Clear();
             preShrinkOriginalCells = null;
+            preExpandOriginalCells = null;
             Log.Message("[ZoneUndoTracker] Cleared all undo data");
         }
 

@@ -47,7 +47,7 @@ namespace RimWorldAccess
             if (zoneAtCursor != null)
             {
                 // Cell IS part of a zone - try to remove it
-                return TryRemoveZoneCell(zoneAtCursor, cursorPos, map, ref targetZone, createdZones);
+                return TryRemoveZoneCell(zoneAtCursor, cursorPos, map, ref targetZone, createdZones, originalZoneCells, isDeleteDesignator);
             }
             else
             {
@@ -58,14 +58,24 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Attempts to remove a cell from a zone, checking for connectivity first.
+        /// In expand mode, prevents removing cells that existed before expansion.
         /// </summary>
         private static ZoneEditResult TryRemoveZoneCell(
             Zone zoneAtCursor,
             IntVec3 cursorPos,
             Map map,
             ref Zone targetZone,
-            HashSet<Zone> createdZones)
+            HashSet<Zone> createdZones,
+            HashSet<IntVec3> originalZoneCells,
+            bool isDeleteDesignator)
         {
+            // In expand mode (not delete designator), prevent removing cells that existed before expansion
+            // Only cells added during this session can be removed
+            if (!isDeleteDesignator && originalZoneCells != null && originalZoneCells.Contains(cursorPos))
+            {
+                return new ZoneEditResult(false, "Cannot remove original zone cell during expansion", SpeechPriority.Normal);
+            }
+
             // Check if we can safely remove it
             if (WouldDisconnectZone(zoneAtCursor, cursorPos, map))
             {
