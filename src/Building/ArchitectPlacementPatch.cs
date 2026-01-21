@@ -789,22 +789,20 @@ namespace RimWorldAccess
 
             try
             {
-                // Clear zone selection before placement to ensure a NEW zone is created
-                // RimWorld's DesignateMultiCell checks Find.Selector.SelectedZone first -
-                // if a same-type zone is selected, it merges new cells into that zone.
-                // By clearing the selection, we force DesignateMultiCell to create a new zone.
-                Zone previouslySelected = Find.Selector.SelectedZone;
-                if (previouslySelected != null)
-                {
-                    Find.Selector.ClearSelection();
-                }
+                // Use cursor-based zone selection to determine expand vs create
+                IntVec3 referenceCell = ArchitectState.SelectedCells[0];
+                ZoneSelectionResult selectionResult = ZoneSelectionHelper.SelectZoneAtCell(designator, referenceCell);
 
                 // Use the designator's standard DesignateMultiCell method
                 designator.DesignateMultiCell(ArchitectState.SelectedCells);
 
                 string label = designator.Label ?? "Zone";
-                TolkHelper.Speak($"{label} created with {ArchitectState.SelectedCells.Count} cells");
-                Log.Message($"Zone placement executed: {label} with {ArchitectState.SelectedCells.Count} cells");
+                string action = selectionResult.IsExpansion ? "expanded" : "created";
+                string zoneName = selectionResult.IsExpansion && selectionResult.TargetZone != null
+                    ? selectionResult.TargetZone.label
+                    : label;
+                TolkHelper.Speak($"{zoneName} {action} with {ArchitectState.SelectedCells.Count} cells");
+                Log.Message($"Zone placement executed: {zoneName} {action} with {ArchitectState.SelectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {

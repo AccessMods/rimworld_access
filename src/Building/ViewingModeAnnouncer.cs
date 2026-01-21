@@ -251,15 +251,18 @@ namespace RimWorldAccess
             // Get blocking obstacle summary using zone-specific detection
             string blockingObstacleSummary = GetZoneBlockingObstacleSummary(obstacleCells);
 
-            // Get shape-aware size string (uses dimensions for regular rectangles, cell count for irregular)
-            string sizeString = ShapeHelper.FormatShapeSize(placedCells);
-
-            // Build the main placement sentence
-            if (obstacleCells.Count > 0 && totalPlaced > 0)
+            // Get actual zone count from createdZones (more accurate than detectedRegionCount)
+            int actualZoneCount = createdZones?.Count ?? 0;
+            if (actualZoneCount == 0 && totalPlaced > 0)
             {
-                // For expansion: "Stockpile zone expanded by 5 by 5, 11 cells blocked by [obstacle list]."
-                // For creation: "5 by 5 stockpile zone created, 11 cells blocked by [obstacle list]."
-                string blockedPart;
+                // Fallback to 1 if zones haven't been collected yet
+                actualZoneCount = 1;
+            }
+
+            // Build blocked part string if there are obstacles
+            string blockedPart = "";
+            if (obstacleCells.Count > 0)
+            {
                 if (!string.IsNullOrEmpty(blockingObstacleSummary))
                 {
                     blockedPart = $", {obstacleCells.Count} cells blocked by {blockingObstacleSummary}";
@@ -268,36 +271,35 @@ namespace RimWorldAccess
                 {
                     blockedPart = $", {obstacleCells.Count} cells blocked";
                 }
+            }
 
-                if (wasZoneExpansion)
+            // Build the main placement sentence
+            if (totalPlaced > 0)
+            {
+                if (actualZoneCount > 1)
                 {
-                    // Expansion: "[Zone name] expanded by [size]"
+                    // Multiple zones created - list each zone's size using shape-aware formatting
+                    var zoneSizes = new List<string>();
+                    foreach (Zone zone in createdZones.OrderByDescending(z => z.Cells.Count))
+                    {
+                        var zoneCells = ZoneEditingHelper.GetZoneCells(zone);
+                        string sizeStr = ShapeHelper.FormatShapeSize(zoneCells);
+                        zoneSizes.Add(sizeStr);
+                    }
+                    string zoneWord = actualZoneCount == 1 ? "zone" : "zones";
+                    parts.Add($"{actualZoneCount} {zoneName} {zoneWord} created: {string.Join(", ", zoneSizes)}{blockedPart}{segmentInfo}");
+                }
+                else if (wasZoneExpansion)
+                {
+                    // Single zone expansion
+                    string sizeString = ShapeHelper.FormatShapeSize(placedCells);
                     parts.Add($"{zoneName} zone expanded by {sizeString}{blockedPart}{segmentInfo}");
                 }
                 else
                 {
-                    // Creation: "[size] [zone name] zone created"
+                    // Single zone creation
+                    string sizeString = ShapeHelper.FormatShapeSize(placedCells);
                     parts.Add($"{sizeString} {zoneName} zone created{blockedPart}{segmentInfo}");
-                }
-
-                // Only add split warning if the valid cells form multiple disconnected regions
-                // Obstacles on the edge don't cause splits - only obstacles that break contiguity do
-                if (detectedRegionCount > 1)
-                {
-                    parts.Add($"Warning: This will create {detectedRegionCount} separate zones");
-                }
-            }
-            else if (totalPlaced > 0)
-            {
-                // For expansion: "Stockpile zone expanded by 5 by 5."
-                // For creation: "5 by 5 stockpile zone created."
-                if (wasZoneExpansion)
-                {
-                    parts.Add($"{zoneName} zone expanded by {sizeString}{segmentInfo}");
-                }
-                else
-                {
-                    parts.Add($"{sizeString} {zoneName} zone created{segmentInfo}");
                 }
             }
             else

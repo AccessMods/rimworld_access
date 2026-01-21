@@ -92,6 +92,10 @@ namespace RimWorldAccess
         // Stack tracking - whether we can return to viewing mode on exit
         private static bool hasViewingModeOnStack = false;
 
+        // Cursor position when entering shape mode - used for zone expand/create decision
+        // This ensures the zone selection matches what was announced on entry
+        private static IntVec3 entryCursorPosition = IntVec3.Invalid;
+
         // Mapping of designator name keywords to gerund action phrases
         private static readonly Dictionary<string, string> DesignatorActionMap = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
         {
@@ -187,6 +191,10 @@ namespace RimWorldAccess
             previewHelper.SetCurrentShape(shape);
             hasViewingModeOnStack = fromViewingMode;
 
+            // Store cursor position for zone expand/create decision
+            // This ensures the zone selection matches what's announced on entry
+            entryCursorPosition = MapNavigationState.CurrentCursorPosition;
+
             string shapeName = ShapeHelper.GetShapeName(shape);
             string designatorLabel = ArchitectHelper.GetSanitizedLabel(designator);
 
@@ -208,7 +216,7 @@ namespace RimWorldAccess
             // Item name and placement type
             if (shape == ShapeType.Manual)
             {
-                if (ShapeHelper.IsOrderDesignator(designator) || ShapeHelper.IsCellsDesignator(designator))
+                if (ShapeHelper.IsOrderDesignator(designator) || ShapeHelper.IsCellsDesignator(designator) || ShapeHelper.IsZoneDesignator(designator))
                 {
                     parts.Add($"{designatorLabel} manual mode");
                 }
@@ -220,6 +228,14 @@ namespace RimWorldAccess
             else
             {
                 parts.Add($"{designatorLabel} {shapeName} placement");
+            }
+
+            // Add zone expand/create info for zone designators
+            if (ShapeHelper.IsZoneDesignator(designator) && !ShapeHelper.IsDeleteDesignator(designator))
+            {
+                IntVec3 cursorPos = MapNavigationState.CurrentCursorPosition;
+                string zoneModeInfo = ZoneSelectionHelper.GetZoneModeAnnouncement(designator, cursorPos);
+                parts.Add(zoneModeInfo);
             }
 
             // Add size and rotation info for build designators
@@ -445,8 +461,11 @@ namespace RimWorldAccess
             {
                 try
                 {
-                    // Get the target zone from selection (for shrink operations)
-                    Zone targetZone = GetSelectedZone();
+                    // Use cursor position from when shape mode was entered to determine expand vs create
+                    // This ensures the behavior matches what was announced on entry
+                    IntVec3 referenceCell = entryCursorPosition.IsValid ? entryCursorPosition : validCells[0];
+                    ZoneSelectionResult selectionResult = ZoneSelectionHelper.SelectZoneAtCell(activeDesignator, referenceCell);
+                    Zone targetZone = selectionResult.TargetZone;
 
                     // For shrink operations, check if this would delete the entire zone
                     if (isDeleteDesignator && targetZone != null)
@@ -771,6 +790,7 @@ namespace RimWorldAccess
             previewHelper.FullReset();
             activeDesignator = null;
             hasViewingModeOnStack = false;
+            entryCursorPosition = IntVec3.Invalid;
 
             Log.Message("[ShapePlacementState] State reset");
         }

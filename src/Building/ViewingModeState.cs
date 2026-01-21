@@ -205,12 +205,12 @@ namespace RimWorldAccess
             }
 
             // For zone designators, reset zone-specific state when adding more segments
-            // This ensures CollectCreatedZones() can properly track the actual zone(s) being modified
-            // (targetZone is only set if null in CollectCreatedZones, so we must clear it here)
+            // Clear targetZone so CollectCreatedZones can set it to the new segment's zone
+            // Keep createdZones intact - it accumulates zones across all segments (HashSet handles duplicates)
+            // At confirm time, CleanupStaleZoneReferences removes any zones that were undone
             if (isAddingMore && isZoneDesignator)
             {
                 targetZone = null;
-                createdZones.Clear();
                 originalZoneCells.Clear();
             }
 
@@ -300,6 +300,13 @@ namespace RimWorldAccess
             {
                 // For builds and zone-add, create obstacles category (includes interior obstacles from enclosures)
                 ViewingModeScannerHelper.UpdateObstacleCategory(obstacleCells, detectedEnclosures, isZoneDesignator);
+            }
+
+            // Clean up any stale zone references before building announcement
+            // This removes zones that were deleted via undo
+            if (isZoneDesignator)
+            {
+                CleanupStaleZoneReferences();
             }
 
             // Build the announcement using the announcer
@@ -566,6 +573,13 @@ namespace RimWorldAccess
                 segmentShapeTypes.RemoveAt(segmentShapeTypes.Count - 1);
             }
 
+            // Capture the segment cells before removing (for shape-aware size formatting)
+            List<IntVec3> removedCells = null;
+            if (!isBuildDesignator && cellSegments.Count > 0)
+            {
+                removedCells = new List<IntVec3>(cellSegments[cellSegments.Count - 1]);
+            }
+
             // Remove the last segment using centralized helper
             int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
             int removedCount = ViewingModeSegmentManager.RemoveSegmentItems(
@@ -577,8 +591,27 @@ namespace RimWorldAccess
             else
                 cellSegments.RemoveAt(cellSegments.Count - 1);
 
-            // Determine item type with proper pluralization
-            string itemType = ViewingModeSegmentManager.GetItemTypeForCount(removedCount, isBuildDesignator, isZoneDesignator);
+            // Build the size string - use shape-aware formatting for zones
+            string sizeString;
+            if (isZoneDesignator && removedCells != null && removedCells.Count > 0)
+            {
+                string shapeSize = ShapeHelper.FormatShapeSize(removedCells);
+                // Add "zone" suffix for clarity (e.g., "3 by 3 zone" or "9 cells zone")
+                // But if FormatShapeSize already includes "cells", don't add redundant suffix
+                if (shapeSize.Contains("cell"))
+                {
+                    sizeString = shapeSize.Replace("cells", "zone cells").Replace("cell", "zone cell");
+                }
+                else
+                {
+                    sizeString = $"{shapeSize} zone";
+                }
+            }
+            else
+            {
+                string itemType = ViewingModeSegmentManager.GetItemTypeForCount(removedCount, isBuildDesignator, isZoneDesignator);
+                sizeString = $"{removedCount} {itemType}";
+            }
 
             // Get shape display name for the removed segment
             string removedShapeName = ViewingModeAnnouncer.GetShapeDisplayName(removedShapeType);
@@ -594,12 +627,12 @@ namespace RimWorldAccess
                 // Use shape type counts for remaining segments
                 string shapeInfo = ViewingModeAnnouncer.FormatShapeTypeCounts(segmentShapeTypes);
                 string remainingInfo = !string.IsNullOrEmpty(shapeInfo) ? $" in {shapeInfo}" : $" in {remainingSegments} segments";
-                TolkHelper.Speak($"{action} {removedCount} {itemType} ({removedShapeName}). {remainingCount} remaining{remainingInfo}.", SpeechPriority.Normal);
+                TolkHelper.Speak($"{action} {sizeString} ({removedShapeName}). {remainingCount} remaining{remainingInfo}.", SpeechPriority.Normal);
             }
             else
             {
                 // No segments left - stay in viewing mode, user presses = to add more
-                TolkHelper.Speak($"{action} {removedCount} {itemType} ({removedShapeName}). No segments remaining.", SpeechPriority.Normal);
+                TolkHelper.Speak($"{action} {sizeString} ({removedShapeName}). No segments remaining.", SpeechPriority.Normal);
             }
 
             Log.Message($"[ViewingModeState] Removed last segment ({removedCount} items), {remainingSegments} segments remaining");
