@@ -44,8 +44,8 @@ namespace RimWorldAccess
                     Scenario firstScenario = ScenarioNavigationState.SelectedScenario;
                     if (firstScenario != null)
                     {
-                        string categoryPrefix = GetCategoryPrefixString(firstScenario.Category);
-                        TolkHelper.Speak($"{pageTitle} - {categoryPrefix}{firstScenario.name} - {firstScenario.summary}");
+                        string categorySuffix = GetCategorySuffixString(firstScenario.Category);
+                        TolkHelper.Speak($"{pageTitle} - {firstScenario.name} - {firstScenario.summary}{categorySuffix}");
                     }
                     else
                     {
@@ -59,39 +59,205 @@ namespace RimWorldAccess
                 {
                     KeyCode keyCode = Event.current.keyCode;
 
-                    if (keyCode == KeyCode.UpArrow)
+                    // Route to detail panel navigation if active
+                    if (ScenarioNavigationState.DetailPanelActive)
                     {
-                        ScenarioNavigationState.NavigateUp();
-
-                        // Update the page's current scenario selection
-                        Scenario selected = ScenarioNavigationState.SelectedScenario;
-                        if (selected != null)
+                        if (keyCode == KeyCode.UpArrow)
                         {
-                            AccessTools.Field(typeof(Page_SelectScenario), "curScen").SetValue(__instance, selected);
+                            // If active search, navigate to previous match
+                            if (ScenarioNavigationState.HasActiveSearch)
+                            {
+                                ScenarioNavigationState.SelectPreviousMatch();
+                            }
+                            else
+                            {
+                                ScenarioNavigationState.NavigateDetailUp();
+                            }
+                            Event.current.Use();
+                            patchActive = true;
                         }
-
-                        Event.current.Use();
-                        patchActive = true;
+                        else if (keyCode == KeyCode.DownArrow)
+                        {
+                            // If active search, navigate to next match
+                            if (ScenarioNavigationState.HasActiveSearch)
+                            {
+                                ScenarioNavigationState.SelectNextMatch();
+                            }
+                            else
+                            {
+                                ScenarioNavigationState.NavigateDetailDown();
+                            }
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.RightArrow)
+                        {
+                            // Expand current item or drill down to first child
+                            ScenarioNavigationState.ExpandOrDrillDown();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.LeftArrow)
+                        {
+                            // Collapse current item or drill up to parent
+                            ScenarioNavigationState.CollapseOrDrillUp();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Home)
+                        {
+                            // Home jumps to first sibling, Ctrl+Home to absolute first
+                            ScenarioNavigationState.HandleHomeKey(Event.current.control);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.End)
+                        {
+                            // End jumps to last sibling, Ctrl+End to absolute last
+                            ScenarioNavigationState.HandleEndKey(Event.current.control);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Escape)
+                        {
+                            // Escape clears search first, then exits detail panel
+                            if (ScenarioNavigationState.HasActiveSearch)
+                            {
+                                ScenarioNavigationState.ClearTypeaheadSearch();
+                            }
+                            else
+                            {
+                                ScenarioNavigationState.ToggleDetailPanel();
+                            }
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Tab)
+                        {
+                            // Tab exits detail panel
+                            ScenarioNavigationState.ToggleDetailPanel();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Backspace)
+                        {
+                            // Backspace removes last character from search
+                            if (ScenarioNavigationState.HandleTypeaheadBackspace())
+                            {
+                                Event.current.Use();
+                                patchActive = true;
+                            }
+                        }
+                        else if (Event.current.character != '\0' &&
+                                 !Event.current.control && !Event.current.alt &&
+                                 char.IsLetterOrDigit(Event.current.character))
+                        {
+                            // Handle typeahead search for printable characters
+                            ScenarioNavigationState.HandleTypeahead(Event.current.character);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
                     }
-                    else if (keyCode == KeyCode.DownArrow)
+                    else
                     {
-                        ScenarioNavigationState.NavigateDown();
-
-                        // Update the page's current scenario selection
-                        Scenario selected = ScenarioNavigationState.SelectedScenario;
-                        if (selected != null)
+                        // Normal scenario list navigation
+                        if (keyCode == KeyCode.UpArrow)
                         {
-                            AccessTools.Field(typeof(Page_SelectScenario), "curScen").SetValue(__instance, selected);
+                            // If active search, navigate to previous match
+                            if (ScenarioNavigationState.ListHasActiveSearch)
+                            {
+                                ScenarioNavigationState.SelectPreviousListMatch();
+                            }
+                            else
+                            {
+                                ScenarioNavigationState.NavigateUp();
+                            }
+                            SyncPageSelection(__instance);
+                            Event.current.Use();
+                            patchActive = true;
                         }
-
-                        Event.current.Use();
-                        patchActive = true;
+                        else if (keyCode == KeyCode.DownArrow)
+                        {
+                            // If active search, navigate to next match
+                            if (ScenarioNavigationState.ListHasActiveSearch)
+                            {
+                                ScenarioNavigationState.SelectNextListMatch();
+                            }
+                            else
+                            {
+                                ScenarioNavigationState.NavigateDown();
+                            }
+                            SyncPageSelection(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Home)
+                        {
+                            ScenarioNavigationState.NavigateHome();
+                            SyncPageSelection(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.End)
+                        {
+                            ScenarioNavigationState.NavigateEnd();
+                            SyncPageSelection(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Tab)
+                        {
+                            ScenarioNavigationState.ToggleDetailPanel();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Escape)
+                        {
+                            // Escape clears search if active
+                            if (ScenarioNavigationState.ListHasActiveSearch)
+                            {
+                                ScenarioNavigationState.ClearListTypeaheadSearch();
+                                Event.current.Use();
+                                patchActive = true;
+                            }
+                            // Otherwise let it pass through to close the page
+                        }
+                        else if (keyCode == KeyCode.Backspace)
+                        {
+                            // Backspace removes last character from search
+                            if (ScenarioNavigationState.HandleListTypeaheadBackspace())
+                            {
+                                SyncPageSelection(__instance);
+                                Event.current.Use();
+                                patchActive = true;
+                            }
+                        }
+                        else if (Event.current.character != '\0' &&
+                                 !Event.current.control && !Event.current.alt &&
+                                 char.IsLetterOrDigit(Event.current.character))
+                        {
+                            // Handle typeahead search for printable characters
+                            ScenarioNavigationState.HandleListTypeahead(Event.current.character);
+                            SyncPageSelection(__instance);
+                            Event.current.Use();
+                            patchActive = true;
+                        }
                     }
                 }
             }
             catch (System.Exception ex)
             {
                 Log.Error($"[RimWorld Access] Error in ScenarioSelectionPatch Prefix: {ex}");
+            }
+        }
+
+        // Helper to sync the page's current scenario selection with our navigation state
+        private static void SyncPageSelection(Page_SelectScenario instance)
+        {
+            Scenario selected = ScenarioNavigationState.SelectedScenario;
+            if (selected != null)
+            {
+                AccessTools.Field(typeof(Page_SelectScenario), "curScen").SetValue(instance, selected);
             }
         }
 
@@ -222,16 +388,16 @@ namespace RimWorldAccess
             return offset;
         }
 
-        private static string GetCategoryPrefixString(ScenarioCategory category)
+        private static string GetCategorySuffixString(ScenarioCategory category)
         {
             switch (category)
             {
                 case ScenarioCategory.FromDef:
-                    return "[Built-in] ";
+                    return " (Built-in)";
                 case ScenarioCategory.CustomLocal:
-                    return "[Custom] ";
+                    return " (Custom)";
                 case ScenarioCategory.SteamWorkshop:
-                    return "[Workshop] ";
+                    return " (Workshop)";
                 default:
                     return "";
             }

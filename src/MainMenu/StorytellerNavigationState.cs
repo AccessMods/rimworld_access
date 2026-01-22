@@ -145,7 +145,7 @@ namespace RimWorldAccess
 
             if (!string.IsNullOrEmpty(difficulty.description))
             {
-                text += $" - {difficulty.description}";
+                text += $" - {difficulty.description.StripTags()}";
             }
 
             TolkHelper.Speak(text);
