@@ -184,6 +184,17 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY -0.23: Handle Baby Gene Inspection if active =====
+            // Gene inspection is a modal view for pregnancy genes (Biotech DLC)
+            if (GeneInspectionState.IsActive)
+            {
+                if (GeneInspectionState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0: Handle world object selection if active =====
             if (WorldObjectSelectionState.IsActive && !WindowlessDialogState.IsActive)
             {
