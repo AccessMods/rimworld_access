@@ -14,6 +14,68 @@ namespace RimWorldAccess
         private static bool patchActive = false;
         private static bool hasAnnouncedTitle = false;
 
+        // Special marker for the "Scenario Builder" placeholder entry
+        public const string ScenarioBuilderMarker = "__SCENARIO_BUILDER__";
+
+        /// <summary>
+        /// Checks if the currently selected item is the Scenario Builder placeholder.
+        /// </summary>
+        public static bool IsScenarioBuilderSelected()
+        {
+            return ScenarioNavigationState.IsScenarioBuilderSelected;
+        }
+
+        /// <summary>
+        /// Opens the Scenario Builder (Page_ScenarioEditor) with a new scenario.
+        /// </summary>
+        public static void OpenScenarioBuilder(Page_SelectScenario page)
+        {
+            // Create new scenario editor with null scenario (generates random)
+            Page_ScenarioEditor editor = new Page_ScenarioEditor(null);
+            editor.prev = page;
+            Find.WindowStack.Add(editor);
+            page.Close();
+        }
+
+        /// <summary>
+        /// Opens the Scenario Editor for the currently selected scenario.
+        /// Matches the game's CanEditScenario logic:
+        /// - CustomLocal scenarios can be edited directly
+        /// - Your own workshop uploads can be edited directly
+        /// - Built-in and others' workshop scenarios get copied
+        /// </summary>
+        public static void OpenScenarioEditor(Page_SelectScenario page)
+        {
+            Scenario selected = ScenarioNavigationState.SelectedScenario;
+            if (selected == null) return;
+
+            // Match the game's CanEditScenario logic exactly
+            bool canEditDirectly = selected.Category == ScenarioCategory.CustomLocal
+                                || selected.CanToUploadToWorkshop();
+
+            Scenario scenarioToEdit;
+            string actionDescription;
+
+            if (canEditDirectly)
+            {
+                scenarioToEdit = selected;
+                actionDescription = $"Editing scenario: {selected.name}";
+            }
+            else
+            {
+                // Create an editable copy for built-in or others' workshop scenarios
+                scenarioToEdit = selected.CopyForEditing();
+                actionDescription = $"Editing copy of: {selected.name}";
+            }
+
+            Page_ScenarioEditor editor = new Page_ScenarioEditor(scenarioToEdit);
+            editor.prev = page;
+            Find.WindowStack.Add(editor);
+            page.Close();
+
+            TolkHelper.Speak(actionDescription);
+        }
+
         // Prefix: Build flat scenario list and handle keyboard input
         static void Prefix(Page_SelectScenario __instance, Rect rect)
         {
@@ -34,7 +96,7 @@ namespace RimWorldAccess
                 var workshopScenarios = ScenarioLister.ScenariosInCategory(ScenarioCategory.SteamWorkshop).Where(s => s.showInUI);
                 allScenarios.AddRange(workshopScenarios);
 
-                // Initialize navigation state
+                // Initialize navigation state (with scenario builder placeholder added internally)
                 ScenarioNavigationState.Initialize(allScenarios);
 
                 // Announce window title and initial selection once
@@ -161,6 +223,37 @@ namespace RimWorldAccess
                     else
                     {
                         // Normal scenario list navigation
+
+                        // Handle Alt+E to edit the selected scenario
+                        if (Event.current.alt && keyCode == KeyCode.E)
+                        {
+                            if (ScenarioNavigationState.IsScenarioBuilderSelected)
+                            {
+                                TolkHelper.Speak("Cannot edit Scenario Builder entry. Press Enter to create a new scenario.");
+                            }
+                            else
+                            {
+                                OpenScenarioEditor(__instance);
+                            }
+                            Event.current.Use();
+                            patchActive = true;
+                            return;
+                        }
+
+                        // Handle Enter key to open scenario builder or select scenario
+                        if (keyCode == KeyCode.Return || keyCode == KeyCode.KeypadEnter)
+                        {
+                            if (ScenarioNavigationState.IsScenarioBuilderSelected)
+                            {
+                                // Open the Scenario Builder
+                                OpenScenarioBuilder(__instance);
+                                Event.current.Use();
+                                patchActive = true;
+                                return;
+                            }
+                            // Otherwise let Enter pass through to select the scenario normally
+                        }
+
                         if (keyCode == KeyCode.UpArrow)
                         {
                             // If active search, navigate to previous match

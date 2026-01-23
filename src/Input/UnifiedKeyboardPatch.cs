@@ -746,6 +746,131 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 2.1: Handle Scenario Builder overlays (highest priority within builder) =====
+            // These overlays must be handled before the main builder state
+            if (WindowlessScenarioDeleteConfirmState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                if (WindowlessScenarioDeleteConfirmState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (WindowlessScenarioLoadState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (WindowlessScenarioLoadState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (WindowlessScenarioLoadState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (WindowlessScenarioSaveState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for filename typing
+                if (Event.current.character != '\0' && !ctrl && !alt)
+                {
+                    if (WindowlessScenarioSaveState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (WindowlessScenarioSaveState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (ScenarioBuilderAddPartState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (ScenarioBuilderAddPartState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderAddPartState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (ScenarioBuilderPartEditState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for dropdown typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (ScenarioBuilderPartEditState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderPartEditState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 2.2: Handle Scenario Builder main state =====
+            if (ScenarioBuilderState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for text editing or typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt)
+                {
+                    if (ScenarioBuilderState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 2.5: Handle area painting mode if active =====
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (AreaPaintingState.IsActive && !WindowlessDialogState.IsActive)

@@ -13,6 +13,22 @@ namespace RimWorldAccess
         private static List<Scenario> flatScenarioList = new List<Scenario>();
         public static bool DetailPanelActive { get; private set; } = false;
 
+        // Track if "Scenario Builder" virtual entry is at the end of the list
+        private static bool hasScenarioBuilderEntry = true;
+
+        /// <summary>
+        /// Gets whether the currently selected item is the Scenario Builder placeholder.
+        /// The builder is always the last entry (index == actual scenario count).
+        /// </summary>
+        public static bool IsScenarioBuilderSelected =>
+            hasScenarioBuilderEntry && selectedIndex == flatScenarioList.Count;
+
+        /// <summary>
+        /// Gets the total navigation count including the Scenario Builder entry.
+        /// </summary>
+        private static int TotalNavigationCount =>
+            flatScenarioList.Count + (hasScenarioBuilderEntry ? 1 : 0);
+
         // Detail panel navigation with treeview structure
         private static List<DetailItem> detailItemsHierarchy = new List<DetailItem>();
         private static List<DetailItem> flattenedDetailItems = new List<DetailItem>();
@@ -94,38 +110,38 @@ namespace RimWorldAccess
 
         public static void NavigateUp()
         {
-            if (flatScenarioList.Count == 0) return;
+            if (TotalNavigationCount == 0) return;
 
             listTypeaheadHelper.ClearSearch();
-            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, flatScenarioList.Count);
-            AnnounceCurrentScenario();
+            selectedIndex = MenuHelper.SelectPrevious(selectedIndex, TotalNavigationCount);
+            AnnounceCurrentSelection();
         }
 
         public static void NavigateDown()
         {
-            if (flatScenarioList.Count == 0) return;
+            if (TotalNavigationCount == 0) return;
 
             listTypeaheadHelper.ClearSearch();
-            selectedIndex = MenuHelper.SelectNext(selectedIndex, flatScenarioList.Count);
-            AnnounceCurrentScenario();
+            selectedIndex = MenuHelper.SelectNext(selectedIndex, TotalNavigationCount);
+            AnnounceCurrentSelection();
         }
 
         public static void NavigateHome()
         {
-            if (flatScenarioList.Count == 0) return;
+            if (TotalNavigationCount == 0) return;
 
             listTypeaheadHelper.ClearSearch();
             selectedIndex = 0;
-            AnnounceCurrentScenario();
+            AnnounceCurrentSelection();
         }
 
         public static void NavigateEnd()
         {
-            if (flatScenarioList.Count == 0) return;
+            if (TotalNavigationCount == 0) return;
 
             listTypeaheadHelper.ClearSearch();
-            selectedIndex = flatScenarioList.Count - 1;
-            AnnounceCurrentScenario();
+            selectedIndex = TotalNavigationCount - 1;
+            AnnounceCurrentSelection();
         }
 
         // Scenario list typeahead support
@@ -136,7 +152,12 @@ namespace RimWorldAccess
             if (flatScenarioList.Count == 0)
                 return false;
 
+            // Create labels list including "Scenario Builder" for search
             var labels = flatScenarioList.Select(s => s.name).ToList();
+            if (hasScenarioBuilderEntry)
+            {
+                labels.Add("Scenario Builder");
+            }
 
             if (listTypeaheadHelper.ProcessCharacterInput(character, labels, out int newIndex))
             {
@@ -159,7 +180,12 @@ namespace RimWorldAccess
             if (!listTypeaheadHelper.HasActiveSearch)
                 return false;
 
+            // Create labels list including "Scenario Builder" for search
             var labels = flatScenarioList.Select(s => s.name).ToList();
+            if (hasScenarioBuilderEntry)
+            {
+                labels.Add("Scenario Builder");
+            }
 
             if (listTypeaheadHelper.ProcessBackspace(labels, out int newIndex))
             {
@@ -177,7 +203,7 @@ namespace RimWorldAccess
         {
             if (listTypeaheadHelper.ClearSearchAndAnnounce())
             {
-                AnnounceCurrentScenario();
+                AnnounceCurrentSelection();
                 return true;
             }
             return false;
@@ -213,6 +239,13 @@ namespace RimWorldAccess
 
         private static void AnnounceWithListSearch()
         {
+            // Scenario Builder doesn't participate in search
+            if (IsScenarioBuilderSelected)
+            {
+                AnnounceScenarioBuilder();
+                return;
+            }
+
             Scenario selected = SelectedScenario;
             if (selected == null) return;
 
@@ -228,13 +261,44 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Announces the current selection (scenario or builder entry).
+        /// </summary>
+        private static void AnnounceCurrentSelection()
+        {
+            if (IsScenarioBuilderSelected)
+            {
+                AnnounceScenarioBuilder();
+            }
+            else
+            {
+                AnnounceCurrentScenario();
+            }
+        }
+
+        /// <summary>
+        /// Announces the Scenario Builder entry.
+        /// </summary>
+        private static void AnnounceScenarioBuilder()
+        {
+            string positionPart = MenuHelper.FormatPosition(selectedIndex, TotalNavigationCount);
+            string text = "Scenario Builder - Create a custom scenario from scratch";
+
+            if (!string.IsNullOrEmpty(positionPart))
+            {
+                text += $" ({positionPart})";
+            }
+
+            TolkHelper.Speak(text);
+        }
+
         private static void AnnounceCurrentScenario()
         {
             Scenario selected = SelectedScenario;
             if (selected == null) return;
 
             string categorySuffix = GetCategorySuffix(selected);
-            string positionPart = MenuHelper.FormatPosition(selectedIndex, flatScenarioList.Count);
+            string positionPart = MenuHelper.FormatPosition(selectedIndex, TotalNavigationCount);
 
             string text = $"{selected.name} - {selected.summary}{categorySuffix}";
 
@@ -256,7 +320,7 @@ namespace RimWorldAccess
         // Legacy method name for compatibility
         private static void CopySelectedToClipboard()
         {
-            AnnounceCurrentScenario();
+            AnnounceCurrentSelection();
         }
 
         private static string GetCategorySuffix(Scenario scenario)
@@ -283,6 +347,13 @@ namespace RimWorldAccess
 
         public static void ToggleDetailPanel()
         {
+            // Don't open detail panel for Scenario Builder entry
+            if (IsScenarioBuilderSelected && !DetailPanelActive)
+            {
+                TolkHelper.Speak("No details for Scenario Builder. Press Enter to open.");
+                return;
+            }
+
             DetailPanelActive = !DetailPanelActive;
             if (DetailPanelActive)
             {
