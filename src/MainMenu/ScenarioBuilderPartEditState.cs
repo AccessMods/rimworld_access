@@ -28,6 +28,7 @@ namespace RimWorldAccess
         private static int quantityMax;
         private static float floatQuantityValue;
         private static bool isFloatQuantity;
+        private static string quantityTypedBuffer = "";
 
         /// <summary>
         /// Opens the field editor for the given field.
@@ -111,6 +112,7 @@ namespace RimWorldAccess
                     quantityValue = 1;
                 }
 
+                quantityTypedBuffer = ""; // Clear any previous typed input
                 IsActive = true;
                 AnnounceQuantity();
             }
@@ -185,6 +187,17 @@ namespace RimWorldAccess
             if (dropdownTypeahead.HasActiveSearch)
             {
                 text += $", {dropdownTypeahead.CurrentMatchPosition} of {dropdownTypeahead.MatchCount} matches";
+            }
+
+            // Add description from Def objects if available
+            if (option.value is Def def && !string.IsNullOrEmpty(def.description))
+            {
+                // Clean up description - take first line only and trim
+                string desc = def.description;
+                int newlineIndex = desc.IndexOf('\n');
+                if (newlineIndex > 0)
+                    desc = desc.Substring(0, newlineIndex);
+                text += $". {desc.Trim()}";
             }
 
             TolkHelper.Speak(text);
@@ -282,11 +295,12 @@ namespace RimWorldAccess
                 value = quantityValue.ToString();
             }
 
-            TolkHelper.Speak($"{currentField?.Name ?? "Value"}: {value}. Use Up/Down to adjust, Enter to confirm.");
+            TolkHelper.Speak($"{currentField?.Name ?? "Value"}: {value}. Type a number or use Up/Down to adjust, Enter to confirm.");
         }
 
         private static void QuantityIncrease(int amount = 1)
         {
+            quantityTypedBuffer = ""; // Clear typed input when using arrows
             if (isFloatQuantity)
             {
                 floatQuantityValue = Mathf.Clamp01(floatQuantityValue + (amount * 0.01f));
@@ -301,6 +315,7 @@ namespace RimWorldAccess
 
         private static void QuantityDecrease(int amount = 1)
         {
+            quantityTypedBuffer = ""; // Clear typed input when using arrows
             if (isFloatQuantity)
             {
                 floatQuantityValue = Mathf.Clamp01(floatQuantityValue - (amount * 0.01f));
@@ -315,6 +330,7 @@ namespace RimWorldAccess
 
         private static void QuantityMin()
         {
+            quantityTypedBuffer = ""; // Clear typed input when using Home
             if (isFloatQuantity)
             {
                 floatQuantityValue = 0f;
@@ -329,6 +345,7 @@ namespace RimWorldAccess
 
         private static void QuantityMax()
         {
+            quantityTypedBuffer = ""; // Clear typed input when using End
             if (isFloatQuantity)
             {
                 floatQuantityValue = 1f;
@@ -411,10 +428,11 @@ namespace RimWorldAccess
 
         private static bool HandleQuantityInput(KeyCode key, bool shift, bool ctrl)
         {
-            // Determine increment amount
+            // Determine increment amount based on modifiers
+            // Shift = 10, Ctrl = 100, Both = 100, None = 1
             int increment = 1;
-            if (shift) increment = 10;
-            if (ctrl) increment = 5;
+            if (ctrl) increment = 100;
+            else if (shift) increment = 10;
 
             switch (key)
             {
@@ -423,6 +441,15 @@ namespace RimWorldAccess
                     return true;
                 case KeyCode.DownArrow:
                     QuantityDecrease(increment);
+                    return true;
+                case KeyCode.Plus:
+                case KeyCode.KeypadPlus:
+                case KeyCode.Equals: // Unshifted + key on most keyboards
+                    QuantityIncrease(1);
+                    return true;
+                case KeyCode.Minus:
+                case KeyCode.KeypadMinus:
+                    QuantityDecrease(1);
                     return true;
                 case KeyCode.Home:
                     QuantityMin();
@@ -440,13 +467,16 @@ namespace RimWorldAccess
                     Close(applyChanges: false);
                     TolkHelper.Speak("Cancelled");
                     return true;
+                case KeyCode.Backspace:
+                    // Handle backspace for typed number input
+                    HandleQuantityBackspace();
+                    return true;
                 // CRITICAL: Consume all navigation keys to prevent them leaking to parent state
                 // Without this, Left/Right/Tab would be handled by ScenarioBuilderState
                 case KeyCode.LeftArrow:
                 case KeyCode.RightArrow:
                 case KeyCode.Tab:
                 case KeyCode.Delete:
-                case KeyCode.Backspace:
                     // Silently consume - these keys don't apply to quantity editing
                     return true;
             }
@@ -455,7 +485,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Handles character input for typeahead in dropdown mode.
+        /// Handles character input for typeahead in dropdown mode or number input in quantity mode.
         /// </summary>
         public static bool HandleCharacterInput(char character)
         {
@@ -468,8 +498,88 @@ namespace RimWorldAccess
                     return HandleDropdownTypeahead(character);
                 }
             }
+            else if (currentField?.Type == ScenarioBuilderState.FieldType.Quantity)
+            {
+                if (char.IsDigit(character))
+                {
+                    return HandleQuantityDigitInput(character);
+                }
+            }
 
             return false;
+        }
+
+        /// <summary>
+        /// Handles digit input for quantity fields - builds a number from typed digits.
+        /// </summary>
+        private static bool HandleQuantityDigitInput(char digit)
+        {
+            quantityTypedBuffer += digit;
+
+            if (int.TryParse(quantityTypedBuffer, out int typedValue))
+            {
+                if (isFloatQuantity)
+                {
+                    // For percentages, treat typed value as percent
+                    floatQuantityValue = Mathf.Clamp01(typedValue / 100f);
+                    TolkHelper.Speak($"{typedValue}%");
+                }
+                else
+                {
+                    // Clamp to valid range
+                    quantityValue = Mathf.Clamp(typedValue, quantityMin, quantityMax);
+                    if (typedValue != quantityValue)
+                    {
+                        // Value was clamped - announce the clamped value
+                        TolkHelper.Speak($"{quantityValue} (clamped from {typedValue})");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak(quantityValue.ToString());
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Handles backspace in quantity mode - removes last typed digit.
+        /// </summary>
+        private static bool HandleQuantityBackspace()
+        {
+            if (string.IsNullOrEmpty(quantityTypedBuffer))
+            {
+                return false; // Nothing to delete
+            }
+
+            // Remove last character
+            quantityTypedBuffer = quantityTypedBuffer.Substring(0, quantityTypedBuffer.Length - 1);
+
+            if (string.IsNullOrEmpty(quantityTypedBuffer))
+            {
+                TolkHelper.Speak("Cleared");
+                // Reset to min value
+                if (isFloatQuantity)
+                    floatQuantityValue = 0f;
+                else
+                    quantityValue = quantityMin;
+            }
+            else if (int.TryParse(quantityTypedBuffer, out int typedValue))
+            {
+                if (isFloatQuantity)
+                {
+                    floatQuantityValue = Mathf.Clamp01(typedValue / 100f);
+                    TolkHelper.Speak($"{typedValue}%");
+                }
+                else
+                {
+                    quantityValue = Mathf.Clamp(typedValue, quantityMin, quantityMax);
+                    TolkHelper.Speak(quantityValue.ToString());
+                }
+            }
+
+            return true;
         }
 
         #endregion

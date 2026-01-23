@@ -8,6 +8,7 @@ namespace RimWorldAccess
     public static class TextInputHelper
     {
         private static string currentText = "";
+        private static bool replaceOnFirstKeystroke = false;
 
         /// <summary>
         /// Gets the current text in the buffer.
@@ -21,10 +22,12 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Sets the initial text in the buffer.
+        /// When replaceOnType is true (default), first keystroke will replace all text.
         /// </summary>
-        public static void SetText(string text)
+        public static void SetText(string text, bool replaceOnType = true)
         {
             currentText = text ?? "";
+            replaceOnFirstKeystroke = replaceOnType && !string.IsNullOrEmpty(currentText);
         }
 
         /// <summary>
@@ -37,18 +40,29 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Handles character input - adds character to buffer and announces it.
+        /// If replaceOnFirstKeystroke is set, clears existing text first.
         /// </summary>
         public static void HandleCharacter(char character)
         {
+            if (replaceOnFirstKeystroke)
+            {
+                // First keystroke replaces all existing text
+                currentText = "";
+                replaceOnFirstKeystroke = false;
+            }
             currentText += character;
             TolkHelper.Speak(character.ToString(), SpeechPriority.High);
         }
 
         /// <summary>
         /// Handles backspace - removes last character and announces deletion.
+        /// Pressing backspace cancels replace-on-type mode (user wants to edit, not replace).
         /// </summary>
         public static void HandleBackspace()
         {
+            // Backspace cancels replace mode - user wants to edit existing text
+            replaceOnFirstKeystroke = false;
+
             if (string.IsNullOrEmpty(currentText))
                 return;
 

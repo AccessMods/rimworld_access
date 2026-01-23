@@ -30,6 +30,56 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
+            // ===== PRIORITY -1.5: Handle character input for scenario builder states =====
+            // Unity IMGUI sends two KeyDown events for printable chars:
+            // 1. keyCode = KeyCode.A (the key itself)
+            // 2. keyCode = KeyCode.None, character = 'a' (the character)
+            // We need to capture the second event BEFORE filtering out KeyCode.None
+            if (key == KeyCode.None && Event.current.character != '\0')
+            {
+                char c = Event.current.character;
+                if (!char.IsControl(c))
+                {
+                    // ScenarioBuilderState text editing (title, summary, description)
+                    if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsEditingText)
+                    {
+                        TextInputHelper.HandleCharacter(c);
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // ScenarioBuilderPartEditState dropdown typeahead
+                    if (ScenarioBuilderPartEditState.IsActive)
+                    {
+                        if (ScenarioBuilderPartEditState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    // ScenarioBuilderAddPartState typeahead
+                    if (ScenarioBuilderAddPartState.IsActive)
+                    {
+                        if (ScenarioBuilderAddPartState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    // WindowlessScenarioSaveState filename input
+                    if (WindowlessScenarioSaveState.IsActive)
+                    {
+                        if (WindowlessScenarioSaveState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+                }
+            }
+
             // Skip if no actual key (Unity IMGUI quirk)
             if (key == KeyCode.None)
                 return;

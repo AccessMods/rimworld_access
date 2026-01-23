@@ -71,6 +71,11 @@ namespace RimWorldAccess
         public static bool IsEditingText => isEditingText;
 
         /// <summary>
+        /// Gets the current scenario being edited.
+        /// </summary>
+        public static Scenario CurrentScenario => currentScenario;
+
+        /// <summary>
         /// Gets the current section.
         /// </summary>
         public static Section CurrentSection => currentSection;
@@ -146,9 +151,18 @@ namespace RimWorldAccess
         /// <summary>
         /// Builds the parts tree from the current scenario.
         /// Iterates through ALL parts (matching the game's editor behavior).
+        /// Preserves expanded state of parts when rebuilding.
         /// </summary>
         public static void BuildPartsTree()
         {
+            // Remember which parts were expanded (by ScenPart reference)
+            var expandedParts = new HashSet<ScenPart>();
+            foreach (var existing in partsHierarchy)
+            {
+                if (existing.IsExpanded)
+                    expandedParts.Add(existing.Part);
+            }
+
             partsHierarchy.Clear();
 
             if (currentScenario == null)
@@ -162,7 +176,7 @@ namespace RimWorldAccess
                     Part = part,
                     Label = part.Label,
                     Summary = GetPartSummary(part),
-                    IsExpanded = false,
+                    IsExpanded = expandedParts.Contains(part), // Preserve expanded state
                     IndentLevel = 0
                 };
 
@@ -292,19 +306,28 @@ namespace RimWorldAccess
                 });
             }
 
-            // Handle ScenPart_PlanetLayer (surface layer, always present)
-            var layerField = partType.GetField("layer", BindingFlags.NonPublic | BindingFlags.Instance);
+            // Handle ScenPart_PlanetLayer (surface layer)
+            // Note: ScenPart_PlanetLayerFixed has CanEdit = false, check for that property
+            var layerField = partType.GetField("layer", BindingFlags.Public | BindingFlags.Instance);
             if (layerField != null && layerField.FieldType == typeof(PlanetLayerDef))
             {
-                var currentLayer = (PlanetLayerDef)layerField.GetValue(part);
-                fields.Add(new PartField
+                // Check if this part type has CanEdit property set to false
+                var canEditProp = partType.GetProperty("CanEdit", BindingFlags.NonPublic | BindingFlags.Instance);
+                bool canEdit = canEditProp == null || (bool)canEditProp.GetValue(part);
+
+                if (canEdit)
                 {
-                    Name = "Surface Layer",
-                    Type = FieldType.Dropdown,
-                    CurrentValue = currentLayer?.LabelCap ?? "None",
-                    Data = GetPlanetLayerOptions(),
-                    SetValue = (val) => layerField.SetValue(part, val)
-                });
+                    var currentLayer = (PlanetLayerDef)layerField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Planet Layer",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentLayer?.LabelCap ?? "None",
+                        Data = GetPlanetLayerOptions(),
+                        SetValue = (val) => layerField.SetValue(part, val)
+                    });
+                }
+                // If CanEdit is false, don't add field - part will show as read-only
             }
 
             // Handle ScenPart_PlayerPawnsArriveMethod - arrival method enum
@@ -393,12 +416,14 @@ namespace RimWorldAccess
             if (countField != null && countField.FieldType == typeof(int))
             {
                 int currentValue = (int)countField.GetValue(part);
+                // Game uses Widgets.TextFieldNumeric with min=1, max=1E+09 (1 billion)
+                // We use int.MaxValue since it's an int field
                 fields.Add(new PartField
                 {
                     Name = "Count",
                     Type = FieldType.Quantity,
                     CurrentValue = currentValue.ToString(),
-                    Data = new int[] { 1, 100 }, // Min/max range
+                    Data = new int[] { 1, int.MaxValue },
                     SetValue = (val) => countField.SetValue(part, val)
                 });
             }
@@ -475,6 +500,60 @@ namespace RimWorldAccess
                     CurrentValue = currentProject?.LabelCap ?? "None",
                     Data = GetResearchOptions(),
                     SetValue = (val) => researchField.SetValue(part, val)
+                });
+            }
+
+            // Handle ScenPart_ConfigPage_ConfigureStartingPawns - pawn count
+            var pawnCountField = partType.GetField("pawnCount", BindingFlags.Public | BindingFlags.Instance);
+            if (pawnCountField != null && pawnCountField.FieldType == typeof(int))
+            {
+                int currentValue = (int)pawnCountField.GetValue(part);
+                fields.Add(new PartField
+                {
+                    Name = "Starting Pawns",
+                    Type = FieldType.Quantity,
+                    CurrentValue = currentValue.ToString(),
+                    Data = new int[] { 1, 10 }, // Game max is 10
+                    SetValue = (val) => pawnCountField.SetValue(part, val)
+                });
+            }
+
+            // Handle ScenPart_PawnFilter_Age - age range (min and max as separate fields)
+            var ageRangeField = partType.GetField("allowedAgeRange", BindingFlags.Public | BindingFlags.Instance);
+            if (ageRangeField != null && ageRangeField.FieldType == typeof(IntRange))
+            {
+                var currentRange = (IntRange)ageRangeField.GetValue(part);
+                fields.Add(new PartField
+                {
+                    Name = "Minimum Age",
+                    Type = FieldType.Quantity,
+                    CurrentValue = currentRange.min.ToString(),
+                    Data = new int[] { 15, 120 }, // Game limits from DoEditInterface
+                    SetValue = (val) =>
+                    {
+                        var range = (IntRange)ageRangeField.GetValue(part);
+                        range.min = (int)val;
+                        // Ensure min doesn't exceed max - 4 (game requires 4 year gap)
+                        if (range.min > range.max - 4)
+                            range.min = range.max - 4;
+                        ageRangeField.SetValue(part, range);
+                    }
+                });
+                fields.Add(new PartField
+                {
+                    Name = "Maximum Age",
+                    Type = FieldType.Quantity,
+                    CurrentValue = currentRange.max.ToString(),
+                    Data = new int[] { 19, 120 }, // Game min-max is 19
+                    SetValue = (val) =>
+                    {
+                        var range = (IntRange)ageRangeField.GetValue(part);
+                        range.max = (int)val;
+                        // Ensure max is at least min + 4 (game requires 4 year gap)
+                        if (range.max < range.min + 4)
+                            range.max = range.min + 4;
+                        ageRangeField.SetValue(part, range);
+                    }
                 });
             }
 
@@ -873,10 +952,35 @@ namespace RimWorldAccess
                     AnnounceCurrentTreeItem();
                 }
             }
-            else if (item.IsField)
+            // For fields and non-expandable parts, Right arrow does nothing
+            // (WCAG tree pattern: Right only expands/drills down, doesn't edit)
+        }
+
+        /// <summary>
+        /// Activates the current item (Enter key behavior).
+        /// Edits fields, provides feedback for non-editable parts.
+        /// </summary>
+        public static void ActivateCurrentItem()
+        {
+            if (flattenedParts.Count == 0 || partsIndex >= flattenedParts.Count)
+                return;
+
+            var item = flattenedParts[partsIndex];
+
+            if (item.IsField)
             {
                 // On a field - edit it
                 EditCurrentField();
+            }
+            else if (item.IsPart && item.IsExpandable)
+            {
+                // On expandable part - toggle expansion
+                ExpandOrDrillDown();
+            }
+            else if (item.IsPart && !item.IsExpandable)
+            {
+                // Part has no editable fields - provide feedback
+                TolkHelper.Speak("This part has no editable fields. Press Delete to remove it.");
             }
         }
 
@@ -1068,6 +1172,16 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Strips trailing punctuation (periods, colons, exclamation marks) from a string.
+        /// Prevents patterns like ". :" or ": :" when concatenating strings.
+        /// </summary>
+        private static string StripTrailingPunctuation(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            return text.TrimEnd('.', ':', '!', '?', ',', ';');
+        }
+
+        /// <summary>
         /// Announces the current tree item.
         /// </summary>
         private static void AnnounceCurrentTreeItem()
@@ -1088,29 +1202,34 @@ namespace RimWorldAccess
 
             if (isSingleFieldPart)
             {
-                // Single-field part: show part context + field info + "Press Enter to edit"
+                // Single-field part: show part label + field value + "Press Enter to edit"
+                // Skip summary because it typically duplicates the field value
                 var part = item.AsPart;
                 var field = item.Field;
                 string typeHint = field.Type == FieldType.Dropdown ? "dropdown" :
                                   field.Type == FieldType.Quantity ? "quantity" : "text";
-                string summary = string.IsNullOrEmpty(part.Summary) ? "" : $" - {part.Summary}";
-                announcement = $"{part.Label}{summary}: {field.CurrentValue}. {typeHint}. Press Enter to edit.";
+                // Strip trailing punctuation to avoid ". :" patterns
+                string partLabel = StripTrailingPunctuation(part.Label);
+                string fieldValue = StripTrailingPunctuation(field.CurrentValue);
+                announcement = $"{partLabel}: {fieldValue}. {typeHint}. Press Enter to edit.";
             }
             else if (item.IsPart)
             {
                 var part = item.AsPart;
-                string summary = string.IsNullOrEmpty(part.Summary) ? "" : $" ({part.Summary})";
+                string partLabel = StripTrailingPunctuation(part.Label);
+                string summaryText = StripTrailingPunctuation(part.Summary);
+                string summary = string.IsNullOrEmpty(summaryText) ? "" : $" ({summaryText})";
 
                 if (item.IsExpandable)
                 {
                     string state = item.IsExpanded ? "expanded" : "collapsed";
                     string itemCount = part.Fields.Count == 1 ? "1 field" : $"{part.Fields.Count} fields";
-                    announcement = $"{part.Label}{summary}, {state}, {itemCount}";
+                    announcement = $"{partLabel}{summary}, {state}, {itemCount}";
                 }
                 else
                 {
-                    // Non-editable part (0 fields) - just the label
-                    announcement = $"{part.Label}{summary}";
+                    // Non-editable part (0 fields) - indicate read-only
+                    announcement = $"{partLabel}{summary}, read only";
                 }
             }
             else if (item.IsField)
@@ -1119,7 +1238,9 @@ namespace RimWorldAccess
                 var field = item.Field;
                 string typeHint = field.Type == FieldType.Dropdown ? "dropdown" :
                                   field.Type == FieldType.Quantity ? "quantity" : "text";
-                announcement = $"{field.Name}: {field.CurrentValue}. {typeHint}. Press Enter to edit.";
+                string fieldName = StripTrailingPunctuation(field.Name);
+                string fieldValue = StripTrailingPunctuation(field.CurrentValue);
+                announcement = $"{fieldName}: {fieldValue}. {typeHint}. Press Enter to edit.";
             }
             else
             {
@@ -1214,10 +1335,11 @@ namespace RimWorldAccess
             if (partHierarchyIndex <= 0) return;
 
             var part = partItem.Part;
+            string partName = StripTrailingPunctuation(part.Label);
 
             if (!currentScenario.CanReorder(part, ReorderDirection.Up))
             {
-                TolkHelper.Speak("Cannot move this part up.");
+                TolkHelper.Speak($"Cannot move {partName} up.");
                 return;
             }
 
@@ -1226,16 +1348,28 @@ namespace RimWorldAccess
             FlattenPartsTree();
 
             // Find the new position of the part in the flattened list
+            int newIndex = -1;
             for (int i = 0; i < flattenedParts.Count; i++)
             {
                 if (flattenedParts[i].IsPart && flattenedParts[i].AsPart.Part == part)
                 {
                     partsIndex = i;
+                    newIndex = i;
                     break;
                 }
             }
 
-            TolkHelper.Speak($"Moved up. Now at position {partsHierarchy.IndexOf(partItem) + 1} of {partsHierarchy.Count}.");
+            // Build context-aware announcement
+            int newHierarchyIndex = partsHierarchy.FindIndex(p => p.Part == part);
+            if (newHierarchyIndex == 0)
+            {
+                TolkHelper.Speak($"Moved {partName} to top of list.");
+            }
+            else
+            {
+                string aboveName = StripTrailingPunctuation(partsHierarchy[newHierarchyIndex - 1].Label);
+                TolkHelper.Speak($"Moved {partName} up, now below {aboveName}.");
+            }
         }
 
         /// <summary>
@@ -1253,10 +1387,11 @@ namespace RimWorldAccess
             if (partHierarchyIndex >= partsHierarchy.Count - 1) return;
 
             var part = partItem.Part;
+            string partName = StripTrailingPunctuation(part.Label);
 
             if (!currentScenario.CanReorder(part, ReorderDirection.Down))
             {
-                TolkHelper.Speak("Cannot move this part down.");
+                TolkHelper.Speak($"Cannot move {partName} down.");
                 return;
             }
 
@@ -1274,7 +1409,17 @@ namespace RimWorldAccess
                 }
             }
 
-            TolkHelper.Speak($"Moved down. Now at position {partsHierarchy.IndexOf(partItem) + 1} of {partsHierarchy.Count}.");
+            // Build context-aware announcement
+            int newHierarchyIndex = partsHierarchy.FindIndex(p => p.Part == part);
+            if (newHierarchyIndex == partsHierarchy.Count - 1)
+            {
+                TolkHelper.Speak($"Moved {partName} to bottom of list.");
+            }
+            else
+            {
+                string belowName = StripTrailingPunctuation(partsHierarchy[newHierarchyIndex + 1].Label);
+                TolkHelper.Speak($"Moved {partName} down, now above {belowName}.");
+            }
         }
 
         #endregion
@@ -1666,9 +1811,12 @@ namespace RimWorldAccess
                         PartsNavigateDown();
                     return true;
                 case KeyCode.RightArrow:
+                    // WCAG tree pattern: Right expands or drills down to first child
+                    ExpandOrDrillDown();
+                    return true;
                 case KeyCode.LeftArrow:
-                    // User preference: Only Enter should expand/collapse tree nodes
-                    // Consume these keys to prevent leaking to other handlers
+                    // WCAG tree pattern: Left collapses or drills up to parent
+                    CollapseOrDrillUp();
                     return true;
                 case KeyCode.Home:
                     PartsHandleHomeKey(ctrl);
@@ -1678,15 +1826,8 @@ namespace RimWorldAccess
                     return true;
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    // Enter expands if on a part, edits if on a field
-                    if (flattenedParts.Count > 0 && partsIndex < flattenedParts.Count)
-                    {
-                        var item = flattenedParts[partsIndex];
-                        if (item.IsField)
-                            EditCurrentField();
-                        else
-                            ExpandOrDrillDown();
-                    }
+                    // Enter activates the current item (edit field, expand, or feedback)
+                    ActivateCurrentItem();
                     return true;
                 case KeyCode.Delete:
                     DeletePart();

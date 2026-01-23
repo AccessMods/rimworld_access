@@ -95,6 +95,7 @@ namespace RimWorldAccess
     /// <summary>
     /// Patch Window.OnCancelKeyPressed to block Escape key from closing the editor.
     /// We want Escape to be handled by our state (to close overlays first).
+    /// Also shows confirmation when there are unsaved changes.
     /// </summary>
     [HarmonyPatch(typeof(Window))]
     [HarmonyPatch("OnCancelKeyPressed")]
@@ -115,9 +116,58 @@ namespace RimWorldAccess
                 {
                     return false; // Skip original method - let our overlay handle the Escape
                 }
+
+                // Check for unsaved changes
+                if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsDirty())
+                {
+                    // Show confirmation dialog with 3 buttons
+                    ShowUnsavedChangesDialog(__instance);
+                    return false; // Block original method
+                }
             }
 
             return true; // Let original method run
+        }
+
+        /// <summary>
+        /// Shows a confirmation dialog for unsaved changes with Save, Discard, and Cancel buttons.
+        /// Uses Dialog_MessageBox which gets intercepted by WindowlessDialogState for accessibility.
+        /// </summary>
+        private static void ShowUnsavedChangesDialog(Window editorWindow)
+        {
+            var dialog = new Dialog_MessageBox(
+                "You have unsaved changes to this scenario.",
+                "Save",
+                () =>
+                {
+                    // Save then close
+                    WindowlessScenarioSaveState.Open(ScenarioBuilderState.CurrentScenario, () =>
+                    {
+                        ScenarioBuilderState.Close();
+                        editorWindow?.Close();
+                    });
+                },
+                "Discard",
+                () =>
+                {
+                    // Discard changes and close
+                    TolkHelper.Speak("Changes discarded.");
+                    ScenarioBuilderState.Close();
+                    editorWindow?.Close();
+                },
+                "Unsaved Changes",
+                false
+            );
+
+            // Add a third button for Cancel
+            dialog.buttonCText = "Cancel";
+            dialog.buttonCAction = () =>
+            {
+                TolkHelper.Speak("Continuing to edit.");
+            };
+            dialog.buttonCClose = true;
+
+            Find.WindowStack.Add(dialog);
         }
     }
 }

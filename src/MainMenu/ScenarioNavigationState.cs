@@ -494,6 +494,9 @@ namespace RimWorldAccess
                         if (IsListHeader(trimmed))
                             continue;
 
+                        // Fix grammar: "will be a X" -> "will be: X" (faction summary)
+                        trimmed = CleanupFactionGrammar(trimmed);
+
                         otherSummaries.Add(trimmed);
                         addedContent.Add(trimmed);
                     }
@@ -573,6 +576,24 @@ namespace RimWorldAccess
             string lineLower = line.ToLowerInvariant();
             return lineLower.StartsWith("start with") ||
                    lineLower.StartsWith("map is scattered");
+        }
+
+        /// <summary>
+        /// Cleans up faction grammar in summary text.
+        /// The game's translation says "Your faction will be a X" but proper nouns
+        /// shouldn't use an article, so we change it to "Your faction will be: X".
+        /// </summary>
+        private static string CleanupFactionGrammar(string text)
+        {
+            // Match "will be a " followed by a faction name (starts with capital)
+            const string pattern = "will be a ";
+            int idx = text.IndexOf(pattern, System.StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                // Replace "will be a X" with "will be: X"
+                return text.Substring(0, idx) + "will be: " + text.Substring(idx + pattern.Length);
+            }
+            return text;
         }
 
         /// <summary>
