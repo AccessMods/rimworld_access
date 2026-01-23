@@ -139,6 +139,26 @@ namespace RimWorldAccess
                 return HandleTextFieldInput(textField, evt);
             }
 
+            // Alt+R: Randomize current field (for Dialog_NamePawn)
+            if (key == KeyCode.R && evt.alt)
+            {
+                if (currentDialog?.GetType().Name == "Dialog_NamePawn" &&
+                    selectedIndex >= 0 && selectedIndex < elements.Count &&
+                    elements[selectedIndex] is TextFieldElement nameField)
+                {
+                    // Calculate field index (accounting for description element at index 0)
+                    int fieldIndex = selectedIndex;
+                    if (elements.Count > 0 && elements[0] is DialogDescriptionElement)
+                    {
+                        fieldIndex = selectedIndex - 1;
+                    }
+
+                    NamePawnDialogHelper.RandomizeField(currentDialog, nameField, fieldIndex);
+                    evt.Use();
+                    return true;
+                }
+            }
+
             // Navigation
             if (key == KeyCode.UpArrow)
             {

@@ -59,6 +59,12 @@ namespace RimWorldAccess
                 return dialog.optionalTitle;
             }
 
+            // For Dialog_NamePawn, use renameText as title
+            if (dialogType.Name == "Dialog_NamePawn")
+            {
+                return NamePawnDialogHelper.GetTitle(dialog, dialogType);
+            }
+
             return null;
         }
 
@@ -119,6 +125,12 @@ namespace RimWorldAccess
                 {
                     Log.Warning($"RimWorld Access: Dialog_NodeTree has no 'curNode' field for dialog type: {dialogType.Name}");
                 }
+            }
+
+            // For Dialog_NamePawn (baby naming, animal naming, mech naming)
+            if (dialogType.Name == "Dialog_NamePawn")
+            {
+                return NamePawnDialogHelper.GetMessage(dialog, dialogType);
             }
 
             // For Dialog_GiveName and subclasses
@@ -187,6 +199,13 @@ namespace RimWorldAccess
 
         private static void ExtractTextFields(Window dialog, Type dialogType, List<DialogElement> elements)
         {
+            // Handle Dialog_NamePawn specially (baby naming, animal naming, mech naming)
+            if (dialogType.Name == "Dialog_NamePawn")
+            {
+                NamePawnDialogHelper.ExtractFields(dialog, dialogType, elements);
+                return;
+            }
+
             // Check if this is a Dialog_GiveName (for better label names)
             bool isDialogGiveName = dialogType.BaseType != null && dialogType.BaseType.Name == "Dialog_GiveName";
 
@@ -442,6 +461,18 @@ namespace RimWorldAccess
                     {
                         Label = "OK",
                         Action = () => ExecuteDialogGiveNameOK(dialog, dialogType),
+                        IsConfirm = true,
+                        IsClose = false // We'll close it manually if validation passes
+                    };
+                    elements.Add(okButton);
+                }
+                // For Dialog_NamePawn
+                else if (dialogType.Name == "Dialog_NamePawn")
+                {
+                    ButtonElement okButton = new ButtonElement
+                    {
+                        Label = "Accept",
+                        Action = () => NamePawnDialogHelper.ExecuteAccept(dialog, dialogType),
                         IsConfirm = true,
                         IsClose = false // We'll close it manually if validation passes
                     };

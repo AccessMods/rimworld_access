@@ -36,7 +36,7 @@ namespace RimWorldAccess
 
             // ===== PRIORITY -1: Block ALL keys if text input mode is active =====
             // Zone/storage rename needs to capture text input, so block everything here
-            // StorageSettingsMenuPatch will handle the input
+            // TextInputCapturePatch will handle the input
             if (ZoneRenameState.IsActive || StorageRenameState.IsActive)
             {
                 // Don't process any keys in this patch when renaming
@@ -439,6 +439,22 @@ namespace RimWorldAccess
                 bool alt = Event.current.alt;
 
                 if (TransportPodLoadingState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.33: Handle ritual dialog if active =====
+            // Handles all ritual types (weddings, funerals, childbirth, conversions, etc.)
+            // Skip if overlay states are active - they take priority
+            if (RitualState.IsActive && !WindowlessDialogState.IsActive && !StatBreakdownState.IsActive && !WindowlessInspectionState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (RitualState.HandleInput(key, shift, ctrl, alt))
                 {
                     Event.current.Use();
                     return;
