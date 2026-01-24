@@ -566,6 +566,18 @@ namespace RimWorldAccess
                 }
             }
 
+            // Handle storage for IStoreSettingsParent things that aren't Buildings or Zones (e.g., Blueprint_Storage)
+            if (category == "Storage" && obj is IStoreSettingsParent storeParent && !(obj is Building) && !(obj is Zone))
+            {
+                var settings = storeParent.GetStoreSettings();
+                if (settings != null)
+                {
+                    WindowlessInspectionState.Close();
+                    StorageSettingsMenuState.Open(settings);
+                }
+                return;
+            }
+
             // Handle building-specific actions
             if (!(obj is Building building))
                 return;

@@ -224,6 +224,13 @@ namespace RimWorldAccess
             if (Find.DesignatorManager != null)
             {
                 Find.DesignatorManager.Select(designator);
+
+                // Sync our tracked rotation with the designator's actual rotation
+                // (RimWorld's Selected() sets placingRot to PlacingDef.defaultPlacingRot)
+                if (designator is Designator_Place placeDesignatorForSync && placingRotField != null)
+                {
+                    currentRotation = (Rot4)placingRotField.GetValue(placeDesignatorForSync);
+                }
             }
         }
 

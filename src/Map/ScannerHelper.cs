@@ -213,6 +213,21 @@ namespace RimWorldAccess
             IsTerrain = true;
         }
 
+        // Constructor for adjacency-grouped mineable regions (ore/rock with Thing reference)
+        public ScannerItem(List<TerrainRegion> regions, string label, IntVec3 cursorPosition, Thing primaryThing)
+        {
+            if (regions == null || regions.Count == 0)
+                throw new ArgumentException("Mineable regions list must contain at least one region");
+
+            Thing = primaryThing; // Keep reference for def info
+            TerrainRegions = regions;
+            // Position is the center of the closest region
+            Position = regions[0].CenterPosition;
+            Distance = regions[0].Distance;
+            Label = label;
+            IsTerrain = false; // Mineables are Things, not terrain
+        }
+
         // Constructor for designation items
         public ScannerItem(Designation designation, IntVec3 cursorPosition)
         {
@@ -730,6 +745,11 @@ namespace RimWorldAccess
 
             // Collect mineable tiles and terrain
             var allCells = map.AllCells;
+
+            // Collect mineables by def type for later adjacency grouping
+            var mineableRareByDef = new Dictionary<string, List<(IntVec3 position, Thing thing)>>();
+            var mineableStoneByDef = new Dictionary<string, List<(IntVec3 position, Thing thing)>>();
+
             foreach (var cell in allCells)
             {
                 // Skip fogged cells
@@ -742,18 +762,22 @@ namespace RimWorldAccess
                 var edifice = cell.GetEdifice(map);
                 if (edifice != null && edifice.def.building != null && edifice.def.building.isNaturalRock)
                 {
-                    var item = new ScannerItem(edifice, cursorPosition);
+                    string defKey = edifice.def.defName;
 
                     // Separate rare minerals (ore) from plain stone
                     if (edifice.def.building.isResourceRock && edifice.def.building.mineableYield > 0)
                     {
                         // Rare minerals (steel, gold, plasteel, uranium, etc.)
-                        mineableRareSubcat.Items.Add(item);
+                        if (!mineableRareByDef.ContainsKey(defKey))
+                            mineableRareByDef[defKey] = new List<(IntVec3, Thing)>();
+                        mineableRareByDef[defKey].Add((cell, edifice));
                     }
                     else
                     {
                         // Plain stone (granite, marble, slate, limestone, sandstone)
-                        mineableStoneSubcat.Items.Add(item);
+                        if (!mineableStoneByDef.ContainsKey(defKey))
+                            mineableStoneByDef[defKey] = new List<(IntVec3, Thing)>();
+                        mineableStoneByDef[defKey].Add((cell, edifice));
                     }
                 }
 
@@ -786,6 +810,32 @@ namespace RimWorldAccess
                         }
                     }
                 }
+            }
+
+            // Group rare mineables (ore) by adjacency
+            foreach (var kvp in mineableRareByDef)
+            {
+                var positions = kvp.Value.Select(x => x.position).ToList();
+                var regions = GroupTerrainByAdjacency(positions, cursorPosition);
+                var primaryThing = kvp.Value[0].thing;
+                string label = primaryThing.def.label ?? "Unknown";
+
+                // Create item with regions (like terrain does)
+                var item = new ScannerItem(regions, label, cursorPosition, primaryThing);
+                mineableRareSubcat.Items.Add(item);
+            }
+
+            // Group stone mineables by adjacency
+            foreach (var kvp in mineableStoneByDef)
+            {
+                var positions = kvp.Value.Select(x => x.position).ToList();
+                var regions = GroupTerrainByAdjacency(positions, cursorPosition);
+                var primaryThing = kvp.Value[0].thing;
+                string label = primaryThing.def.label ?? "Unknown";
+
+                // Create item with regions (like terrain does)
+                var item = new ScannerItem(regions, label, cursorPosition, primaryThing);
+                mineableStoneSubcat.Items.Add(item);
             }
 
             // Collect all designations/orders

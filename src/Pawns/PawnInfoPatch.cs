@@ -146,8 +146,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the currently selected pawn, if any.
-        /// Returns null and announces appropriate message if no pawn is selected.
+        /// Gets the currently selected pawn from the game selector.
         /// </summary>
         private static Pawn GetSelectedPawn()
         {

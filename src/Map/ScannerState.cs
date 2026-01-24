@@ -908,13 +908,15 @@ namespace RimWorldAccess
 
             // Get target position (use live position for things that might be moving)
             IntVec3 targetPos = item.Thing != null ? item.Thing.Position : item.Position;
+            var currentCursorPos = MapNavigationState.CurrentCursorPosition;
+            var freshDistance = (targetPos - currentCursorPos).LengthHorizontal;  // Calculate fresh distance
             var itemDirection = GetDirectionFromCursor(targetPos);
 
             // Build announcement with direction (use comma instead of hyphen to avoid "minus" reading)
             string basicAnnouncement;
             if (itemDirection != null)
             {
-                basicAnnouncement = $"{item.Label}, {item.Distance:F1} tiles {itemDirection}";
+                basicAnnouncement = $"{item.Label}, {freshDistance:F1} tiles {itemDirection}";
             }
             else
             {

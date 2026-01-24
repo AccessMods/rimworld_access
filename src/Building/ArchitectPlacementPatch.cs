@@ -87,6 +87,19 @@ namespace RimWorldAccess
                 // For other keys, let placement mode handle them normally
             }
 
+            // Don't let placement mode steal Enter/Escape from active scanner search
+            // Search should always have priority for these keys
+            if (ScannerSearchState.IsActive)
+            {
+                if (Event.current.keyCode == KeyCode.Return ||
+                    Event.current.keyCode == KeyCode.KeypadEnter ||
+                    Event.current.keyCode == KeyCode.Escape)
+                {
+                    // Don't consume - let UnifiedKeyboardPatch route to search
+                    return;
+                }
+            }
+
             // Check we have a valid map
             if (Find.CurrentMap == null)
             {

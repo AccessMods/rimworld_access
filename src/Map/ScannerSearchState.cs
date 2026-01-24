@@ -21,6 +21,10 @@ namespace RimWorldAccess
         private static string activeFilterQuery = "";
         private static bool activeFilterIsWorldMap = false;
 
+        // Previous filter state for restoration on cancel
+        private static string savedFilterQuery = "";
+        private static bool savedFilterIsWorldMap = false;
+
         // Word separators for match type detection
         private static readonly char[] WordSeparators = { ' ', '-', '_', '(', ')', '[', ']', '/', '\\', '.', ',' };
 
@@ -41,12 +45,16 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Activates search mode (Z key pressed).
-        /// Clears any existing filter since a new search will replace it.
+        /// Saves existing filter for restoration on cancel, then clears it.
         /// </summary>
         /// <param name="onWorldMap">True if on world map, false if on colony map</param>
         public static void Activate(bool onWorldMap)
         {
-            // Clear any existing filter - new search replaces old
+            // Save the previous filter state BEFORE clearing (for restoration on cancel)
+            savedFilterQuery = activeFilterQuery;
+            savedFilterIsWorldMap = activeFilterIsWorldMap;
+
+            // Clear any existing filter - new search will replace it
             if (HasActiveFilter)
             {
                 activeFilterQuery = "";
@@ -65,18 +73,22 @@ namespace RimWorldAccess
             isSearchModeActive = true;
 
             // Save focus before we start modifying scanner state
-            if (onWorldMap)
+            // Only save focus if there was no previous filter (filter already has its own position)
+            if (string.IsNullOrEmpty(savedFilterQuery))
             {
-                if (!WorldScannerState.IsInTemporaryCategory())
+                if (onWorldMap)
                 {
-                    WorldScannerState.SaveFocus();
+                    if (!WorldScannerState.IsInTemporaryCategory())
+                    {
+                        WorldScannerState.SaveFocus();
+                    }
                 }
-            }
-            else
-            {
-                if (!ScannerState.IsInTemporaryCategory())
+                else
                 {
-                    ScannerState.SaveFocus();
+                    if (!ScannerState.IsInTemporaryCategory())
+                    {
+                        ScannerState.SaveFocus();
+                    }
                 }
             }
 
@@ -122,6 +134,7 @@ namespace RimWorldAccess
         /// Confirms the search and keeps the filter active (Enter key).
         /// Exits search input mode but preserves the search category.
         /// The filter will refresh automatically when the scanner refreshes.
+        /// Clears any saved filter state - new filter permanently replaces old.
         /// </summary>
         public static void ConfirmSearch()
         {
@@ -133,6 +146,11 @@ namespace RimWorldAccess
 
                 searchBuffer = "";
                 isSearchModeActive = false;
+
+                // Clear saved filter - new one replaces it permanently
+                savedFilterQuery = "";
+                savedFilterIsWorldMap = false;
+
                 TolkHelper.Speak($"Scanner now filtering {activeFilterQuery}", SpeechPriority.Normal);
             }
             else
@@ -144,27 +162,69 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Cancels the search and reverts to previous scanner state (Escape key).
-        /// Removes the search category and restores focus to where it was before searching.
-        /// Also clears any active filter.
+        /// If there was a previous filter, restores it. Otherwise, restores focus to pre-search position.
         /// </summary>
         public static void CancelSearch()
         {
             searchBuffer = "";
             isSearchModeActive = false;
-            activeFilterQuery = "";
 
+            // Remove current search temporary category
             if (isOnWorldMap)
             {
                 WorldScannerState.RemoveTemporaryCategory();
-                WorldScannerState.RestoreFocus();
             }
             else
             {
                 ScannerState.RemoveTemporaryCategory();
-                ScannerState.RestoreFocus();
             }
 
-            TolkHelper.Speak("Search cancelled", SpeechPriority.Normal);
+            // Restore previous filter if there was one
+            if (!string.IsNullOrEmpty(savedFilterQuery))
+            {
+                activeFilterQuery = savedFilterQuery;
+                activeFilterIsWorldMap = savedFilterIsWorldMap;
+
+                // Recreate the previous filter's temporary category
+                if (savedFilterIsWorldMap)
+                {
+                    var matching = RefreshWorldFilter();
+                    if (matching != null && matching.Count > 0)
+                    {
+                        WorldScannerState.CreateTemporaryCategory($"Search: {activeFilterQuery}", matching);
+                    }
+                }
+                else
+                {
+                    var map = Find.CurrentMap;
+                    var cursor = MapNavigationState.CurrentCursorPosition;
+                    var matching = RefreshMapFilter(map, cursor);
+                    if (matching != null && matching.Count > 0)
+                    {
+                        ScannerState.CreateTemporaryCategory($"Search: {activeFilterQuery}", matching);
+                    }
+                }
+
+                TolkHelper.Speak($"Search cancelled. Restored filter: {savedFilterQuery}", SpeechPriority.Normal);
+            }
+            else
+            {
+                activeFilterQuery = "";
+                // Restore saved focus (pre-search position)
+                if (isOnWorldMap)
+                {
+                    WorldScannerState.RestoreFocus();
+                }
+                else
+                {
+                    ScannerState.RestoreFocus();
+                }
+                TolkHelper.Speak("Search cancelled", SpeechPriority.Normal);
+            }
+
+            // Clear saved state
+            savedFilterQuery = "";
+            savedFilterIsWorldMap = false;
         }
 
         /// <summary>
@@ -219,6 +279,52 @@ namespace RimWorldAccess
             var matching = firstWordMatches.OrderBy(i => i.Distance)
                 .Concat(otherWordMatches.OrderBy(i => i.Distance))
                 .Concat(containsMatches.OrderBy(i => i.Distance))
+                .ToList();
+
+            return matching;
+        }
+
+        /// <summary>
+        /// Refreshes the active filter with fresh items from the world map.
+        /// Called when restoring a previous filter on the world map.
+        /// Returns the updated list of matching items, or null if no active filter.
+        /// </summary>
+        public static List<WorldScannerItem> RefreshWorldFilter()
+        {
+            if (string.IsNullOrEmpty(activeFilterQuery) || !activeFilterIsWorldMap)
+                return null;
+
+            var originTile = WorldNavigationState.CurrentSelectedTile;
+
+            // Collect all items from world
+            var allItems = CollectAllWorldItemsFlat();
+
+            // Filter and prioritize by match type
+            var firstWordMatches = new List<WorldScannerItem>();
+            var otherWordMatches = new List<WorldScannerItem>();
+            var containsMatches = new List<WorldScannerItem>();
+
+            foreach (var item in allItems)
+            {
+                var matchType = GetMatchType(activeFilterQuery, item.Label);
+                switch (matchType)
+                {
+                    case MatchType.FirstWord:
+                        firstWordMatches.Add(item);
+                        break;
+                    case MatchType.OtherWord:
+                        otherWordMatches.Add(item);
+                        break;
+                    case MatchType.Contains:
+                        containsMatches.Add(item);
+                        break;
+                }
+            }
+
+            // Sort by relevance first, then distance within each tier
+            var matching = firstWordMatches.OrderBy(i => i.GetDistance(originTile, 0))
+                .Concat(otherWordMatches.OrderBy(i => i.GetDistance(originTile, 0)))
+                .Concat(containsMatches.OrderBy(i => i.GetDistance(originTile, 0)))
                 .ToList();
 
             return matching;
@@ -300,7 +406,9 @@ namespace RimWorldAccess
 
             if (matching.Count == 0)
             {
-                TolkHelper.Speak("No results", SpeechPriority.Normal);
+                // No matches - announce and clear buffer so user can type again
+                TolkHelper.Speak($"No matches for '{searchBuffer}'", SpeechPriority.Normal);
+                searchBuffer = "";
                 return;
             }
 
@@ -358,7 +466,9 @@ namespace RimWorldAccess
 
             if (matching.Count == 0)
             {
-                TolkHelper.Speak("No results", SpeechPriority.Normal);
+                // No matches - announce and clear buffer so user can type again
+                TolkHelper.Speak($"No matches for '{searchBuffer}'", SpeechPriority.Normal);
+                searchBuffer = "";
                 return;
             }
 

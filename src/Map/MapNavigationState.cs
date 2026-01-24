@@ -371,6 +371,9 @@ namespace RimWorldAccess
             knownMapIds.Clear();
             hasAnnouncedMultiMapHint = false;
             cameraFollowMode = CameraFollowMode.Cursor;
+
+            // Invalidate scanner since map data is no longer valid
+            ScannerState.Invalidate();
         }
 
         /// <summary>

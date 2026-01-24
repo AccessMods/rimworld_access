@@ -113,7 +113,7 @@ namespace RimWorldAccess
                     if (cap != null && pawn.health.capacities.CapableOf(cap))
                     {
                         float level = pawn.health.capacities.GetLevel(cap);
-                        string status = level < 1f ? $"{level:P0}" : "100%";
+                        string status = $"{level:P0}";
                         sb.AppendLine($"{cap.LabelCap}: {status}.");
                     }
                 }
