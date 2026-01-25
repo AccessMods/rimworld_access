@@ -283,24 +283,11 @@ namespace RimWorldAccess
 
             string text = $"{option.label}";
 
-            // Add description from Def objects or TraitDegreeData if available
+            // Add description from Def objects if available (only when game UI shows tooltips)
             // Special handling for FactionDef which has a computed Description property
             if (option.value is FactionDef fd && !string.IsNullOrEmpty(fd.Description))
             {
                 string desc = fd.Description;
-                int newlineIndex = desc.IndexOf('\n');
-                if (newlineIndex > 0)
-                    desc = desc.Substring(0, newlineIndex);
-                text += $". {desc.Trim()}";
-            }
-            else if (option.value is TraitDegreeData tdd && !string.IsNullOrEmpty(tdd.description))
-            {
-                // TraitDegreeData descriptions may contain {PAWN} placeholder - strip it
-                string desc = tdd.description.Replace("{PAWN_nameDef}", "colonist")
-                                              .Replace("{PAWN_possessive}", "their")
-                                              .Replace("{PAWN_objective}", "them")
-                                              .Replace("{PAWN_pronoun}", "they")
-                                              .Replace("{PAWN}", "colonist");
                 int newlineIndex = desc.IndexOf('\n');
                 if (newlineIndex > 0)
                     desc = desc.Substring(0, newlineIndex);
