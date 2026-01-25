@@ -51,8 +51,27 @@ namespace RimWorldAccess
             public PartField Field { get; set; } // The field (null for parts)
             public PartTreeItem AsPart { get; set; } // If this is a part, the PartTreeItem
 
+            // List item support (3-level hierarchy for list-based parts)
+            public bool IsListItem { get; set; } // True if this is an item in a list (level 1)
+            public int ListItemIndex { get; set; } // Index within the parent list
+            public bool IsAddAction { get; set; } // True if this is an "Add New Item" action
+            public object ListItemReference { get; set; } // Reference to the actual list item object
+            public ListItemData ListItemData { get; set; } // The ListItemData for list items
+
             public bool IsPart => AsPart != null;
             public bool IsField => Field != null;
+        }
+
+        /// <summary>
+        /// Represents a list item within a list-based part (e.g., PawnKindCount in KindDefs).
+        /// </summary>
+        public class ListItemData
+        {
+            public string Label { get; set; }
+            public List<PartField> Fields { get; set; } = new List<PartField>();
+            public int Index { get; set; }
+            public object ItemReference { get; set; }
+            public bool IsExpanded { get; set; }
         }
 
         // Reference to the current scenario and editor page
@@ -60,7 +79,7 @@ namespace RimWorldAccess
         private static Page_ScenarioEditor currentPage;
 
         // For tracking changes
-        private static int originalHash;
+        private static bool isDirty;
 
         // Level tracking for tree navigation
         private const string LevelTrackingKey = "ScenarioBuilderParts";
@@ -81,6 +100,22 @@ namespace RimWorldAccess
         public static Section CurrentSection => currentSection;
 
         /// <summary>
+        /// Marks the scenario as having unsaved changes.
+        /// </summary>
+        public static void SetDirty()
+        {
+            isDirty = true;
+        }
+
+        /// <summary>
+        /// Resets the dirty flag (after saving or loading).
+        /// </summary>
+        public static void ResetDirty()
+        {
+            isDirty = false;
+        }
+
+        /// <summary>
         /// Represents a part in the parts tree with its editable fields.
         /// </summary>
         public class PartTreeItem
@@ -91,6 +126,10 @@ namespace RimWorldAccess
             public List<PartField> Fields { get; set; } = new List<PartField>();
             public bool IsExpanded { get; set; }
             public int IndentLevel { get; set; }
+
+            // List-based part support
+            public bool IsListPart { get; set; }
+            public List<ListItemData> ListItems { get; set; } = new List<ListItemData>();
         }
 
         /// <summary>
@@ -105,7 +144,7 @@ namespace RimWorldAccess
             public Action<object> SetValue { get; set; } // Callback to set the value
         }
 
-        public enum FieldType { Dropdown, Quantity, Text }
+        public enum FieldType { Dropdown, Quantity, Text, Checkbox }
 
         /// <summary>
         /// Opens the scenario builder state with the given scenario.
@@ -114,7 +153,7 @@ namespace RimWorldAccess
         {
             currentScenario = scenario;
             currentPage = page;
-            originalHash = scenario?.GetHashCode() ?? 0;
+            isDirty = false;
 
             currentSection = Section.Metadata;
             metadataIndex = 0;
@@ -146,6 +185,28 @@ namespace RimWorldAccess
             flattenedParts.Clear();
             partsTypeaheadHelper.ClearSearch();
             MenuHelper.ResetLevel(LevelTrackingKey);
+
+            // Close any active child states to prevent broken state on re-entry
+            if (ScenarioBuilderAddPartState.IsActive)
+            {
+                ScenarioBuilderAddPartState.Close(selectPart: false);
+            }
+            if (ScenarioBuilderPartEditState.IsActive)
+            {
+                ScenarioBuilderPartEditState.Close(applyChanges: false);
+            }
+            if (WindowlessScenarioLoadState.IsActive)
+            {
+                WindowlessScenarioLoadState.Close();
+            }
+            if (WindowlessScenarioSaveState.IsActive)
+            {
+                WindowlessScenarioSaveState.Close();
+            }
+            if (WindowlessScenarioDeleteConfirmState.IsActive)
+            {
+                WindowlessScenarioDeleteConfirmState.Cancel();
+            }
         }
 
         /// <summary>
@@ -157,10 +218,26 @@ namespace RimWorldAccess
         {
             // Remember which parts were expanded (by ScenPart reference)
             var expandedParts = new HashSet<ScenPart>();
+            // Remember which list items were expanded (by part reference + item index)
+            var expandedListItems = new Dictionary<ScenPart, HashSet<int>>();
+
             foreach (var existing in partsHierarchy)
             {
                 if (existing.IsExpanded)
                     expandedParts.Add(existing.Part);
+
+                // Track expanded list items
+                if (existing.IsListPart && existing.ListItems != null)
+                {
+                    var expandedIndices = new HashSet<int>();
+                    foreach (var listItem in existing.ListItems)
+                    {
+                        if (listItem.IsExpanded)
+                            expandedIndices.Add(listItem.Index);
+                    }
+                    if (expandedIndices.Count > 0)
+                        expandedListItems[existing.Part] = expandedIndices;
+                }
             }
 
             partsHierarchy.Clear();
@@ -180,8 +257,30 @@ namespace RimWorldAccess
                     IndentLevel = 0
                 };
 
-                // Extract editable fields from the part
-                item.Fields = ExtractPartFields(part);
+                // Check if this is a list-based part
+                if (IsListBasedPart(part))
+                {
+                    item.IsListPart = true;
+                    item.ListItems = ExtractListItems(part);
+
+                    // Restore expanded state for list items
+                    if (expandedListItems.TryGetValue(part, out var expandedIndices))
+                    {
+                        foreach (var listItem in item.ListItems)
+                        {
+                            if (expandedIndices.Contains(listItem.Index))
+                                listItem.IsExpanded = true;
+                        }
+                    }
+
+                    // For list parts, still extract regular fields (like pawnChoiceCount)
+                    item.Fields = ExtractPartFields(part);
+                }
+                else
+                {
+                    // Extract editable fields from the part
+                    item.Fields = ExtractPartFields(part);
+                }
 
                 partsHierarchy.Add(item);
             }
@@ -191,6 +290,7 @@ namespace RimWorldAccess
         /// Flattens the parts tree for navigation.
         /// Includes parts and their fields (when expanded).
         /// Single-field parts are shown directly without needing to expand.
+        /// List-based parts have 3 levels: Part -> List Items -> Item Fields
         /// </summary>
         private static void FlattenPartsTree()
         {
@@ -205,9 +305,98 @@ namespace RimWorldAccess
                     partLabel += $" - {part.Summary}";
                 }
 
+                // LIST-BASED PARTS: Special 3-level hierarchy
+                if (part.IsListPart)
+                {
+                    // Calculate total child count: list items + regular fields + add action
+                    int childCount = part.ListItems.Count + part.Fields.Count + 1; // +1 for "Add New Item"
+                    bool hasChildren = childCount > 0;
+
+                    flattenedParts.Add(new TreeViewItem
+                    {
+                        Label = partLabel,
+                        IndentLevel = 0,
+                        IsExpandable = hasChildren,
+                        IsExpanded = part.IsExpanded,
+                        ParentPart = null,
+                        Field = null,
+                        AsPart = part
+                    });
+
+                    if (part.IsExpanded)
+                    {
+                        // Add regular fields first (like pawnChoiceCount)
+                        foreach (var field in part.Fields)
+                        {
+                            flattenedParts.Add(new TreeViewItem
+                            {
+                                Label = $"{field.Name}: {field.CurrentValue}",
+                                IndentLevel = 1,
+                                IsExpandable = false,
+                                IsExpanded = false,
+                                ParentPart = part,
+                                Field = field,
+                                AsPart = null
+                            });
+                        }
+
+                        // Add list items (level 1)
+                        foreach (var listItem in part.ListItems)
+                        {
+                            flattenedParts.Add(new TreeViewItem
+                            {
+                                Label = listItem.Label,
+                                IndentLevel = 1,
+                                IsExpandable = listItem.Fields.Count > 0,
+                                IsExpanded = listItem.IsExpanded,
+                                ParentPart = part,
+                                Field = null,
+                                AsPart = null,
+                                IsListItem = true,
+                                ListItemIndex = listItem.Index,
+                                ListItemReference = listItem.ItemReference,
+                                ListItemData = listItem
+                            });
+
+                            // If list item is expanded, add its fields (level 2)
+                            if (listItem.IsExpanded)
+                            {
+                                foreach (var field in listItem.Fields)
+                                {
+                                    flattenedParts.Add(new TreeViewItem
+                                    {
+                                        Label = $"{field.Name}: {field.CurrentValue}",
+                                        IndentLevel = 2,
+                                        IsExpandable = false,
+                                        IsExpanded = false,
+                                        ParentPart = part,
+                                        Field = field,
+                                        AsPart = null,
+                                        IsListItem = false,
+                                        ListItemIndex = listItem.Index,
+                                        ListItemData = listItem
+                                    });
+                                }
+                            }
+                        }
+
+                        // Add "Add New Item" action at the end
+                        flattenedParts.Add(new TreeViewItem
+                        {
+                            Label = "Add New Item",
+                            IndentLevel = 1,
+                            IsExpandable = false,
+                            IsExpanded = false,
+                            ParentPart = part,
+                            Field = null,
+                            AsPart = null,
+                            IsAddAction = true
+                        });
+                    }
+                }
                 // SPECIAL CASE: Parts with exactly 1 field are shown directly as that field
                 // This avoids requiring expand/collapse for simple items like "Player Faction"
-                if (part.Fields.Count == 1)
+                else if (part.Fields.Count == 1 && !part.IsListPart)
                 {
                     var field = part.Fields[0];
                     flattenedParts.Add(new TreeViewItem
@@ -258,15 +447,62 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets a summary of the part's current values.
+        /// Uses GetSummaryListEntries() for parts that support it (to avoid aggregation issues),
+        /// falls back to Summary() for other parts.
         /// </summary>
         private static string GetPartSummary(ScenPart part)
         {
             try
             {
+                // Try to get individual summary entries for this specific part.
+                // Parts like ScenPart_StartingThing_Defined use GetSummaryListEntries()
+                // to provide per-part summaries, while Summary() aggregates all parts.
+
+                // Check common tags used by scenario parts
+                string[] tagsToCheck = new string[]
+                {
+                    "PlayerStartsWith",   // Starting items, animals, mechs, things near start
+                    "DisallowBuilding",   // Disallowed buildings
+                    "MapScatteredWith",   // Scattered items anywhere
+                    "PermaGameCondition", // Permanent game conditions
+                    "CreateIncident",     // Scheduled incidents
+                    "DisableIncident"     // Disabled incidents
+                };
+
+                foreach (var tag in tagsToCheck)
+                {
+                    var entries = part.GetSummaryListEntries(tag);
+                    if (entries != null)
+                    {
+                        var entriesList = entries.ToList();
+                        if (entriesList.Count > 0)
+                        {
+                            // Join multiple entries (usually just one per part)
+                            return string.Join(", ", entriesList);
+                        }
+                    }
+                }
+
+                // No list entries found - fall back to Summary()
+                // Reset summarized flag to ensure we get fresh data
+                part.summarized = false;
                 string summary = part.Summary(currentScenario);
+
                 if (!string.IsNullOrEmpty(summary))
                 {
-                    // Clean up the summary - take first line only
+                    // Handle SummaryWithList format (starts with newline + intro)
+                    if (summary.StartsWith("\n"))
+                    {
+                        // Parse the list format: "\nIntro:\n   -Item1\n   -Item2"
+                        var lines = summary.Split('\n')
+                            .Where(l => l.TrimStart().StartsWith("-"))
+                            .Select(l => l.TrimStart(' ', '-'))
+                            .ToList();
+                        if (lines.Count > 0)
+                            return string.Join(", ", lines);
+                    }
+
+                    // Clean up regular summaries - take first line only
                     int newlineIndex = summary.IndexOf('\n');
                     if (newlineIndex > 0)
                         summary = summary.Substring(0, newlineIndex);
@@ -328,6 +564,45 @@ namespace RimWorldAccess
                     });
                 }
                 // If CanEdit is false, don't add field - part will show as read-only
+            }
+
+            // Handle ScenPart_PlanetLayer - tag field (unique layer identifier)
+            var tagField = partType.GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+            if (tagField != null && tagField.FieldType == typeof(string) &&
+                partType.Name == "ScenPart_PlanetLayer")
+            {
+                var currentTag = (string)tagField.GetValue(part) ?? "";
+                fields.Add(new PartField
+                {
+                    Name = "Layer Tag",
+                    Type = FieldType.Text,
+                    CurrentValue = string.IsNullOrEmpty(currentTag) ? "(empty)" :
+                        (currentTag.Length > 60 ? currentTag.Substring(0, 60) + "..." : currentTag),
+                    Data = currentTag,
+                    SetValue = (val) => tagField.SetValue(part, val)
+                });
+            }
+
+            // Handle ScenPart_PlanetLayer - settingsDef field
+            var settingsDefField = partType.GetField("settingsDef", BindingFlags.Public | BindingFlags.Instance);
+            if (settingsDefField != null && partType.Name == "ScenPart_PlanetLayer")
+            {
+                var currentSettings = settingsDefField.GetValue(part);
+                string currentLabel = "None";
+                if (currentSettings != null)
+                {
+                    var labelProp = currentSettings.GetType().GetProperty("LabelCap");
+                    if (labelProp != null)
+                        currentLabel = labelProp.GetValue(currentSettings)?.ToString() ?? "None";
+                }
+                fields.Add(new PartField
+                {
+                    Name = "Layer Settings",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = currentLabel,
+                    Data = GetPlanetLayerSettingsOptions(),
+                    SetValue = (val) => settingsDefField.SetValue(part, val)
+                });
             }
 
             // Handle ScenPart_PlayerPawnsArriveMethod - arrival method enum
@@ -443,6 +718,75 @@ namespace RimWorldAccess
                 });
             }
 
+            // Handle ScenPart_ForcedHediff - hediff field
+            var hediffField = partType.GetField("hediff", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (hediffField != null && hediffField.FieldType == typeof(HediffDef))
+            {
+                var currentHediff = (HediffDef)hediffField.GetValue(part);
+                fields.Add(new PartField
+                {
+                    Name = "Condition",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = currentHediff?.LabelCap ?? "None",
+                    Data = GetHediffOptions(),
+                    SetValue = (val) => hediffField.SetValue(part, val)
+                });
+            }
+
+            // Handle ScenPart_ForcedHediff - severityRange field
+            var severityRangeField = partType.GetField("severityRange", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (severityRangeField != null && severityRangeField.FieldType == typeof(FloatRange))
+            {
+                var currentRange = (FloatRange)severityRangeField.GetValue(part);
+
+                // Min severity field
+                fields.Add(new PartField
+                {
+                    Name = "Minimum Severity",
+                    Type = FieldType.Quantity,
+                    CurrentValue = $"{(currentRange.min * 100):F0}%",
+                    Data = new float[] { 0f, 1f },
+                    SetValue = (val) =>
+                    {
+                        var range = (FloatRange)severityRangeField.GetValue(part);
+                        float newMin = Convert.ToSingle(val);
+                        if (newMin > range.max) newMin = range.max;
+                        severityRangeField.SetValue(part, new FloatRange(newMin, range.max));
+                    }
+                });
+
+                // Max severity field
+                fields.Add(new PartField
+                {
+                    Name = "Maximum Severity",
+                    Type = FieldType.Quantity,
+                    CurrentValue = $"{(currentRange.max * 100):F0}%",
+                    Data = new float[] { 0f, 1f },
+                    SetValue = (val) =>
+                    {
+                        var range = (FloatRange)severityRangeField.GetValue(part);
+                        float newMax = Convert.ToSingle(val);
+                        if (newMax < range.min) newMax = range.min;
+                        severityRangeField.SetValue(part, new FloatRange(range.min, newMax));
+                    }
+                });
+            }
+
+            // Handle ScenPart_PawnModifier - context field
+            var contextField = partType.GetField("context", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (contextField != null && contextField.FieldType == typeof(PawnGenerationContext))
+            {
+                var currentContext = (PawnGenerationContext)contextField.GetValue(part);
+                fields.Add(new PartField
+                {
+                    Name = "Affects",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = currentContext.ToStringHuman(),
+                    Data = GetPawnGenerationContextOptions(),
+                    SetValue = (val) => contextField.SetValue(part, val)
+                });
+            }
+
             // Try to find PawnKindDef field (for animals)
             var animalKindField = partType.GetField("animalKind", BindingFlags.NonPublic | BindingFlags.Instance);
             if (animalKindField != null && animalKindField.FieldType == typeof(PawnKindDef))
@@ -458,34 +802,129 @@ namespace RimWorldAccess
                 });
             }
 
-            // Try to find TraitDef field
-            var traitField = partType.GetField("trait", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (traitField != null && traitField.FieldType == typeof(TraitDef))
+            // Handle ScenPart_ForcedTrait - trait with degree selection
+            if (partType.Name == "ScenPart_ForcedTrait")
             {
-                var currentTrait = (TraitDef)traitField.GetValue(part);
-                fields.Add(new PartField
+                var traitField = partType.GetField("trait", BindingFlags.NonPublic | BindingFlags.Instance);
+                var degreeField = partType.GetField("degree", BindingFlags.NonPublic | BindingFlags.Instance);
+
+                if (traitField != null && degreeField != null)
                 {
-                    Name = "Trait",
-                    Type = FieldType.Dropdown,
-                    CurrentValue = currentTrait?.label?.CapitalizeFirst() ?? "None",
-                    Data = GetTraitOptions(),
-                    SetValue = (val) => traitField.SetValue(part, val)
-                });
+                    var currentTrait = traitField.GetValue(part) as TraitDef;
+                    int currentDegree = (int)degreeField.GetValue(part);
+
+                    // Build current display value
+                    string currentLabel = "None";
+                    if (currentTrait != null)
+                    {
+                        var degreeData = currentTrait.DataAtDegree(currentDegree);
+                        currentLabel = degreeData?.LabelCap ?? currentTrait.LabelCap;
+                    }
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Trait",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentLabel,
+                        Data = GetTraitWithDegreeOptions(),
+                        SetValue = (val) => {
+                            if (val is TraitDegreeData tdd)
+                            {
+                                // Find the parent TraitDef
+                                foreach (var td in DefDatabase<TraitDef>.AllDefs)
+                                {
+                                    if (td.degreeDatas.Contains(tdd))
+                                    {
+                                        traitField.SetValue(part, td);
+                                        degreeField.SetValue(part, tdd.degree);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
             }
 
-            // Try to find IncidentDef field
-            var incidentField = partType.GetField("incident", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (incidentField != null && incidentField.FieldType == typeof(IncidentDef))
+            // Handle ScenPart_CreateIncident - incident timing and repeat
+            if (partType.Name == "ScenPart_CreateIncident")
             {
-                var currentIncident = (IncidentDef)incidentField.GetValue(part);
-                fields.Add(new PartField
+                // incident field (inherited from IncidentBase)
+                var incidentField = partType.GetField("incident", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (incidentField != null)
                 {
-                    Name = "Incident",
-                    Type = FieldType.Dropdown,
-                    CurrentValue = currentIncident?.LabelCap ?? "None",
-                    Data = GetIncidentOptions(),
-                    SetValue = (val) => incidentField.SetValue(part, val)
-                });
+                    var currentIncident = incidentField.GetValue(part) as IncidentDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Incident",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentIncident?.LabelCap ?? "None",
+                        Data = GetIncidentDefOptions(),
+                        SetValue = (val) => incidentField.SetValue(part, val)
+                    });
+                }
+
+                // minDays
+                var minDaysField = partType.GetField("minDays", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (minDaysField != null)
+                {
+                    float currentMin = (float)minDaysField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Minimum Days",
+                        Type = FieldType.Quantity,
+                        CurrentValue = currentMin.ToString("F1"),
+                        Data = new float[] { 0f, 1000f },
+                        SetValue = (val) => minDaysField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+
+                // maxDays
+                var maxDaysField = partType.GetField("maxDays", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (maxDaysField != null)
+                {
+                    float currentMax = (float)maxDaysField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Maximum Days",
+                        Type = FieldType.Quantity,
+                        CurrentValue = currentMax.ToString("F1"),
+                        Data = new float[] { 0f, 1000f },
+                        SetValue = (val) => maxDaysField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+
+                // repeat
+                var repeatField = partType.GetField("repeat", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (repeatField != null)
+                {
+                    bool currentRepeat = (bool)repeatField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Repeat",
+                        Type = FieldType.Checkbox,
+                        CurrentValue = currentRepeat ? "Yes" : "No",
+                        Data = null,
+                        SetValue = (val) => repeatField.SetValue(part, val is bool b ? b : val?.ToString() == "Yes")
+                    });
+                }
+            }
+            // Try to find IncidentDef field (generic handler for other incident parts)
+            else
+            {
+                var incidentField = partType.GetField("incident", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (incidentField != null && incidentField.FieldType == typeof(IncidentDef))
+                {
+                    var currentIncident = (IncidentDef)incidentField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Incident",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentIncident?.LabelCap ?? "None",
+                        Data = GetIncidentOptions(),
+                        SetValue = (val) => incidentField.SetValue(part, val)
+                    });
+                }
             }
 
             // Try to find ResearchProjectDef field
@@ -503,8 +942,11 @@ namespace RimWorldAccess
                 });
             }
 
-            // Handle ScenPart_ConfigPage_ConfigureStartingPawns - pawn count
+            // Handle ScenPart_ConfigPage_ConfigureStartingPawns - pawn count and choice pool
+            // These two fields are linked: pawnChoiceCount must be >= pawnCount
             var pawnCountField = partType.GetField("pawnCount", BindingFlags.Public | BindingFlags.Instance);
+            var pawnChoiceCountField = partType.GetField("pawnChoiceCount", BindingFlags.Public | BindingFlags.Instance);
+
             if (pawnCountField != null && pawnCountField.FieldType == typeof(int))
             {
                 int currentValue = (int)pawnCountField.GetValue(part);
@@ -514,8 +956,103 @@ namespace RimWorldAccess
                     Type = FieldType.Quantity,
                     CurrentValue = currentValue.ToString(),
                     Data = new int[] { 1, 10 }, // Game max is 10
-                    SetValue = (val) => pawnCountField.SetValue(part, val)
+                    SetValue = (val) => {
+                        int newPawnCount = Convert.ToInt32(val);
+                        pawnCountField.SetValue(part, newPawnCount);
+                        // Game enforces pawnChoiceCount >= pawnCount, so bump it up if needed
+                        if (pawnChoiceCountField != null)
+                        {
+                            int choiceCount = (int)pawnChoiceCountField.GetValue(part);
+                            if (choiceCount < newPawnCount)
+                            {
+                                pawnChoiceCountField.SetValue(part, newPawnCount);
+                            }
+                        }
+                    }
                 });
+            }
+
+            // Handle pawnChoiceCount - how many pawns to choose from (must be >= pawnCount)
+            if (pawnChoiceCountField != null && pawnChoiceCountField.FieldType == typeof(int))
+            {
+                int currentValue = (int)pawnChoiceCountField.GetValue(part);
+                int pawnCount = 1;
+                if (pawnCountField != null)
+                    pawnCount = (int)pawnCountField.GetValue(part);
+
+                fields.Add(new PartField
+                {
+                    Name = "Pawn Choice Pool",
+                    Type = FieldType.Quantity,
+                    CurrentValue = currentValue.ToString(),
+                    Data = new int[] { pawnCount, 10 }, // Minimum is current pawnCount
+                    SetValue = (val) => {
+                        int newChoiceCount = Convert.ToInt32(val);
+                        // Enforce minimum of pawnCount
+                        int currentPawnCount = pawnCountField != null ? (int)pawnCountField.GetValue(part) : 1;
+                        if (newChoiceCount < currentPawnCount)
+                            newChoiceCount = currentPawnCount;
+                        pawnChoiceCountField.SetValue(part, newChoiceCount);
+                    }
+                });
+            }
+
+            // Handle ScenPart_ConfigPage_ConfigureStartingPawns - allowedDevelopmentalStages (Biotech DLC)
+            if (ModsConfig.BiotechActive && partType.Name == "ScenPart_ConfigPage_ConfigureStartingPawns")
+            {
+                var devStagesField = partType.GetField("allowedDevelopmentalStages", BindingFlags.Public | BindingFlags.Instance);
+                if (devStagesField != null)
+                {
+                    var currentStagesObj = devStagesField.GetValue(part);
+                    int currentStages = Convert.ToInt32(currentStagesObj);
+
+                    // DevelopmentalStage is a flags enum: Baby=1, Child=2, Adult=4
+                    bool allowBabies = (currentStages & 1) != 0;
+                    bool allowChildren = (currentStages & 2) != 0;
+                    bool allowAdults = (currentStages & 4) != 0;
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Allow Babies",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = allowBabies ? "Yes" : "No",
+                        Data = GetYesNoOptions(),
+                        SetValue = (val) => {
+                            bool enable = val?.ToString() == "Yes";
+                            int stages = Convert.ToInt32(devStagesField.GetValue(part));
+                            if (enable) stages |= 1; else stages &= ~1;
+                            devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
+                        }
+                    });
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Allow Children",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = allowChildren ? "Yes" : "No",
+                        Data = GetYesNoOptions(),
+                        SetValue = (val) => {
+                            bool enable = val?.ToString() == "Yes";
+                            int stages = Convert.ToInt32(devStagesField.GetValue(part));
+                            if (enable) stages |= 2; else stages &= ~2;
+                            devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
+                        }
+                    });
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Allow Adults",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = allowAdults ? "Yes" : "No",
+                        Data = GetYesNoOptions(),
+                        SetValue = (val) => {
+                            bool enable = val?.ToString() == "Yes";
+                            int stages = Convert.ToInt32(devStagesField.GetValue(part));
+                            if (enable) stages |= 4; else stages &= ~4;
+                            devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
+                        }
+                    });
+                }
             }
 
             // Handle ScenPart_PawnFilter_Age - age range (min and max as separate fields)
@@ -557,6 +1094,387 @@ namespace RimWorldAccess
                 });
             }
 
+            // Handle ScenPart_StartingMech (Biotech DLC) - mech type and overseen chance
+            if (ModsConfig.BiotechActive && partType.Name == "ScenPart_StartingMech")
+            {
+                // Mech kind selection
+                var mechKindField = partType.GetField("mechKind", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (mechKindField != null)
+                {
+                    var currentKind = mechKindField.GetValue(part);
+                    string currentLabel = "Random";
+                    if (currentKind != null)
+                    {
+                        var labelProp = currentKind.GetType().GetProperty("LabelCap");
+                        currentLabel = labelProp?.GetValue(currentKind)?.ToString() ?? "Random";
+                    }
+                    fields.Add(new PartField
+                    {
+                        Name = "Mech Type",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentLabel,
+                        Data = GetStartingMechOptions(),
+                        SetValue = (val) => mechKindField.SetValue(part, val)
+                    });
+                }
+
+                // Overseen by mechanitor chance
+                var mechChanceField = partType.GetField("overseenByPlayerPawnChance", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (mechChanceField != null)
+                {
+                    float currentChance = (float)mechChanceField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Mechanitor Oversight Chance",
+                        Type = FieldType.Quantity,
+                        CurrentValue = $"{currentChance * 100:F0}%",
+                        Data = new float[] { 0f, 1f },
+                        SetValue = (val) => mechChanceField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+            }
+
+            // Handle ScenPart_GameStartDialog - dialog text (multi-line text field)
+            if (partType.Name == "ScenPart_GameStartDialog")
+            {
+                var textField = partType.GetField("text", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (textField != null && textField.FieldType == typeof(string))
+                {
+                    var fullText = (string)textField.GetValue(part) ?? "";
+
+                    // Create truncated display value (for tree view)
+                    string displayText = fullText;
+                    if (fullText.Contains("\n"))
+                    {
+                        int newlineIndex = fullText.IndexOf('\n');
+                        displayText = fullText.Substring(0, Math.Min(newlineIndex, 60)) + "...";
+                    }
+                    else if (fullText.Length > 60)
+                    {
+                        displayText = fullText.Substring(0, 60) + "...";
+                    }
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Dialog Text",
+                        Type = FieldType.Text,
+                        CurrentValue = string.IsNullOrEmpty(displayText) ? "(empty)" : displayText,
+                        Data = fullText, // Store full text for editing
+                        SetValue = (val) => textField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_DisableIncident - incident to disable
+            if (partType.Name == "ScenPart_DisableIncident")
+            {
+                var incidentField = partType.GetField("incident", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (incidentField != null)
+                {
+                    var currentIncident = incidentField.GetValue(part) as IncidentDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Incident",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentIncident?.LabelCap ?? "None",
+                        Data = GetIncidentDefOptions(), // Reuse existing helper
+                        SetValue = (val) => incidentField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_StatFactor - stat modifier
+            if (partType.Name == "ScenPart_StatFactor")
+            {
+                // stat field
+                var statField = partType.GetField("stat", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (statField != null)
+                {
+                    var currentStat = statField.GetValue(part) as StatDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Stat",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentStat?.LabelCap ?? "None",
+                        Data = GetStatDefOptions(),
+                        SetValue = (val) => statField.SetValue(part, val)
+                    });
+                }
+
+                // factor field (displayed as percentage, stored as decimal)
+                var factorField = partType.GetField("factor", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (factorField != null)
+                {
+                    float currentFactor = (float)factorField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Factor",
+                        Type = FieldType.Quantity,
+                        CurrentValue = $"{currentFactor * 100:F0}%",
+                        Data = new float[] { 0f, 100f }, // 0-10000% range in game
+                        SetValue = (val) => factorField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+            }
+
+            // Handle ScenPart_PermaGameCondition - permanent game condition
+            if (partType.Name == "ScenPart_PermaGameCondition")
+            {
+                var conditionField = partType.GetField("gameCondition", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (conditionField != null)
+                {
+                    var currentCondition = conditionField.GetValue(part) as GameConditionDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Condition",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentCondition?.LabelCap ?? "None",
+                        Data = GetPermanentGameConditionOptions(),
+                        SetValue = (val) => conditionField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_DisallowBuilding - building to disallow
+            if (partType.Name == "ScenPart_DisallowBuilding")
+            {
+                var buildingField = partType.GetField("building", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (buildingField != null)
+                {
+                    var currentBuilding = buildingField.GetValue(part) as ThingDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Building",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentBuilding?.LabelCap ?? "None",
+                        Data = GetBuildableThingDefOptions(),
+                        SetValue = (val) => buildingField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_SetNeedLevel - set pawn need levels
+            if (partType.Name == "ScenPart_SetNeedLevel")
+            {
+                // need field
+                var needField = partType.GetField("need", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (needField != null)
+                {
+                    var currentNeed = needField.GetValue(part) as NeedDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Need",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentNeed?.LabelCap ?? "None",
+                        Data = GetNeedDefOptions(),
+                        SetValue = (val) => needField.SetValue(part, val)
+                    });
+                }
+
+                // levelRange field (FloatRange - min and max level)
+                var levelRangeField = partType.GetField("levelRange", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (levelRangeField != null)
+                {
+                    var currentRange = (FloatRange)levelRangeField.GetValue(part);
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Minimum Level",
+                        Type = FieldType.Quantity,
+                        CurrentValue = $"{currentRange.min * 100:F0}%",
+                        Data = new float[] { 0f, 1f },
+                        SetValue = (val) => {
+                            var range = (FloatRange)levelRangeField.GetValue(part);
+                            float newMin = Convert.ToSingle(val);
+                            if (newMin > range.max) newMin = range.max;
+                            levelRangeField.SetValue(part, new FloatRange(newMin, range.max));
+                        }
+                    });
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Maximum Level",
+                        Type = FieldType.Quantity,
+                        CurrentValue = $"{currentRange.max * 100:F0}%",
+                        Data = new float[] { 0f, 1f },
+                        SetValue = (val) => {
+                            var range = (FloatRange)levelRangeField.GetValue(part);
+                            float newMax = Convert.ToSingle(val);
+                            if (newMax < range.min) newMax = range.min;
+                            levelRangeField.SetValue(part, new FloatRange(range.min, newMax));
+                        }
+                    });
+                }
+            }
+
+            // Handle ScenPart_GameCondition - temporary game condition with duration
+            if (partType.Name == "ScenPart_GameCondition")
+            {
+                // Note: The condition type comes from def.gameCondition, not a field
+                // We only expose durationDays which is editable
+                var durationField = partType.GetField("durationDays", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (durationField != null)
+                {
+                    float currentDuration = (float)durationField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Duration (Days)",
+                        Type = FieldType.Quantity,
+                        CurrentValue = currentDuration.ToString("F1"),
+                        Data = new float[] { 0f, 1000f },
+                        SetValue = (val) => durationField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+            }
+
+            // Handle ScenPart_OnPawnDeathExplode - explosion on pawn death
+            if (partType.Name == "ScenPart_OnPawnDeathExplode")
+            {
+                // radius field
+                var radiusField = partType.GetField("radius", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (radiusField != null)
+                {
+                    float currentRadius = (float)radiusField.GetValue(part);
+                    fields.Add(new PartField
+                    {
+                        Name = "Explosion Radius",
+                        Type = FieldType.Quantity,
+                        CurrentValue = currentRadius.ToString("F1"),
+                        Data = new float[] { 0.1f, 50f },
+                        SetValue = (val) => radiusField.SetValue(part, Convert.ToSingle(val))
+                    });
+                }
+
+                // damage field (limited to Bomb and Flame in vanilla)
+                var damageField = partType.GetField("damage", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (damageField != null)
+                {
+                    var currentDamage = damageField.GetValue(part) as DamageDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Damage Type",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentDamage?.LabelCap ?? "None",
+                        Data = GetExplosionDamageDefOptions(),
+                        SetValue = (val) => damageField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_DisableQuest - quest to disable
+            if (partType.Name == "ScenPart_DisableQuest")
+            {
+                var questDefField = partType.GetField("questDef", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (questDefField != null)
+                {
+                    var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Quest",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentQuest?.LabelCap ?? "None",
+                        Data = GetQuestScriptDefOptions(),
+                        SetValue = (val) => questDefField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_CreateQuest - quest to create
+            if (partType.Name == "ScenPart_CreateQuest")
+            {
+                var questDefField = partType.GetField("questDef", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (questDefField != null)
+                {
+                    var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Quest",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentQuest?.LabelCap ?? "None",
+                        Data = GetQuestScriptDefOptions(),
+                        SetValue = (val) => questDefField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_ForcedMap - forced map generator and layer
+            if (partType.Name == "ScenPart_ForcedMap")
+            {
+                // mapGenerator field
+                var mapGenField = partType.GetField("mapGenerator", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (mapGenField != null)
+                {
+                    var currentMapGen = mapGenField.GetValue(part) as MapGeneratorDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Map Generator",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentMapGen?.LabelCap ?? "None",
+                        Data = GetMapGeneratorDefOptions(),
+                        SetValue = (val) => mapGenField.SetValue(part, val)
+                    });
+                }
+
+                // layerDef field
+                var layerDefField = partType.GetField("layerDef", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (layerDefField != null)
+                {
+                    var currentLayer = layerDefField.GetValue(part) as PlanetLayerDef;
+                    fields.Add(new PartField
+                    {
+                        Name = "Planet Layer",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentLayer?.LabelCap ?? "None",
+                        Data = GetPlanetLayerOptions(),
+                        SetValue = (val) => layerDefField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_MonolithGeneration - monolith generation method (Anomaly DLC)
+            if (ModsConfig.AnomalyActive && partType.Name == "ScenPart_MonolithGeneration")
+            {
+                var methodField = partType.GetField("method", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (methodField != null)
+                {
+                    var currentMethod = methodField.GetValue(part);
+                    string currentLabel = currentMethod?.ToString() ?? "None";
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Generation Method",
+                        Type = FieldType.Dropdown,
+                        CurrentValue = currentLabel,
+                        Data = GetMonolithGenerationMethodOptions(),
+                        SetValue = (val) => methodField.SetValue(part, val)
+                    });
+                }
+            }
+
+            // Handle ScenPart_AutoActivateMonolith - auto activation delay (Anomaly DLC)
+            if (ModsConfig.AnomalyActive && partType.Name == "ScenPart_AutoActivateMonolith")
+            {
+                var delayTicksField = partType.GetField("delayTicks", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (delayTicksField != null)
+                {
+                    int currentTicks = (int)delayTicksField.GetValue(part);
+                    float currentDays = currentTicks / 60000f; // Convert ticks to days
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Activation Delay (Days)",
+                        Type = FieldType.Quantity,
+                        CurrentValue = currentDays.ToString("F1"),
+                        Data = new float[] { 0f, 1000f },
+                        SetValue = (val) => {
+                            float days = Convert.ToSingle(val);
+                            int ticks = (int)(days * 60000f);
+                            delayTicksField.SetValue(part, ticks);
+                        }
+                    });
+                }
+            }
+
             // If no fields found, it's a part that can't be edited directly
             return fields;
         }
@@ -583,6 +1501,31 @@ namespace RimWorldAccess
             return options;
         }
 
+        private static List<(string label, object value)> GetPlanetLayerSettingsOptions()
+        {
+            var options = new List<(string, object)>();
+            var settingsDefType = AccessTools.TypeByName("RimWorld.PlanetLayerSettingsDef");
+            if (settingsDefType != null)
+            {
+                var defDatabaseType = typeof(DefDatabase<>).MakeGenericType(settingsDefType);
+                var allDefsProperty = defDatabaseType.GetProperty("AllDefs", BindingFlags.Public | BindingFlags.Static);
+                if (allDefsProperty != null)
+                {
+                    var allDefs = allDefsProperty.GetValue(null) as System.Collections.IEnumerable;
+                    if (allDefs != null)
+                    {
+                        foreach (var def in allDefs)
+                        {
+                            var labelProp = def.GetType().GetProperty("LabelCap");
+                            string label = labelProp?.GetValue(def)?.ToString() ?? def.ToString();
+                            options.Add((label, def));
+                        }
+                    }
+                }
+            }
+            return options.OrderBy(o => o.Item1).ToList();
+        }
+
         private static List<(string label, object value)> GetAnimalOptions()
         {
             var options = new List<(string, object)>();
@@ -604,10 +1547,37 @@ namespace RimWorldAccess
             return options;
         }
 
+        private static List<(string label, object value)> GetTraitWithDegreeOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var trait in DefDatabase<TraitDef>.AllDefs.OrderBy(t => t.label))
+            {
+                foreach (var degreeData in trait.degreeDatas)
+                {
+                    string label = degreeData.LabelCap;
+                    if (string.IsNullOrEmpty(label))
+                        label = trait.LabelCap;
+                    options.Add((label, degreeData));
+                }
+            }
+            return options.OrderBy(o => o.Item1).ToList();
+        }
+
         private static List<(string label, object value)> GetIncidentOptions()
         {
             var options = new List<(string, object)>();
             foreach (var incident in DefDatabase<IncidentDef>.AllDefs.Where(i => i.targetTags != null).OrderBy(i => i.label))
+            {
+                options.Add((incident.LabelCap, incident));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetIncidentDefOptions()
+        {
+            var options = new List<(string, object)>();
+            // Match game's DoIncidentEditInterface - all incidents are available
+            foreach (var incident in DefDatabase<IncidentDef>.AllDefs.OrderBy(i => i.label))
             {
                 options.Add((incident.LabelCap, incident));
             }
@@ -689,6 +1659,879 @@ namespace RimWorldAccess
                 options.Add((quality.GetLabel().CapitalizeFirst(), quality));
             }
             return options;
+        }
+
+        private static List<(string label, object value)> GetHediffOptions()
+        {
+            var options = new List<(string, object)>();
+            // Match the game's filter: only hediffs with scenarioCanAdd = true
+            foreach (var hediff in DefDatabase<HediffDef>.AllDefs
+                .Where(h => h.scenarioCanAdd)
+                .OrderBy(h => h.label))
+            {
+                options.Add((hediff.LabelCap, hediff));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetPawnGenerationContextOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (PawnGenerationContext context in Enum.GetValues(typeof(PawnGenerationContext)))
+            {
+                options.Add((context.ToStringHuman(), context));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetYesNoOptions()
+        {
+            return new List<(string, object)>
+            {
+                ("Yes", "Yes"),
+                ("No", "No")
+            };
+        }
+
+        private static List<(string label, object value)> GetStartingMechOptions()
+        {
+            var options = new List<(string, object)>();
+            options.Add(("Random", null));
+
+            foreach (var kind in DefDatabase<PawnKindDef>.AllDefs
+                .Where(k => k.RaceProps != null && k.RaceProps.IsMechanoid)
+                .OrderBy(k => k.label))
+            {
+                options.Add((kind.LabelCap, kind));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetStatDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var stat in DefDatabase<StatDef>.AllDefs
+                .Where(s => !s.forInformationOnly && s.CanShowWithLoadedMods())
+                .OrderBy(s => s.label))
+            {
+                options.Add((stat.LabelCap, stat));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetPermanentGameConditionOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var condition in DefDatabase<GameConditionDef>.AllDefs
+                .Where(c => c.canBePermanent)
+                .OrderBy(c => c.label))
+            {
+                options.Add((condition.LabelCap, condition));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetBuildableThingDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var thing in DefDatabase<ThingDef>.AllDefs
+                .Where(t => t.category == ThingCategory.Building && t.BuildableByPlayer)
+                .OrderBy(t => t.label))
+            {
+                options.Add((thing.LabelCap, thing));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetNeedDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var need in DefDatabase<NeedDef>.AllDefs
+                .Where(n => n.major)
+                .OrderBy(n => n.label))
+            {
+                options.Add((need.LabelCap, need));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetExplosionDamageDefOptions()
+        {
+            var options = new List<(string, object)>();
+            // Game limits to Bomb and Flame damage types for this part
+            var bomb = DefDatabase<DamageDef>.GetNamedSilentFail("Bomb");
+            var flame = DefDatabase<DamageDef>.GetNamedSilentFail("Flame");
+
+            if (bomb != null) options.Add((bomb.LabelCap, bomb));
+            if (flame != null) options.Add((flame.LabelCap, flame));
+
+            return options;
+        }
+
+        private static List<(string label, object value)> GetQuestScriptDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var quest in DefDatabase<QuestScriptDef>.AllDefs
+                .Where(q => q.IsRootAny)
+                .OrderBy(q => q.label))
+            {
+                options.Add((quest.LabelCap, quest));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetMapGeneratorDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var mapGen in DefDatabase<MapGeneratorDef>.AllDefs
+                .Where(m => m.validScenarioMap)
+                .OrderBy(m => m.label))
+            {
+                options.Add((mapGen.LabelCap, mapGen));
+            }
+            return options;
+        }
+
+        private static List<(string label, object value)> GetMonolithGenerationMethodOptions()
+        {
+            var options = new List<(string, object)>();
+
+            // MonolithGenerationMethod is an enum in RimWorld namespace
+            var enumType = AccessTools.TypeByName("RimWorld.MonolithGenerationMethod");
+            if (enumType != null)
+            {
+                foreach (var value in Enum.GetValues(enumType))
+                {
+                    string label = value.ToString();
+                    // Try to get translated label if available
+                    string translationKey = $"MonolithGenerationMethod_{label}";
+                    if (translationKey.CanTranslate())
+                        label = translationKey.Translate();
+                    options.Add((label, value));
+                }
+            }
+            return options;
+        }
+
+        /// <summary>
+        /// Gets available PawnKindDef options for starting pawn kind selection.
+        /// Only includes humanlike kinds from player factions.
+        /// </summary>
+        private static List<(string label, object value)> GetPawnKindDefOptions()
+        {
+            var options = new List<(string, object)>();
+            foreach (var kind in DefDatabase<PawnKindDef>.AllDefs
+                .Where(k => k.RaceProps.Humanlike && k.defaultFactionDef != null && k.defaultFactionDef.isPlayer)
+                .OrderBy(k => k.label))
+            {
+                options.Add((kind.LabelCap, kind));
+            }
+            return options;
+        }
+
+        /// <summary>
+        /// Gets available XenotypeDef options for xenotype selection (Biotech DLC).
+        /// </summary>
+        private static List<(string label, object value)> GetXenotypeDefOptions()
+        {
+            var options = new List<(string, object)>();
+            if (!ModsConfig.BiotechActive)
+                return options;
+
+            foreach (var xenotype in DefDatabase<XenotypeDef>.AllDefs.OrderBy(x => x.label))
+            {
+                options.Add((xenotype.LabelCap, xenotype));
+            }
+            return options;
+        }
+
+        /// <summary>
+        /// Gets available MutantDef options for mutant selection (Anomaly DLC).
+        /// Includes "None" option and only mutants with showInScenarioEditor = true.
+        /// </summary>
+        private static List<(string label, object value)> GetMutantDefOptions()
+        {
+            var options = new List<(string, object)>();
+            if (!ModsConfig.AnomalyActive)
+                return options;
+
+            options.Add(("None".Translate().CapitalizeFirst(), null));
+
+            foreach (var mutant in DefDatabase<MutantDef>.AllDefs
+                .Where(m => m.showInScenarioEditor)
+                .OrderBy(m => m.label))
+            {
+                options.Add((mutant.LabelCap, mutant));
+            }
+            return options;
+        }
+
+        /// <summary>
+        /// Gets available tag options for planet layer connections.
+        /// Returns tags from other PlanetLayer parts that aren't already connected.
+        /// </summary>
+        private static List<(string label, object value)> GetAvailableTagOptions(ScenPart part, List<object> existingConnections)
+        {
+            var options = new List<(string, object)>();
+            var usedTags = new HashSet<string>();
+
+            // Get tags already used in connections
+            if (existingConnections != null)
+            {
+                foreach (var conn in existingConnections)
+                {
+                    var tagField = conn.GetType().GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                    if (tagField != null)
+                    {
+                        var tag = tagField.GetValue(conn) as string;
+                        if (!string.IsNullOrEmpty(tag))
+                            usedTags.Add(tag);
+                    }
+                }
+            }
+
+            // Add "Remove" option first
+            options.Add(("Remove".Translate().CapitalizeFirst(), "__REMOVE__"));
+
+            // Find all other PlanetLayer parts and their tags
+            if (currentScenario != null)
+            {
+                foreach (var otherPart in currentScenario.AllParts)
+                {
+                    if (otherPart == part) continue;
+                    if (otherPart.GetType().Name != "ScenPart_PlanetLayer") continue;
+
+                    var tagField = otherPart.GetType().GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                    if (tagField != null)
+                    {
+                        var tag = tagField.GetValue(otherPart) as string;
+                        if (!string.IsNullOrEmpty(tag) && !usedTags.Contains(tag))
+                        {
+                            options.Add((tag, tag));
+                        }
+                    }
+                }
+            }
+
+            return options;
+        }
+
+        /// <summary>
+        /// Gets zoom mode options for planet layer connections.
+        /// </summary>
+        private static List<(string label, object value)> GetZoomModeOptions()
+        {
+            var options = new List<(string, object)>();
+
+            var zoomModeType = AccessTools.TypeByName("RimWorld.LayerConnection+ZoomMode");
+            if (zoomModeType != null)
+            {
+                foreach (var value in Enum.GetValues(zoomModeType))
+                {
+                    string label = value.ToString();
+                    // Try to get translated label
+                    string translationKey = $"ScenPart_PlanetLayerConnections_{label}";
+                    if (translationKey.CanTranslate())
+                        label = translationKey.Translate();
+                    else if (label == "ZoomIn")
+                        label = "Zoom In";
+                    else if (label == "ZoomOut")
+                        label = "Zoom Out";
+                    options.Add((label, value));
+                }
+            }
+            return options;
+        }
+
+        #endregion
+
+        #region List-Based Part Extraction
+
+        /// <summary>
+        /// Checks if a part is a list-based part that needs special handling.
+        /// </summary>
+        private static bool IsListBasedPart(ScenPart part)
+        {
+            string typeName = part.GetType().Name;
+            return typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_KindDefs" ||
+                   (ModsConfig.BiotechActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Xenotypes") ||
+                   (ModsConfig.AnomalyActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Mutants") ||
+                   typeName == "ScenPart_PlanetLayer";
+        }
+
+        /// <summary>
+        /// Extracts list items from a list-based part.
+        /// </summary>
+        private static List<ListItemData> ExtractListItems(ScenPart part)
+        {
+            string typeName = part.GetType().Name;
+
+            if (typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_KindDefs")
+                return ExtractKindDefsListItems(part);
+            if (ModsConfig.BiotechActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Xenotypes")
+                return ExtractXenotypeListItems(part);
+            if (ModsConfig.AnomalyActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Mutants")
+                return ExtractMutantListItems(part);
+            if (typeName == "ScenPart_PlanetLayer")
+                return ExtractLayerConnectionItems(part);
+
+            return new List<ListItemData>();
+        }
+
+        /// <summary>
+        /// Extracts list items from ScenPart_ConfigPage_ConfigureStartingPawns_KindDefs.
+        /// </summary>
+        private static List<ListItemData> ExtractKindDefsListItems(ScenPart part)
+        {
+            var listItems = new List<ListItemData>();
+            var kindCountsField = part.GetType().GetField("kindCounts", BindingFlags.Public | BindingFlags.Instance);
+            if (kindCountsField == null) return listItems;
+
+            var kindCounts = kindCountsField.GetValue(part) as System.Collections.IList;
+            if (kindCounts == null) return listItems;
+
+            for (int i = 0; i < kindCounts.Count; i++)
+            {
+                var item = kindCounts[i];
+                var kindDefField = item.GetType().GetField("kindDef", BindingFlags.Public | BindingFlags.Instance);
+                var countField = item.GetType().GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                var requiredField = item.GetType().GetField("requiredAtStart", BindingFlags.Public | BindingFlags.Instance);
+
+                var kindDef = kindDefField?.GetValue(item) as PawnKindDef;
+                int count = countField != null ? (int)countField.GetValue(item) : 1;
+                bool required = requiredField != null && (bool)requiredField.GetValue(item);
+
+                string kindLabel = kindDef?.LabelCap ?? "Unknown";
+                string label = $"{count}x {kindLabel}" + (required ? " (Required)" : "");
+
+                var listItem = new ListItemData
+                {
+                    Label = label,
+                    Index = i,
+                    ItemReference = item,
+                    IsExpanded = false,
+                    Fields = new List<PartField>()
+                };
+
+                // Add fields for this item
+                int capturedIndex = i;
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Count",
+                    Type = FieldType.Quantity,
+                    CurrentValue = count.ToString(),
+                    Data = new int[] { 1, 10 },
+                    SetValue = (val) =>
+                    {
+                        var list = kindCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            countField.SetValue(entry, Convert.ToInt32(val));
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Pawn Kind",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = kindLabel,
+                    Data = GetPawnKindDefOptions(),
+                    SetValue = (val) =>
+                    {
+                        var list = kindCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            kindDefField.SetValue(entry, val);
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Required at Start",
+                    Type = FieldType.Checkbox,
+                    CurrentValue = required ? "Yes" : "No",
+                    Data = null,
+                    SetValue = (val) =>
+                    {
+                        var list = kindCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            bool newVal = val is bool b ? b : val?.ToString() == "Yes";
+                            requiredField.SetValue(entry, newVal);
+                        }
+                    }
+                });
+
+                listItems.Add(listItem);
+            }
+
+            return listItems;
+        }
+
+        /// <summary>
+        /// Extracts list items from ScenPart_ConfigPage_ConfigureStartingPawns_Xenotypes.
+        /// </summary>
+        private static List<ListItemData> ExtractXenotypeListItems(ScenPart part)
+        {
+            var listItems = new List<ListItemData>();
+            if (!ModsConfig.BiotechActive) return listItems;
+
+            var xenotypeCountsField = part.GetType().GetField("xenotypeCounts", BindingFlags.Public | BindingFlags.Instance);
+            if (xenotypeCountsField == null) return listItems;
+
+            var xenotypeCounts = xenotypeCountsField.GetValue(part) as System.Collections.IList;
+            if (xenotypeCounts == null) return listItems;
+
+            for (int i = 0; i < xenotypeCounts.Count; i++)
+            {
+                var item = xenotypeCounts[i];
+                var xenotypeField = item.GetType().GetField("xenotype", BindingFlags.Public | BindingFlags.Instance);
+                var countField = item.GetType().GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                var requiredField = item.GetType().GetField("requiredAtStart", BindingFlags.Public | BindingFlags.Instance);
+
+                var xenotype = xenotypeField?.GetValue(item) as XenotypeDef;
+                int count = countField != null ? (int)countField.GetValue(item) : 1;
+                bool required = requiredField != null && (bool)requiredField.GetValue(item);
+
+                string xenoLabel = xenotype?.LabelCap ?? "Unknown";
+                string label = $"{count}x {xenoLabel}" + (required ? " (Required)" : "");
+
+                var listItem = new ListItemData
+                {
+                    Label = label,
+                    Index = i,
+                    ItemReference = item,
+                    IsExpanded = false,
+                    Fields = new List<PartField>()
+                };
+
+                int capturedIndex = i;
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Count",
+                    Type = FieldType.Quantity,
+                    CurrentValue = count.ToString(),
+                    Data = new int[] { 1, 10 },
+                    SetValue = (val) =>
+                    {
+                        var list = xenotypeCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            countField.SetValue(entry, Convert.ToInt32(val));
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Xenotype",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = xenoLabel,
+                    Data = GetXenotypeDefOptions(),
+                    SetValue = (val) =>
+                    {
+                        var list = xenotypeCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            xenotypeField.SetValue(entry, val);
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Required at Start",
+                    Type = FieldType.Checkbox,
+                    CurrentValue = required ? "Yes" : "No",
+                    Data = null,
+                    SetValue = (val) =>
+                    {
+                        var list = xenotypeCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            bool newVal = val is bool b ? b : val?.ToString() == "Yes";
+                            requiredField.SetValue(entry, newVal);
+                        }
+                    }
+                });
+
+                listItems.Add(listItem);
+            }
+
+            return listItems;
+        }
+
+        /// <summary>
+        /// Extracts list items from ScenPart_ConfigPage_ConfigureStartingPawns_Mutants.
+        /// </summary>
+        private static List<ListItemData> ExtractMutantListItems(ScenPart part)
+        {
+            var listItems = new List<ListItemData>();
+            if (!ModsConfig.AnomalyActive) return listItems;
+
+            var mutantCountsField = part.GetType().GetField("mutantCounts", BindingFlags.Public | BindingFlags.Instance);
+            if (mutantCountsField == null) return listItems;
+
+            var mutantCounts = mutantCountsField.GetValue(part) as System.Collections.IList;
+            if (mutantCounts == null) return listItems;
+
+            for (int i = 0; i < mutantCounts.Count; i++)
+            {
+                var item = mutantCounts[i];
+                var mutantField = item.GetType().GetField("mutant", BindingFlags.Public | BindingFlags.Instance);
+                var countField = item.GetType().GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                var requiredField = item.GetType().GetField("requiredAtStart", BindingFlags.Public | BindingFlags.Instance);
+
+                var mutant = mutantField?.GetValue(item) as MutantDef;
+                int count = countField != null ? (int)countField.GetValue(item) : 1;
+                bool required = requiredField != null && (bool)requiredField.GetValue(item);
+
+                string mutantLabel = mutant?.LabelCap ?? "None".Translate().CapitalizeFirst();
+                string label = $"{count}x {mutantLabel}" + (required ? " (Required)" : "");
+
+                var listItem = new ListItemData
+                {
+                    Label = label,
+                    Index = i,
+                    ItemReference = item,
+                    IsExpanded = false,
+                    Fields = new List<PartField>()
+                };
+
+                int capturedIndex = i;
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Count",
+                    Type = FieldType.Quantity,
+                    CurrentValue = count.ToString(),
+                    Data = new int[] { 1, 10 },
+                    SetValue = (val) =>
+                    {
+                        var list = mutantCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            countField.SetValue(entry, Convert.ToInt32(val));
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Mutant Type",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = mutantLabel,
+                    Data = GetMutantDefOptions(),
+                    SetValue = (val) =>
+                    {
+                        var list = mutantCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            mutantField.SetValue(entry, val);
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Required at Start",
+                    Type = FieldType.Checkbox,
+                    CurrentValue = required ? "Yes" : "No",
+                    Data = null,
+                    SetValue = (val) =>
+                    {
+                        var list = mutantCountsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            bool newVal = val is bool b ? b : val?.ToString() == "Yes";
+                            requiredField.SetValue(entry, newVal);
+                        }
+                    }
+                });
+
+                listItems.Add(listItem);
+            }
+
+            return listItems;
+        }
+
+        /// <summary>
+        /// Extracts list items from ScenPart_PlanetLayer connections.
+        /// </summary>
+        private static List<ListItemData> ExtractLayerConnectionItems(ScenPart part)
+        {
+            var listItems = new List<ListItemData>();
+
+            var connectionsField = part.GetType().GetField("connections", BindingFlags.Public | BindingFlags.Instance);
+            if (connectionsField == null) return listItems;
+
+            var connections = connectionsField.GetValue(part) as System.Collections.IList;
+            if (connections == null) return listItems;
+
+            var connectionsList = new List<object>();
+            foreach (var conn in connections)
+                connectionsList.Add(conn);
+
+            for (int i = 0; i < connections.Count; i++)
+            {
+                var item = connections[i];
+                var tagField = item.GetType().GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                var zoomModeField = item.GetType().GetField("zoomMode", BindingFlags.Public | BindingFlags.Instance);
+                var fuelCostField = item.GetType().GetField("fuelCost", BindingFlags.Public | BindingFlags.Instance);
+
+                string tag = tagField?.GetValue(item) as string ?? "";
+                var zoomMode = zoomModeField?.GetValue(item);
+                float fuelCost = fuelCostField != null ? (float)fuelCostField.GetValue(item) : 0f;
+
+                string zoomLabel = zoomMode?.ToString() ?? "None";
+                if (zoomLabel == "ZoomIn") zoomLabel = "Zoom In";
+                else if (zoomLabel == "ZoomOut") zoomLabel = "Zoom Out";
+
+                string label = $"Connection to {tag}" + (zoomLabel != "None" ? $" ({zoomLabel})" : "");
+
+                var listItem = new ListItemData
+                {
+                    Label = label,
+                    Index = i,
+                    ItemReference = item,
+                    IsExpanded = false,
+                    Fields = new List<PartField>()
+                };
+
+                int capturedIndex = i;
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Target Layer",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = tag,
+                    Data = GetAvailableTagOptions(part, connectionsList),
+                    SetValue = (val) =>
+                    {
+                        if (val?.ToString() == "__REMOVE__")
+                        {
+                            // Remove this connection
+                            var list = connectionsField.GetValue(part) as System.Collections.IList;
+                            if (list != null && capturedIndex < list.Count)
+                            {
+                                list.RemoveAt(capturedIndex);
+                            }
+                        }
+                        else
+                        {
+                            var list = connectionsField.GetValue(part) as System.Collections.IList;
+                            if (list != null && capturedIndex < list.Count)
+                            {
+                                var entry = list[capturedIndex];
+                                tagField.SetValue(entry, val?.ToString());
+                            }
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Zoom Mode",
+                    Type = FieldType.Dropdown,
+                    CurrentValue = zoomLabel,
+                    Data = GetZoomModeOptions(),
+                    SetValue = (val) =>
+                    {
+                        var list = connectionsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            zoomModeField.SetValue(entry, val);
+                        }
+                    }
+                });
+
+                listItem.Fields.Add(new PartField
+                {
+                    Name = "Fuel Cost",
+                    Type = FieldType.Quantity,
+                    CurrentValue = fuelCost.ToString("F1"),
+                    Data = new float[] { 0f, 10000f },
+                    SetValue = (val) =>
+                    {
+                        var list = connectionsField.GetValue(part) as System.Collections.IList;
+                        if (list != null && capturedIndex < list.Count)
+                        {
+                            var entry = list[capturedIndex];
+                            fuelCostField.SetValue(entry, Convert.ToSingle(val));
+                        }
+                    }
+                });
+
+                listItems.Add(listItem);
+            }
+
+            return listItems;
+        }
+
+        /// <summary>
+        /// Adds a new item to a list-based part.
+        /// </summary>
+        private static void AddListItem(PartTreeItem partItem)
+        {
+            var part = partItem.Part;
+            string typeName = part.GetType().Name;
+
+            if (typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_KindDefs")
+            {
+                var kindCountsField = part.GetType().GetField("kindCounts", BindingFlags.Public | BindingFlags.Instance);
+                var kindCounts = kindCountsField?.GetValue(part) as System.Collections.IList;
+                if (kindCounts != null)
+                {
+                    var kindCountType = AccessTools.TypeByName("RimWorld.PawnKindCount");
+                    var newItem = Activator.CreateInstance(kindCountType);
+                    var kindDefField = kindCountType.GetField("kindDef", BindingFlags.Public | BindingFlags.Instance);
+                    var countField = kindCountType.GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                    kindDefField.SetValue(newItem, PawnKindDefOf.Colonist);
+                    countField.SetValue(newItem, 1);
+                    kindCounts.Add(newItem);
+                    SetDirty();
+                    TolkHelper.Speak("Added new pawn kind entry.");
+                }
+            }
+            else if (ModsConfig.BiotechActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Xenotypes")
+            {
+                var xenotypeCountsField = part.GetType().GetField("xenotypeCounts", BindingFlags.Public | BindingFlags.Instance);
+                var xenotypeCounts = xenotypeCountsField?.GetValue(part) as System.Collections.IList;
+                if (xenotypeCounts != null)
+                {
+                    var xenoCountType = AccessTools.TypeByName("RimWorld.XenotypeCount");
+                    var newItem = Activator.CreateInstance(xenoCountType);
+                    var xenotypeField = xenoCountType.GetField("xenotype", BindingFlags.Public | BindingFlags.Instance);
+                    var countField = xenoCountType.GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                    xenotypeField.SetValue(newItem, XenotypeDefOf.Baseliner);
+                    countField.SetValue(newItem, 1);
+                    xenotypeCounts.Add(newItem);
+                    SetDirty();
+                    TolkHelper.Speak("Added new xenotype entry.");
+                }
+            }
+            else if (ModsConfig.AnomalyActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Mutants")
+            {
+                var mutantCountsField = part.GetType().GetField("mutantCounts", BindingFlags.Public | BindingFlags.Instance);
+                var mutantCounts = mutantCountsField?.GetValue(part) as System.Collections.IList;
+                if (mutantCounts != null)
+                {
+                    var mutantCountType = AccessTools.TypeByName("RimWorld.MutantCount");
+                    var newItem = Activator.CreateInstance(mutantCountType);
+                    var countField = mutantCountType.GetField("count", BindingFlags.Public | BindingFlags.Instance);
+                    countField.SetValue(newItem, 1);
+                    // mutant field defaults to null which means "None"
+                    mutantCounts.Add(newItem);
+                    SetDirty();
+                    TolkHelper.Speak("Added new mutant entry.");
+                }
+            }
+            else if (typeName == "ScenPart_PlanetLayer")
+            {
+                // For connections, we need to find available tags
+                var connectionsField = part.GetType().GetField("connections", BindingFlags.Public | BindingFlags.Instance);
+                var connections = connectionsField?.GetValue(part) as System.Collections.IList;
+                if (connections != null)
+                {
+                    // Get unused tags
+                    var usedTags = new HashSet<string>();
+                    foreach (var conn in connections)
+                    {
+                        var tagField = conn.GetType().GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                        var tag = tagField?.GetValue(conn) as string;
+                        if (!string.IsNullOrEmpty(tag))
+                            usedTags.Add(tag);
+                    }
+
+                    // Find first available tag from other PlanetLayer parts
+                    string availableTag = null;
+                    if (currentScenario != null)
+                    {
+                        foreach (var otherPart in currentScenario.AllParts)
+                        {
+                            if (otherPart == part) continue;
+                            if (otherPart.GetType().Name != "ScenPart_PlanetLayer") continue;
+
+                            var tagField = otherPart.GetType().GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                            var tag = tagField?.GetValue(otherPart) as string;
+                            if (!string.IsNullOrEmpty(tag) && !usedTags.Contains(tag))
+                            {
+                                availableTag = tag;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (availableTag == null)
+                    {
+                        TolkHelper.Speak("No available layer tags to connect to.");
+                        return;
+                    }
+
+                    var connectionType = AccessTools.TypeByName("RimWorld.LayerConnection");
+                    var newItem = Activator.CreateInstance(connectionType);
+                    var newTagField = connectionType.GetField("tag", BindingFlags.Public | BindingFlags.Instance);
+                    newTagField.SetValue(newItem, availableTag);
+                    connections.Add(newItem);
+                    SetDirty();
+                    TolkHelper.Speak($"Added connection to {availableTag}.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Deletes a list item from a list-based part.
+        /// </summary>
+        private static void DeleteListItem(PartTreeItem partItem, int listItemIndex)
+        {
+            var part = partItem.Part;
+            string typeName = part.GetType().Name;
+
+            System.Collections.IList list = null;
+            string itemType = "item";
+
+            if (typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_KindDefs")
+            {
+                var kindCountsField = part.GetType().GetField("kindCounts", BindingFlags.Public | BindingFlags.Instance);
+                list = kindCountsField?.GetValue(part) as System.Collections.IList;
+                itemType = "pawn kind entry";
+            }
+            else if (ModsConfig.BiotechActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Xenotypes")
+            {
+                var xenotypeCountsField = part.GetType().GetField("xenotypeCounts", BindingFlags.Public | BindingFlags.Instance);
+                list = xenotypeCountsField?.GetValue(part) as System.Collections.IList;
+                itemType = "xenotype entry";
+            }
+            else if (ModsConfig.AnomalyActive && typeName == "ScenPart_ConfigPage_ConfigureStartingPawns_Mutants")
+            {
+                var mutantCountsField = part.GetType().GetField("mutantCounts", BindingFlags.Public | BindingFlags.Instance);
+                list = mutantCountsField?.GetValue(part) as System.Collections.IList;
+                itemType = "mutant entry";
+            }
+            else if (typeName == "ScenPart_PlanetLayer")
+            {
+                var connectionsField = part.GetType().GetField("connections", BindingFlags.Public | BindingFlags.Instance);
+                list = connectionsField?.GetValue(part) as System.Collections.IList;
+                itemType = "connection";
+            }
+
+            if (list != null && listItemIndex >= 0 && listItemIndex < list.Count)
+            {
+                list.RemoveAt(listItemIndex);
+                SetDirty();
+                TolkHelper.Speak($"Removed {itemType}.");
+            }
         }
 
         #endregion
@@ -873,6 +2716,7 @@ namespace RimWorldAccess
                     break;
             }
 
+            isDirty = true;
             isEditingText = false;
             TolkHelper.Speak($"{editingFieldName} set to: {(string.IsNullOrEmpty(newValue) ? "empty" : newValue)}");
         }
@@ -936,6 +2780,26 @@ namespace RimWorldAccess
             partsTypeaheadHelper.ClearSearch();
             var item = flattenedParts[partsIndex];
 
+            // Handle list items (level 1)
+            if (item.IsListItem && item.IsExpandable)
+            {
+                if (!item.IsExpanded)
+                {
+                    // Expand the list item
+                    item.ListItemData.IsExpanded = true;
+                    FlattenPartsTree();
+                    AnnounceCurrentTreeItem();
+                }
+                else if (item.ListItemData.Fields.Count > 0)
+                {
+                    // Already expanded - move to first field
+                    partsIndex++;
+                    AnnounceCurrentTreeItem();
+                }
+                return;
+            }
+
+            // Handle parts (level 0)
             if (item.IsPart && item.IsExpandable)
             {
                 if (!item.IsExpanded)
@@ -945,11 +2809,17 @@ namespace RimWorldAccess
                     FlattenPartsTree();
                     AnnounceCurrentTreeItem();
                 }
-                else if (item.AsPart.Fields.Count > 0)
+                else
                 {
-                    // Already expanded - move to first child
-                    partsIndex++;
-                    AnnounceCurrentTreeItem();
+                    // Already expanded - move to first child (field or list item)
+                    bool hasChildren = item.AsPart.IsListPart
+                        ? (item.AsPart.Fields.Count > 0 || item.AsPart.ListItems.Count > 0)
+                        : item.AsPart.Fields.Count > 0;
+                    if (hasChildren)
+                    {
+                        partsIndex++;
+                        AnnounceCurrentTreeItem();
+                    }
                 }
             }
             // For fields and non-expandable parts, Right arrow does nothing
@@ -966,6 +2836,27 @@ namespace RimWorldAccess
                 return;
 
             var item = flattenedParts[partsIndex];
+
+            // Handle "Add New Item" action
+            if (item.IsAddAction)
+            {
+                if (item.ParentPart != null)
+                {
+                    AddListItem(item.ParentPart);
+                    BuildPartsTree();
+                    FlattenPartsTree();
+                    // Stay on the add action or move to new item
+                    AnnounceCurrentTreeItem();
+                }
+                return;
+            }
+
+            // Handle list items (expandable containers)
+            if (item.IsListItem && item.IsExpandable)
+            {
+                ExpandOrDrillDown();
+                return;
+            }
 
             if (item.IsField)
             {
@@ -995,6 +2886,44 @@ namespace RimWorldAccess
             partsTypeaheadHelper.ClearSearch();
             var item = flattenedParts[partsIndex];
 
+            // Handle expanded list items
+            if (item.IsListItem && item.IsExpanded)
+            {
+                // Collapse the list item
+                item.ListItemData.IsExpanded = false;
+                FlattenPartsTree();
+                AnnounceCurrentTreeItem();
+                return;
+            }
+
+            // Handle fields at level 2 (inside list items) - go to parent list item
+            if (item.IndentLevel == 2 && item.ListItemData != null)
+            {
+                for (int i = partsIndex - 1; i >= 0; i--)
+                {
+                    if (flattenedParts[i].IsListItem && flattenedParts[i].ListItemIndex == item.ListItemIndex)
+                    {
+                        partsIndex = i;
+                        AnnounceCurrentTreeItem();
+                        return;
+                    }
+                }
+            }
+
+            // Handle list items and "Add New Item" - go to parent part
+            if (item.IsListItem || item.IsAddAction)
+            {
+                for (int i = partsIndex - 1; i >= 0; i--)
+                {
+                    if (flattenedParts[i].IsPart && flattenedParts[i].AsPart == item.ParentPart)
+                    {
+                        partsIndex = i;
+                        AnnounceCurrentTreeItem();
+                        return;
+                    }
+                }
+            }
+
             if (item.IsPart && item.IsExpanded)
             {
                 // Collapse the part
@@ -1004,10 +2933,21 @@ namespace RimWorldAccess
             }
             else if (item.IsField)
             {
-                // Move to parent part
+                // Move to parent part or list item
                 for (int i = partsIndex - 1; i >= 0; i--)
                 {
-                    if (flattenedParts[i].IsPart && flattenedParts[i].AsPart == item.ParentPart)
+                    var parentItem = flattenedParts[i];
+
+                    // If the field belongs to a list item, go to the list item first
+                    if (item.ListItemData != null && parentItem.IsListItem && parentItem.ListItemData == item.ListItemData)
+                    {
+                        partsIndex = i;
+                        AnnounceCurrentTreeItem();
+                        return;
+                    }
+
+                    // Otherwise, go to parent part
+                    if (parentItem.IsPart && parentItem.AsPart == item.ParentPart)
                     {
                         partsIndex = i;
                         AnnounceCurrentTreeItem();
@@ -1146,7 +3086,39 @@ namespace RimWorldAccess
         /// </summary>
         private static (int position, int total) GetSiblingPosition(TreeViewItem item)
         {
-            if (item.IsField && item.ParentPart != null)
+            // Handle fields inside list items (level 2)
+            if (item.IsField && item.ListItemData != null)
+            {
+                int position = 0;
+                int total = item.ListItemData.Fields.Count;
+                for (int i = 0; i < item.ListItemData.Fields.Count; i++)
+                {
+                    if (item.ListItemData.Fields[i] == item.Field)
+                    {
+                        position = i + 1;
+                        break;
+                    }
+                }
+                return (position, total);
+            }
+            // Handle list items (level 1) - count list items + add action
+            else if (item.IsListItem && item.ParentPart != null)
+            {
+                int position = item.ListItemIndex + 1;
+                // Total includes regular fields + list items + add action
+                int total = item.ParentPart.Fields.Count + item.ParentPart.ListItems.Count + 1;
+                // Position needs to account for regular fields
+                position += item.ParentPart.Fields.Count;
+                return (position, total);
+            }
+            // Handle "Add New Item" action
+            else if (item.IsAddAction && item.ParentPart != null)
+            {
+                int total = item.ParentPart.Fields.Count + item.ParentPart.ListItems.Count + 1;
+                return (total, total);
+            }
+            // Handle regular fields under expanded parts
+            else if (item.IsField && item.ParentPart != null)
             {
                 // Count fields of the same parent
                 int position = 0;
@@ -1182,6 +3154,21 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Gets a display name for a part including its summary for context.
+        /// Example: "Scattered Randomly (packaged survival meal x 7)"
+        /// </summary>
+        private static string GetPartDisplayName(PartTreeItem partItem)
+        {
+            string label = StripTrailingPunctuation(partItem.Label);
+            string summaryText = StripTrailingPunctuation(partItem.Summary);
+            if (!string.IsNullOrEmpty(summaryText))
+            {
+                return $"{label} ({summaryText})";
+            }
+            return label;
+        }
+
+        /// <summary>
         /// Announces the current tree item.
         /// </summary>
         private static void AnnounceCurrentTreeItem()
@@ -1197,21 +3184,46 @@ namespace RimWorldAccess
             string positionPart = MenuHelper.FormatPosition(position - 1, total);
             string announcement;
 
+            // Handle "Add New Item" action
+            if (item.IsAddAction)
+            {
+                announcement = "Add New Item. Press Enter to add.";
+            }
+            // Handle list items (level 1 in list-based parts)
+            else if (item.IsListItem)
+            {
+                string itemLabel = StripTrailingPunctuation(item.Label);
+                if (item.IsExpandable)
+                {
+                    string state = item.IsExpanded ? "expanded" : "collapsed";
+                    int fieldCount = item.ListItemData?.Fields.Count ?? 0;
+                    string fieldCountStr = fieldCount == 1 ? "1 field" : $"{fieldCount} fields";
+                    announcement = $"{itemLabel}, {state}, {fieldCountStr}. Press Delete to remove.";
+                }
+                else
+                {
+                    announcement = $"{itemLabel}. Press Delete to remove.";
+                }
+            }
             // Single-field items have BOTH AsPart and Field set - treat them as editable fields
-            bool isSingleFieldPart = item.IsPart && item.IsField;
-
-            if (isSingleFieldPart)
+            else if (item.IsPart && item.IsField)
             {
                 // Single-field part: show part label + field value + "Press Enter to edit"
                 // Skip summary because it typically duplicates the field value
                 var part = item.AsPart;
                 var field = item.Field;
                 string typeHint = field.Type == FieldType.Dropdown ? "dropdown" :
-                                  field.Type == FieldType.Quantity ? "quantity" : "text";
+                                  field.Type == FieldType.Quantity ? "quantity" :
+                                  field.Type == FieldType.Checkbox ? "checkbox" : "text";
                 // Strip trailing punctuation to avoid ". :" patterns
                 string partLabel = StripTrailingPunctuation(part.Label);
                 string fieldValue = StripTrailingPunctuation(field.CurrentValue);
                 announcement = $"{partLabel}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                // Add Insert key hint for truncated Text fields
+                if (field.Type == FieldType.Text && field.Data is string fullText && fullText.Length > 60)
+                {
+                    announcement += " Press Insert to read full text.";
+                }
             }
             else if (item.IsPart)
             {
@@ -1223,8 +3235,21 @@ namespace RimWorldAccess
                 if (item.IsExpandable)
                 {
                     string state = item.IsExpanded ? "expanded" : "collapsed";
-                    string itemCount = part.Fields.Count == 1 ? "1 field" : $"{part.Fields.Count} fields";
-                    announcement = $"{partLabel}{summary}, {state}, {itemCount}";
+
+                    // For list-based parts, count list items + fields
+                    int childCount;
+                    if (part.IsListPart)
+                    {
+                        childCount = part.ListItems.Count + part.Fields.Count;
+                        string itemCountStr = childCount == 1 ? "1 item" : $"{childCount} items";
+                        announcement = $"{partLabel}{summary}, {state}, {itemCountStr}";
+                    }
+                    else
+                    {
+                        childCount = part.Fields.Count;
+                        string itemCountStr = childCount == 1 ? "1 field" : $"{childCount} fields";
+                        announcement = $"{partLabel}{summary}, {state}, {itemCountStr}";
+                    }
                 }
                 else
                 {
@@ -1234,13 +3259,19 @@ namespace RimWorldAccess
             }
             else if (item.IsField)
             {
-                // Regular field (child of expanded part)
+                // Regular field (child of expanded part or list item)
                 var field = item.Field;
                 string typeHint = field.Type == FieldType.Dropdown ? "dropdown" :
-                                  field.Type == FieldType.Quantity ? "quantity" : "text";
+                                  field.Type == FieldType.Quantity ? "quantity" :
+                                  field.Type == FieldType.Checkbox ? "checkbox" : "text";
                 string fieldName = StripTrailingPunctuation(field.Name);
                 string fieldValue = StripTrailingPunctuation(field.CurrentValue);
                 announcement = $"{fieldName}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                // Add Insert key hint for truncated Text fields
+                if (field.Type == FieldType.Text && field.Data is string fullText && fullText.Length > 60)
+                {
+                    announcement += " Press Insert to read full text.";
+                }
             }
             else
             {
@@ -1256,6 +3287,43 @@ namespace RimWorldAccess
             announcement += MenuHelper.GetLevelSuffix(LevelTrackingKey, item.IndentLevel);
 
             TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Reads the full text content of a Text field (for long content that's truncated in announcements).
+        /// </summary>
+        private static void ReadFullFieldText()
+        {
+            if (currentSection != Section.Parts) return;
+
+            if (flattenedParts.Count == 0 || partsIndex >= flattenedParts.Count)
+            {
+                TolkHelper.Speak("No item selected.");
+                return;
+            }
+
+            var item = flattenedParts[partsIndex];
+
+            // Check if this is a field item
+            if (item.IsField && item.Field != null)
+            {
+                var field = item.Field;
+                if (field.Type == FieldType.Text && field.Data is string fullText)
+                {
+                    if (string.IsNullOrEmpty(fullText))
+                    {
+                        TolkHelper.Speak("Field is empty.");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak(fullText);
+                    }
+                    return;
+                }
+            }
+
+            // Not a text field
+            TolkHelper.Speak("Not a text field.");
         }
 
         /// <summary>
@@ -1281,7 +3349,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Deletes the current part (if on a part, not a field).
+        /// Deletes the current part or list item.
         /// </summary>
         public static void DeletePart()
         {
@@ -1289,11 +3357,39 @@ namespace RimWorldAccess
 
             var item = flattenedParts[partsIndex];
 
-            // Get the part (either the item itself or its parent)
-            PartTreeItem partItem = item.IsPart ? item.AsPart : item.ParentPart;
-            if (partItem == null) return;
+            // Handle list items (delete from list, not the whole part)
+            if (item.IsListItem)
+            {
+                PartTreeItem partItem = item.ParentPart;
+                if (partItem != null && partItem.IsListPart)
+                {
+                    DeleteListItem(partItem, item.ListItemIndex);
+                    BuildPartsTree();
+                    FlattenPartsTree();
 
-            var part = partItem.Part;
+                    // Adjust index if needed
+                    if (partsIndex >= flattenedParts.Count)
+                    {
+                        partsIndex = Math.Max(0, flattenedParts.Count - 1);
+                    }
+
+                    AnnounceCurrentTreeItem();
+                    return;
+                }
+            }
+
+            // Handle "Add New Item" action - can't delete this
+            if (item.IsAddAction)
+            {
+                TolkHelper.Speak("Cannot delete the add action.");
+                return;
+            }
+
+            // Get the part (either the item itself or its parent)
+            PartTreeItem partToDelete = item.IsPart ? item.AsPart : item.ParentPart;
+            if (partToDelete == null) return;
+
+            var part = partToDelete.Part;
 
             // Check if part can be removed
             if (!part.def.PlayerAddRemovable)
@@ -1303,10 +3399,11 @@ namespace RimWorldAccess
             }
 
             // Remember the part label before removing
-            string label = partItem.Label;
+            string label = partToDelete.Label;
 
             // Remove the part
             currentScenario.RemovePart(part);
+            isDirty = true;
             BuildPartsTree();
             FlattenPartsTree();
 
@@ -1361,14 +3458,35 @@ namespace RimWorldAccess
 
             // Build context-aware announcement
             int newHierarchyIndex = partsHierarchy.FindIndex(p => p.Part == part);
-            if (newHierarchyIndex == 0)
+            bool atTop = newHierarchyIndex == 0;
+            bool atBottom = newHierarchyIndex == partsHierarchy.Count - 1;
+
+            if (atTop)
             {
-                TolkHelper.Speak($"Moved {partName} to top of list.");
+                // Moved to top of list
+                if (!atBottom && partsHierarchy.Count > 1)
+                {
+                    string belowName = GetPartDisplayName(partsHierarchy[newHierarchyIndex + 1]);
+                    TolkHelper.Speak($"Moved {partName} to top, above {belowName}.");
+                }
+                else
+                {
+                    TolkHelper.Speak($"Moved {partName} to top of list.");
+                }
             }
             else
             {
-                string aboveName = StripTrailingPunctuation(partsHierarchy[newHierarchyIndex - 1].Label);
-                TolkHelper.Speak($"Moved {partName} up, now below {aboveName}.");
+                // Moved up but not to top - has item above
+                string aboveName = GetPartDisplayName(partsHierarchy[newHierarchyIndex - 1]);
+                if (!atBottom)
+                {
+                    string belowName = GetPartDisplayName(partsHierarchy[newHierarchyIndex + 1]);
+                    TolkHelper.Speak($"Moved {partName} up, now between {aboveName} and {belowName}.");
+                }
+                else
+                {
+                    TolkHelper.Speak($"Moved {partName} up, now below {aboveName}.");
+                }
             }
         }
 
@@ -1411,14 +3529,35 @@ namespace RimWorldAccess
 
             // Build context-aware announcement
             int newHierarchyIndex = partsHierarchy.FindIndex(p => p.Part == part);
-            if (newHierarchyIndex == partsHierarchy.Count - 1)
+            bool atTop = newHierarchyIndex == 0;
+            bool atBottom = newHierarchyIndex == partsHierarchy.Count - 1;
+
+            if (atBottom)
             {
-                TolkHelper.Speak($"Moved {partName} to bottom of list.");
+                // Moved to bottom of list
+                if (!atTop && partsHierarchy.Count > 1)
+                {
+                    string aboveName = GetPartDisplayName(partsHierarchy[newHierarchyIndex - 1]);
+                    TolkHelper.Speak($"Moved {partName} to bottom, below {aboveName}.");
+                }
+                else
+                {
+                    TolkHelper.Speak($"Moved {partName} to bottom of list.");
+                }
             }
             else
             {
-                string belowName = StripTrailingPunctuation(partsHierarchy[newHierarchyIndex + 1].Label);
-                TolkHelper.Speak($"Moved {partName} down, now above {belowName}.");
+                // Moved down but not to bottom - has item below
+                string belowName = GetPartDisplayName(partsHierarchy[newHierarchyIndex + 1]);
+                if (!atTop)
+                {
+                    string aboveName = GetPartDisplayName(partsHierarchy[newHierarchyIndex - 1]);
+                    TolkHelper.Speak($"Moved {partName} down, now between {aboveName} and {belowName}.");
+                }
+                else
+                {
+                    TolkHelper.Speak($"Moved {partName} down, now above {belowName}.");
+                }
             }
         }
 
@@ -1566,6 +3705,7 @@ namespace RimWorldAccess
                     var partsField = AccessTools.Field(typeof(Scenario), "parts");
                     var partsList = partsField.GetValue(currentScenario) as List<ScenPart>;
                     partsList?.Add(newPart);
+                    isDirty = true;
 
                     // Refresh and select the new part
                     BuildPartsTree();
@@ -1583,7 +3723,7 @@ namespace RimWorldAccess
 
                     currentSection = Section.Parts;
 
-                    TolkHelper.Speak($"Added {selectedDef.LabelCap}. Press Right to edit fields.");
+                    TolkHelper.Speak($"Added {selectedDef.LabelCap}. Press Enter to edit.");
                 }
             });
         }
@@ -1602,6 +3742,7 @@ namespace RimWorldAccess
                     AccessTools.Field(typeof(Page_ScenarioEditor), "seedIsValid").SetValue(currentPage, false);
 
                     currentScenario = loadedScenario;
+                    isDirty = false;
                     BuildPartsTree();
                     FlattenPartsTree();
                     currentSection = Section.Metadata;
@@ -1622,6 +3763,7 @@ namespace RimWorldAccess
 
             WindowlessScenarioSaveState.Open(currentScenario, () =>
             {
+                isDirty = false;
                 TolkHelper.Speak("Scenario saved.");
             });
         }
@@ -1641,6 +3783,7 @@ namespace RimWorldAccess
 
                 // Refresh our reference to the scenario
                 currentScenario = (Scenario)AccessTools.Field(typeof(Page_ScenarioEditor), "curScen").GetValue(currentPage);
+                isDirty = true;
                 BuildPartsTree();
                 FlattenPartsTree();
                 partsIndex = 0;
@@ -1654,8 +3797,7 @@ namespace RimWorldAccess
         /// </summary>
         public static bool IsDirty()
         {
-            if (currentScenario == null) return false;
-            return currentScenario.GetHashCode() != originalHash;
+            return isDirty;
         }
 
         #endregion
@@ -1836,6 +3978,9 @@ namespace RimWorldAccess
                     // WCAG tree pattern: * expands all siblings
                     ExpandAllSiblings();
                     return true;
+                case KeyCode.Insert:
+                    ReadFullFieldText();
+                    return true;
             }
 
             return false;
@@ -1846,6 +3991,10 @@ namespace RimWorldAccess
         /// </summary>
         public static bool HandleCharacterInput(char character)
         {
+            // Don't handle characters if save/load dialog is open
+            if (WindowlessScenarioSaveState.IsActive || WindowlessScenarioLoadState.IsActive)
+                return false;
+
             if (isEditingText)
             {
                 TextInputHelper.HandleCharacter(character);

@@ -1,3 +1,6 @@
+using System;
+using UnityEngine;
+
 namespace RimWorldAccess
 {
     /// <summary>
@@ -69,6 +72,49 @@ namespace RimWorldAccess
             char removed = currentText[currentText.Length - 1];
             currentText = currentText.Substring(0, currentText.Length - 1);
             TolkHelper.Speak($"Deleted {removed}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Handles paste from clipboard (Ctrl+V) - inserts clipboard content and announces.
+        /// If replaceOnFirstKeystroke is set, clears existing text first.
+        /// </summary>
+        public static void HandlePaste()
+        {
+            string clipboard = GUIUtility.systemCopyBuffer;
+            if (string.IsNullOrEmpty(clipboard))
+            {
+                TolkHelper.Speak("Clipboard is empty", SpeechPriority.High);
+                return;
+            }
+
+            if (replaceOnFirstKeystroke)
+            {
+                // Paste replaces all existing text (same as first keystroke behavior)
+                currentText = "";
+                replaceOnFirstKeystroke = false;
+            }
+
+            currentText += clipboard;
+
+            // Announce what was pasted - summarize for long content
+            int lineCount = clipboard.Split('\n').Length;
+            int wordCount = clipboard.Split(new[] { ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
+
+            string announcement;
+            if (lineCount > 1)
+            {
+                announcement = $"Pasted {lineCount} lines, {wordCount} words";
+            }
+            else if (wordCount > 5)
+            {
+                announcement = $"Pasted {wordCount} words";
+            }
+            else
+            {
+                announcement = $"Pasted: {clipboard}";
+            }
+
+            TolkHelper.Speak(announcement, SpeechPriority.High);
         }
 
         /// <summary>

@@ -214,7 +214,7 @@ namespace RimWorldAccess
             try
             {
                 scenarioToSave.name = scenarioToSave.name ?? fileName;
-                GameDataSaveLoader.SaveScenario(scenarioToSave, fileName);
+                GameDataSaveLoader.SaveScenario(scenarioToSave, fullPath);
 
                 Close();
                 TolkHelper.Speak($"Saved as {fileName}");

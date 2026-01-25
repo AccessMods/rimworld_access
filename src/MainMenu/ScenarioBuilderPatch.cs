@@ -107,6 +107,13 @@ namespace RimWorldAccess
             // Only intercept for Page_ScenarioEditor
             if (__instance is Page_ScenarioEditor)
             {
+                // Block the game's Cancel handling when typeahead search is active
+                // (Escape should clear search first, not close the editor)
+                if (ScenarioBuilderState.IsActive && ScenarioBuilderState.PartsHasActiveSearch)
+                {
+                    return false; // Let UnifiedKeyboardPatch handle clearing the search
+                }
+
                 // Block the game's Cancel handling when our overlay states are active
                 if (ScenarioBuilderPartEditState.IsActive ||
                     ScenarioBuilderAddPartState.IsActive ||
@@ -168,6 +175,41 @@ namespace RimWorldAccess
             dialog.buttonCClose = true;
 
             Find.WindowStack.Add(dialog);
+        }
+    }
+
+    /// <summary>
+    /// Blocks the Page.CanDoBack() method when our overlay states are active.
+    /// This prevents Page.DoBottomButtons() from calling DoBack() when Escape is pressed.
+    /// </summary>
+    [HarmonyPatch(typeof(Page))]
+    [HarmonyPatch("CanDoBack")]
+    public static class ScenarioBuilderCanDoBackPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix(Page __instance, ref bool __result)
+        {
+            if (__instance is Page_ScenarioEditor)
+            {
+                // Block going back when any overlay state is active
+                if (ScenarioBuilderAddPartState.IsActive ||
+                    ScenarioBuilderPartEditState.IsActive ||
+                    WindowlessScenarioLoadState.IsActive ||
+                    WindowlessScenarioSaveState.IsActive ||
+                    WindowlessScenarioDeleteConfirmState.IsActive)
+                {
+                    __result = false;
+                    return false;
+                }
+
+                // Block going back when ScenarioBuilderState has active typeahead
+                if (ScenarioBuilderState.IsActive && ScenarioBuilderState.PartsHasActiveSearch)
+                {
+                    __result = false;
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }

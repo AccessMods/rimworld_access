@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using RimWorld;
 using UnityEngine;
 using Verse;
 
@@ -116,10 +117,39 @@ namespace RimWorldAccess
                 IsActive = true;
                 AnnounceQuantity();
             }
+            else if (field.Type == ScenarioBuilderState.FieldType.Text)
+            {
+                currentField = field;
+                onComplete = onCompleteCallback;
+
+                // Initialize text helper with full text from Data
+                string fullText = field.Data as string ?? "";
+                TextInputHelper.SetText(fullText);
+
+                IsActive = true;
+                AnnounceText();
+            }
+            else if (field.Type == ScenarioBuilderState.FieldType.Checkbox)
+            {
+                currentField = field;
+                onComplete = onCompleteCallback;
+
+                // Checkbox is simple - just toggle and close
+                bool currentValue = field.CurrentValue == "Yes" || field.CurrentValue == "true" || field.CurrentValue == "True";
+                bool newValue = !currentValue;
+
+                field.CurrentValue = newValue ? "Yes" : "No";
+                field.SetValue?.Invoke(newValue);
+                ScenarioBuilderState.SetDirty();
+
+                TolkHelper.Speak($"{field.Name}: {(newValue ? "Enabled" : "Disabled")}");
+                onCompleteCallback?.Invoke();
+                return; // Don't set IsActive - immediate toggle
+            }
             else
             {
-                TolkHelper.Speak("Text editing not supported for this field.");
-                onCompleteCallback?.Invoke(); // Call callback so parent state refreshes
+                TolkHelper.Speak("Unsupported field type.");
+                onCompleteCallback?.Invoke();
             }
         }
 
@@ -137,6 +167,7 @@ namespace RimWorldAccess
             currentField = null;
             dropdownOptions = null;
             dropdownTypeahead.ClearSearch();
+            TextInputHelper.Clear();
 
             onComplete?.Invoke();
         }
@@ -153,6 +184,7 @@ namespace RimWorldAccess
                 var selected = dropdownOptions[selectedOptionIndex];
                 currentField.SetValue?.Invoke(selected.value);
                 currentField.CurrentValue = selected.label;
+                ScenarioBuilderState.SetDirty();
             }
             else if (currentField.Type == ScenarioBuilderState.FieldType.Quantity)
             {
@@ -166,6 +198,33 @@ namespace RimWorldAccess
                     currentField.SetValue?.Invoke(quantityValue);
                     currentField.CurrentValue = quantityValue.ToString();
                 }
+                ScenarioBuilderState.SetDirty();
+            }
+            else if (currentField.Type == ScenarioBuilderState.FieldType.Text)
+            {
+                string newText = TextInputHelper.CurrentText;
+                currentField.SetValue?.Invoke(newText);
+
+                // Update display value (truncated for tree view)
+                if (string.IsNullOrEmpty(newText))
+                {
+                    currentField.CurrentValue = "(empty)";
+                }
+                else if (newText.Contains("\n"))
+                {
+                    int newlineIndex = newText.IndexOf('\n');
+                    currentField.CurrentValue = newText.Substring(0, Math.Min(newlineIndex, 60)) + "...";
+                }
+                else if (newText.Length > 60)
+                {
+                    currentField.CurrentValue = newText.Substring(0, 60) + "...";
+                }
+                else
+                {
+                    currentField.CurrentValue = newText;
+                }
+
+                ScenarioBuilderState.SetDirty();
             }
         }
 
@@ -190,9 +249,17 @@ namespace RimWorldAccess
             }
 
             // Add description from Def objects if available
-            if (option.value is Def def && !string.IsNullOrEmpty(def.description))
+            // Special handling for FactionDef which has a computed Description property
+            if (option.value is FactionDef fd && !string.IsNullOrEmpty(fd.Description))
             {
-                // Clean up description - take first line only and trim
+                string desc = fd.Description;
+                int newlineIndex = desc.IndexOf('\n');
+                if (newlineIndex > 0)
+                    desc = desc.Substring(0, newlineIndex);
+                text += $". {desc.Trim()}";
+            }
+            else if (option.value is Def def && !string.IsNullOrEmpty(def.description))
+            {
                 string desc = def.description;
                 int newlineIndex = desc.IndexOf('\n');
                 if (newlineIndex > 0)
@@ -298,6 +365,25 @@ namespace RimWorldAccess
             TolkHelper.Speak($"{currentField?.Name ?? "Value"}: {value}. Type a number or use Up/Down to adjust, Enter to confirm.");
         }
 
+        private static void AnnounceText()
+        {
+            string text = TextInputHelper.CurrentText;
+            int lineCount = text.Split('\n').Length;
+            int wordCount = text.Split(new[] { ' ', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
+
+            string summary;
+            if (string.IsNullOrEmpty(text))
+                summary = "empty";
+            else if (lineCount > 1)
+                summary = $"{lineCount} lines, {wordCount} words";
+            else if (text.Length > 50)
+                summary = $"{wordCount} words";
+            else
+                summary = text;
+
+            TolkHelper.Speak($"{currentField?.Name ?? "Text"}: {summary}. Type to edit, Ctrl+V to paste, Insert to read all, Shift+Enter for new line, Enter to confirm, Escape to cancel.");
+        }
+
         private static void QuantityIncrease(int amount = 1)
         {
             quantityTypedBuffer = ""; // Clear typed input when using arrows
@@ -378,6 +464,10 @@ namespace RimWorldAccess
             {
                 return HandleQuantityInput(key, shift, ctrl);
             }
+            else if (currentField?.Type == ScenarioBuilderState.FieldType.Text)
+            {
+                return HandleTextInput(key, shift, ctrl);
+            }
 
             return false;
         }
@@ -400,8 +490,9 @@ namespace RimWorldAccess
                     return true;
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
+                    string selectedLabel = dropdownOptions[selectedOptionIndex].label;
                     Close(applyChanges: true);
-                    TolkHelper.Speak($"Selected: {dropdownOptions[selectedOptionIndex].label}");
+                    TolkHelper.Speak($"Selected: {selectedLabel}");
                     return true;
                 case KeyCode.Escape:
                     Close(applyChanges: false);
@@ -484,6 +575,57 @@ namespace RimWorldAccess
             return false;
         }
 
+        private static bool HandleTextInput(KeyCode key, bool shift, bool ctrl)
+        {
+            switch (key)
+            {
+                case KeyCode.Return:
+                case KeyCode.KeypadEnter:
+                    if (shift)
+                    {
+                        // Shift+Enter inserts a newline
+                        TextInputHelper.HandleCharacter('\n');
+                        TolkHelper.Speak("New line", SpeechPriority.High);
+                        return true;
+                    }
+                    else
+                    {
+                        // Enter confirms the edit
+                        Close(applyChanges: true);
+                        TolkHelper.Speak("Text saved");
+                        return true;
+                    }
+                case KeyCode.Escape:
+                    Close(applyChanges: false);
+                    TolkHelper.Speak("Cancelled");
+                    return true;
+                case KeyCode.Backspace:
+                    TextInputHelper.HandleBackspace();
+                    return true;
+                case KeyCode.Insert:
+                    TextInputHelper.ReadCurrentText();
+                    return true;
+                case KeyCode.V:
+                    if (ctrl)
+                    {
+                        TextInputHelper.HandlePaste();
+                        return true;
+                    }
+                    break;
+                // Consume navigation keys to prevent leaking to parent state
+                case KeyCode.UpArrow:
+                case KeyCode.DownArrow:
+                case KeyCode.LeftArrow:
+                case KeyCode.RightArrow:
+                case KeyCode.Tab:
+                case KeyCode.Home:
+                case KeyCode.End:
+                case KeyCode.Delete:
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// Handles character input for typeahead in dropdown mode or number input in quantity mode.
         /// </summary>
@@ -505,6 +647,15 @@ namespace RimWorldAccess
                     return HandleQuantityDigitInput(character);
                 }
             }
+            else if (currentField?.Type == ScenarioBuilderState.FieldType.Text)
+            {
+                // Accept all printable characters for text editing
+                if (character >= ' ')
+                {
+                    TextInputHelper.HandleCharacter(character);
+                    return true;
+                }
+            }
 
             return false;
         }
@@ -521,8 +672,21 @@ namespace RimWorldAccess
                 if (isFloatQuantity)
                 {
                     // For percentages, treat typed value as percent
-                    floatQuantityValue = Mathf.Clamp01(typedValue / 100f);
-                    TolkHelper.Speak($"{typedValue}%");
+                    float clampedFloat = Mathf.Clamp01(typedValue / 100f);
+                    floatQuantityValue = clampedFloat;
+                    int clampedPercent = Mathf.RoundToInt(clampedFloat * 100);
+
+                    if (typedValue != clampedPercent)
+                    {
+                        // Value was clamped - clear buffer and use friendly message
+                        quantityTypedBuffer = clampedPercent.ToString();
+                        string limitType = typedValue > 100 ? "maximum" : "minimum";
+                        TolkHelper.Speak($"{clampedPercent}% ({limitType})");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak($"{typedValue}%");
+                    }
                 }
                 else
                 {
@@ -530,8 +694,10 @@ namespace RimWorldAccess
                     quantityValue = Mathf.Clamp(typedValue, quantityMin, quantityMax);
                     if (typedValue != quantityValue)
                     {
-                        // Value was clamped - announce the clamped value
-                        TolkHelper.Speak($"{quantityValue} (clamped from {typedValue})");
+                        // Value was clamped - clear buffer to clamped value and use friendly message
+                        quantityTypedBuffer = quantityValue.ToString();
+                        string limitType = typedValue > quantityMax ? "maximum" : "minimum";
+                        TolkHelper.Speak($"{quantityValue} ({limitType})");
                     }
                     else
                     {
