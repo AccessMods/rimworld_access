@@ -499,6 +499,17 @@ namespace RimWorldAccess
                     }
                 }
 
+                // Handle ScenPart_GameCondition to include "days" unit
+                if (part.GetType().Name == "ScenPart_GameCondition")
+                {
+                    var durationField = part.GetType().GetField("durationDays", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (durationField != null)
+                    {
+                        float days = (float)durationField.GetValue(part);
+                        return $"{days:F0} days";
+                    }
+                }
+
                 // No list entries found - fall back to Summary()
                 // Reset summarized flag to ensure we get fresh data
                 part.summarized = false;
@@ -1388,13 +1399,24 @@ namespace RimWorldAccess
             // Handle ScenPart_DisableQuest - quest to disable
             if (partType.Name == "ScenPart_DisableQuest")
             {
-                var questDefField = partType.GetField("questDef", BindingFlags.NonPublic | BindingFlags.Instance);
+                var questDefField = partType.GetField("questDef", BindingFlags.Public | BindingFlags.Instance);
                 if (questDefField != null)
                 {
                     var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
-                    // LabelCap returns null when label is empty, fall back to defName
-                    string questLabel = currentQuest == null ? "None" :
-                        (currentQuest.label.NullOrEmpty() ? currentQuest.defName : (string)currentQuest.LabelCap);
+                    // LabelCap returns null when label is empty, use readable defName
+                    string questLabel;
+                    if (currentQuest == null)
+                    {
+                        questLabel = "None";
+                    }
+                    else if (currentQuest.label.NullOrEmpty())
+                    {
+                        questLabel = GenText.SplitCamelCase(currentQuest.defName).Replace("_", " ");
+                    }
+                    else
+                    {
+                        questLabel = (string)currentQuest.LabelCap;
+                    }
                     fields.Add(new PartField
                     {
                         Name = "Quest",
@@ -1413,9 +1435,20 @@ namespace RimWorldAccess
                 if (questDefField != null)
                 {
                     var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
-                    // LabelCap returns null when label is empty, fall back to defName
-                    string questLabel = currentQuest == null ? "None" :
-                        (currentQuest.label.NullOrEmpty() ? currentQuest.defName : (string)currentQuest.LabelCap);
+                    // LabelCap returns null when label is empty, use readable defName
+                    string questLabel;
+                    if (currentQuest == null)
+                    {
+                        questLabel = "None";
+                    }
+                    else if (currentQuest.label.NullOrEmpty())
+                    {
+                        questLabel = GenText.SplitCamelCase(currentQuest.defName).Replace("_", " ");
+                    }
+                    else
+                    {
+                        questLabel = (string)currentQuest.LabelCap;
+                    }
                     fields.Add(new PartField
                     {
                         Name = "Quest",
@@ -1806,8 +1839,16 @@ namespace RimWorldAccess
                 .Where(q => q.IsRootAny)
                 .OrderBy(q => q.label ?? q.defName))
             {
-                // LabelCap returns null when label is empty, fall back to defName
-                string displayLabel = quest.label.NullOrEmpty() ? quest.defName : (string)quest.LabelCap;
+                // LabelCap returns null when label is empty, use readable defName
+                string displayLabel;
+                if (quest.label.NullOrEmpty())
+                {
+                    displayLabel = GenText.SplitCamelCase(quest.defName).Replace("_", " ");
+                }
+                else
+                {
+                    displayLabel = (string)quest.LabelCap;
+                }
                 options.Add((displayLabel, quest));
             }
             return options;

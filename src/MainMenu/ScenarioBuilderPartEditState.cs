@@ -282,21 +282,25 @@ namespace RimWorldAccess
             string positionPart = MenuHelper.FormatPosition(selectedOptionIndex, dropdownOptions.Count);
 
             string text = $"{option.label}";
-            if (!string.IsNullOrEmpty(positionPart))
-            {
-                text += $" ({positionPart})";
-            }
 
-            if (dropdownTypeahead.HasActiveSearch)
-            {
-                text += $", {dropdownTypeahead.CurrentMatchPosition} of {dropdownTypeahead.MatchCount} matches";
-            }
-
-            // Add description from Def objects if available
+            // Add description from Def objects or TraitDegreeData if available
             // Special handling for FactionDef which has a computed Description property
             if (option.value is FactionDef fd && !string.IsNullOrEmpty(fd.Description))
             {
                 string desc = fd.Description;
+                int newlineIndex = desc.IndexOf('\n');
+                if (newlineIndex > 0)
+                    desc = desc.Substring(0, newlineIndex);
+                text += $". {desc.Trim()}";
+            }
+            else if (option.value is TraitDegreeData tdd && !string.IsNullOrEmpty(tdd.description))
+            {
+                // TraitDegreeData descriptions may contain {PAWN} placeholder - strip it
+                string desc = tdd.description.Replace("{PAWN_nameDef}", "colonist")
+                                              .Replace("{PAWN_possessive}", "their")
+                                              .Replace("{PAWN_objective}", "them")
+                                              .Replace("{PAWN_pronoun}", "they")
+                                              .Replace("{PAWN}", "colonist");
                 int newlineIndex = desc.IndexOf('\n');
                 if (newlineIndex > 0)
                     desc = desc.Substring(0, newlineIndex);
@@ -309,6 +313,16 @@ namespace RimWorldAccess
                 if (newlineIndex > 0)
                     desc = desc.Substring(0, newlineIndex);
                 text += $". {desc.Trim()}";
+            }
+
+            if (!string.IsNullOrEmpty(positionPart))
+            {
+                text += $" ({positionPart})";
+            }
+
+            if (dropdownTypeahead.HasActiveSearch)
+            {
+                text += $", {dropdownTypeahead.CurrentMatchPosition} of {dropdownTypeahead.MatchCount} matches";
             }
 
             TolkHelper.Speak(text);
