@@ -208,8 +208,82 @@ namespace RimWorldAccess
                     __result = false;
                     return false;
                 }
+
+                // NOTE: Do NOT block here when dirty - let DoBack() be called so it can show the dialog
             }
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Patches Page.DoBack() to show unsaved changes dialog for scenario builder.
+    /// CRITICAL: This is the correct place to intercept Escape key for Page windows.
+    /// OnCancelKeyPressed is NEVER called for Pages because closeOnCancel = false.
+    /// DoBack() is called by DoBottomButtons() when Escape is pressed and CanDoBack() returns true.
+    /// Since we block CanDoBack() when dirty, we also need to handle the dialog here for when
+    /// users use the Back button directly.
+    /// </summary>
+    [HarmonyPatch(typeof(Page))]
+    [HarmonyPatch("DoBack")]
+    public static class ScenarioBuilderDoBackPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix(Page __instance)
+        {
+            // Only intercept for Page_ScenarioEditor
+            if (__instance is Page_ScenarioEditor)
+            {
+                // Check for unsaved changes
+                if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsDirty())
+                {
+                    ShowUnsavedChangesDialog(__instance);
+                    return false; // Block original method
+                }
+            }
+            return true; // Let original method run
+        }
+
+        /// <summary>
+        /// Shows a confirmation dialog for unsaved changes with Save, Discard, and Cancel buttons.
+        /// </summary>
+        private static void ShowUnsavedChangesDialog(Window editorWindow)
+        {
+            var dialog = new Dialog_MessageBox(
+                "You have unsaved changes to this scenario.",
+                "Save",
+                () =>
+                {
+                    // Save then close
+                    WindowlessScenarioSaveState.Open(ScenarioBuilderState.CurrentScenario, () =>
+                    {
+                        ScenarioBuilderState.ResetDirty();
+                        ScenarioBuilderState.Close();
+                        editorWindow?.Close();
+                    });
+                },
+                "Discard",
+                () =>
+                {
+                    // Discard changes and close
+                    TolkHelper.Speak("Changes discarded.");
+                    ScenarioBuilderState.ResetDirty();
+                    ScenarioBuilderState.Close();
+                    editorWindow?.Close();
+                },
+                "Unsaved Changes",
+                false
+            );
+
+            // Add a third button for Cancel
+            dialog.buttonCText = "Cancel";
+            dialog.buttonCAction = () =>
+            {
+                TolkHelper.Speak("Continuing to edit.");
+            };
+            dialog.buttonCClose = true;
+
+            Find.WindowStack.Add(dialog);
+            TolkHelper.Speak("You have unsaved changes. Save, Discard, or Cancel?", SpeechPriority.High);
         }
     }
 }

@@ -17,6 +17,13 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static DialogElement editingElement = null;
 
+        /// <summary>
+        /// Tracks the frame number when the dialog was opened.
+        /// Used to skip input handling on the same frame to prevent the triggering key
+        /// (e.g., Escape) from immediately activating a button in the dialog.
+        /// </summary>
+        private static int openedOnFrame = -1;
+
         public static bool IsActive => currentDialog != null;
         public static bool IsEditingTextField => editingElement != null;
 
@@ -46,6 +53,10 @@ namespace RimWorldAccess
             CloseActiveMenus();
 
             currentDialog = dialog;
+
+            // Track the frame when opened to skip input on this frame
+            // This prevents the triggering key (e.g., Escape) from immediately activating Cancel
+            openedOnFrame = Time.frameCount;
 
             // Track if this dialog should force pause - used by WindowsForcePausePatch
             // to prevent game systems from thinking no modal dialog is open
@@ -117,6 +128,7 @@ namespace RimWorldAccess
             selectedIndex = 0;
             editingElement = null;
             ShouldForcePause = false;
+            openedOnFrame = -1;
         }
 
         /// <summary>
@@ -129,6 +141,11 @@ namespace RimWorldAccess
                 return false;
 
             if (evt.type != EventType.KeyDown)
+                return false;
+
+            // Skip input handling on the same frame the dialog was opened
+            // This prevents the triggering key (e.g., Escape) from immediately activating Cancel
+            if (Time.frameCount == openedOnFrame)
                 return false;
 
             KeyCode key = evt.keyCode;

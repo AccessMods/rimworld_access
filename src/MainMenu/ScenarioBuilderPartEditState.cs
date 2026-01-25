@@ -28,7 +28,11 @@ namespace RimWorldAccess
         private static int quantityMin;
         private static int quantityMax;
         private static float floatQuantityValue;
+        private static float floatQuantityMin;
+        private static float floatQuantityMax;
         private static bool isFloatQuantity;
+        private static bool isPercentQuantity; // True for 0-1 percentage values, false for raw float values
+        private static bool isIntegerDisplay; // True for floats that should display without decimals (e.g., days)
         private static string quantityTypedBuffer = "";
 
         /// <summary>
@@ -83,6 +87,7 @@ namespace RimWorldAccess
                     quantityMin = intRange[0];
                     quantityMax = intRange[1];
                     isFloatQuantity = false;
+                    isIntegerDisplay = false; // Not applicable for int[] data
 
                     // Parse current value
                     string valueStr = field.CurrentValue.Replace("%", "").Trim();
@@ -93,16 +98,30 @@ namespace RimWorldAccess
                 }
                 else if (field.Data is float[] floatRange)
                 {
-                    quantityMin = 0;
-                    quantityMax = 100;
                     isFloatQuantity = true;
+                    floatQuantityMin = floatRange[0];
+                    floatQuantityMax = floatRange[1];
 
-                    // Parse percentage value
+                    // Check if this is a percentage display field
+                    // Use explicit flag if set, otherwise infer from range (0-1 = percentage)
+                    isPercentQuantity = field.IsPercentDisplay || (floatRange[1] <= 1.0f);
+
+                    // Check if this should display as integer (no decimals)
+                    isIntegerDisplay = field.IsIntegerDisplay;
+
+                    // Parse current value
                     string valueStr = field.CurrentValue.Replace("%", "").Trim();
                     if (float.TryParse(valueStr, out float parsed))
-                        floatQuantityValue = parsed / 100f;
+                    {
+                        if (isPercentQuantity)
+                            floatQuantityValue = parsed / 100f; // Convert from display percentage to stored value
+                        else
+                            floatQuantityValue = parsed; // Raw float value
+                    }
                     else
+                    {
                         floatQuantityValue = floatRange[0];
+                    }
                 }
                 else
                 {
@@ -110,6 +129,7 @@ namespace RimWorldAccess
                     quantityMin = 1;
                     quantityMax = 100;
                     isFloatQuantity = false;
+                    isIntegerDisplay = false;
                     quantityValue = 1;
                 }
 
@@ -191,11 +211,35 @@ namespace RimWorldAccess
                 if (isFloatQuantity)
                 {
                     currentField.SetValue?.Invoke(floatQuantityValue);
-                    currentField.CurrentValue = $"{floatQuantityValue * 100:F0}%";
+
+                    // If GetValue is available, read back the actual stored value (may differ due to validation)
+                    if (currentField.GetValue != null)
+                    {
+                        var actualValue = currentField.GetValue();
+                        if (actualValue is float actualFloat)
+                            floatQuantityValue = actualFloat;
+                    }
+
+                    // Use appropriate format based on field type
+                    if (isPercentQuantity)
+                        currentField.CurrentValue = $"{floatQuantityValue * 100:F0}%";
+                    else if (isIntegerDisplay)
+                        currentField.CurrentValue = floatQuantityValue.ToString("F0");
+                    else
+                        currentField.CurrentValue = floatQuantityValue.ToString("F1");
                 }
                 else
                 {
                     currentField.SetValue?.Invoke(quantityValue);
+
+                    // If GetValue is available, read back the actual stored value (may differ due to validation)
+                    if (currentField.GetValue != null)
+                    {
+                        var actualValue = currentField.GetValue();
+                        if (actualValue is int actualInt)
+                            quantityValue = actualInt;
+                    }
+
                     currentField.CurrentValue = quantityValue.ToString();
                 }
                 ScenarioBuilderState.SetDirty();
@@ -350,12 +394,25 @@ namespace RimWorldAccess
 
         #region Quantity Navigation
 
+        /// <summary>
+        /// Formats the current float value for display based on type flags.
+        /// </summary>
+        private static string FormatFloatValue(float value)
+        {
+            if (isPercentQuantity)
+                return $"{value * 100:F0}%";
+            else if (isIntegerDisplay)
+                return value.ToString("F0");
+            else
+                return value.ToString("F1");
+        }
+
         private static void AnnounceQuantity()
         {
             string value;
             if (isFloatQuantity)
             {
-                value = $"{floatQuantityValue * 100:F0}%";
+                value = FormatFloatValue(floatQuantityValue);
             }
             else
             {
@@ -389,8 +446,17 @@ namespace RimWorldAccess
             quantityTypedBuffer = ""; // Clear typed input when using arrows
             if (isFloatQuantity)
             {
-                floatQuantityValue = Mathf.Clamp01(floatQuantityValue + (amount * 0.01f));
-                TolkHelper.Speak($"{floatQuantityValue * 100:F0}%");
+                if (isPercentQuantity)
+                {
+                    // Increment by percentage points (amount=1 means 1%)
+                    floatQuantityValue = Mathf.Clamp(floatQuantityValue + (amount * 0.01f), floatQuantityMin, floatQuantityMax);
+                }
+                else
+                {
+                    // Raw float - increment by 1 (or amount)
+                    floatQuantityValue = Mathf.Clamp(floatQuantityValue + amount, floatQuantityMin, floatQuantityMax);
+                }
+                TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
             }
             else
             {
@@ -404,8 +470,17 @@ namespace RimWorldAccess
             quantityTypedBuffer = ""; // Clear typed input when using arrows
             if (isFloatQuantity)
             {
-                floatQuantityValue = Mathf.Clamp01(floatQuantityValue - (amount * 0.01f));
-                TolkHelper.Speak($"{floatQuantityValue * 100:F0}%");
+                if (isPercentQuantity)
+                {
+                    // Decrement by percentage points (amount=1 means 1%)
+                    floatQuantityValue = Mathf.Clamp(floatQuantityValue - (amount * 0.01f), floatQuantityMin, floatQuantityMax);
+                }
+                else
+                {
+                    // Raw float - decrement by 1 (or amount)
+                    floatQuantityValue = Mathf.Clamp(floatQuantityValue - amount, floatQuantityMin, floatQuantityMax);
+                }
+                TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
             }
             else
             {
@@ -419,8 +494,8 @@ namespace RimWorldAccess
             quantityTypedBuffer = ""; // Clear typed input when using Home
             if (isFloatQuantity)
             {
-                floatQuantityValue = 0f;
-                TolkHelper.Speak("0%");
+                floatQuantityValue = floatQuantityMin;
+                TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
             }
             else
             {
@@ -434,8 +509,8 @@ namespace RimWorldAccess
             quantityTypedBuffer = ""; // Clear typed input when using End
             if (isFloatQuantity)
             {
-                floatQuantityValue = 1f;
-                TolkHelper.Speak("100%");
+                floatQuantityValue = floatQuantityMax;
+                TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
             }
             else
             {
@@ -551,7 +626,11 @@ namespace RimWorldAccess
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
                     Close(applyChanges: true);
-                    string finalValue = isFloatQuantity ? $"{floatQuantityValue * 100:F0}%" : quantityValue.ToString();
+                    string finalValue;
+                    if (isFloatQuantity)
+                        finalValue = FormatFloatValue(floatQuantityValue);
+                    else
+                        finalValue = quantityValue.ToString();
                     TolkHelper.Speak($"Set to: {finalValue}");
                     return true;
                 case KeyCode.Escape:
@@ -642,9 +721,15 @@ namespace RimWorldAccess
             }
             else if (currentField?.Type == ScenarioBuilderState.FieldType.Quantity)
             {
+                // Allow digits for all quantity fields
                 if (char.IsDigit(character))
                 {
                     return HandleQuantityDigitInput(character);
+                }
+                // Allow decimal point for float fields that are NOT integer-display and NOT percentage
+                if ((character == '.' || character == ',') && isFloatQuantity && !isIntegerDisplay && !isPercentQuantity)
+                {
+                    return HandleQuantityDecimalInput();
                 }
             }
             else if (currentField?.Type == ScenarioBuilderState.FieldType.Text)
@@ -661,31 +746,108 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Handles decimal point input for float quantity fields.
+        /// </summary>
+        private static bool HandleQuantityDecimalInput()
+        {
+            // Don't allow multiple decimal points
+            if (quantityTypedBuffer.Contains("."))
+            {
+                TolkHelper.Speak("Already has decimal point");
+                return true;
+            }
+
+            // If buffer is empty, start with "0."
+            if (string.IsNullOrEmpty(quantityTypedBuffer))
+            {
+                quantityTypedBuffer = "0.";
+                TolkHelper.Speak("0 point");
+            }
+            else
+            {
+                quantityTypedBuffer += ".";
+                TolkHelper.Speak($"{quantityTypedBuffer.TrimEnd('.')} point");
+            }
+
+            return true;
+        }
+
+        /// <summary>
         /// Handles digit input for quantity fields - builds a number from typed digits.
         /// </summary>
         private static bool HandleQuantityDigitInput(char digit)
         {
             quantityTypedBuffer += digit;
 
+            // For float fields that support decimals, parse as float
+            if (isFloatQuantity && !isPercentQuantity && !isIntegerDisplay && quantityTypedBuffer.Contains("."))
+            {
+                // Parse as float for decimal values
+                if (float.TryParse(quantityTypedBuffer, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float typedFloat))
+                {
+                    float clampedFloat = Mathf.Clamp(typedFloat, floatQuantityMin, floatQuantityMax);
+                    floatQuantityValue = clampedFloat;
+
+                    if (typedFloat != clampedFloat)
+                    {
+                        // Value was clamped
+                        quantityTypedBuffer = clampedFloat.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+                        string limitType = typedFloat > floatQuantityMax ? "maximum" : "minimum";
+                        TolkHelper.Speak($"{clampedFloat:F1} ({limitType})");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak(typedFloat.ToString("F1"));
+                    }
+                }
+                return true;
+            }
+
+            // Parse as integer for whole numbers
             if (int.TryParse(quantityTypedBuffer, out int typedValue))
             {
                 if (isFloatQuantity)
                 {
-                    // For percentages, treat typed value as percent
-                    float clampedFloat = Mathf.Clamp01(typedValue / 100f);
-                    floatQuantityValue = clampedFloat;
-                    int clampedPercent = Mathf.RoundToInt(clampedFloat * 100);
-
-                    if (typedValue != clampedPercent)
+                    if (isPercentQuantity)
                     {
-                        // Value was clamped - clear buffer and use friendly message
-                        quantityTypedBuffer = clampedPercent.ToString();
-                        string limitType = typedValue > 100 ? "maximum" : "minimum";
-                        TolkHelper.Speak($"{clampedPercent}% ({limitType})");
+                        // For percentages, typed value is the display percentage
+                        // Convert to stored value by dividing by 100
+                        float storedValue = typedValue / 100f;
+                        float clampedFloat = Mathf.Clamp(storedValue, floatQuantityMin, floatQuantityMax);
+                        floatQuantityValue = clampedFloat;
+                        int clampedPercent = Mathf.RoundToInt(clampedFloat * 100);
+                        int maxPercent = Mathf.RoundToInt(floatQuantityMax * 100);
+
+                        if (typedValue != clampedPercent)
+                        {
+                            // Value was clamped - clear buffer and use friendly message
+                            quantityTypedBuffer = clampedPercent.ToString();
+                            string limitType = typedValue > maxPercent ? "maximum" : "minimum";
+                            TolkHelper.Speak($"{clampedPercent}% ({limitType})");
+                        }
+                        else
+                        {
+                            TolkHelper.Speak($"{typedValue}%");
+                        }
                     }
                     else
                     {
-                        TolkHelper.Speak($"{typedValue}%");
+                        // For raw floats (like days or radius), treat typed value directly
+                        float clampedFloat = Mathf.Clamp(typedValue, floatQuantityMin, floatQuantityMax);
+                        floatQuantityValue = clampedFloat;
+
+                        if (typedValue != (int)clampedFloat)
+                        {
+                            // Value was clamped
+                            quantityTypedBuffer = ((int)clampedFloat).ToString();
+                            string limitType = typedValue > floatQuantityMax ? "maximum" : "minimum";
+                            TolkHelper.Speak($"{FormatFloatValue(clampedFloat)} ({limitType})");
+                        }
+                        else
+                        {
+                            TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
+                        }
                     }
                 }
                 else
@@ -710,7 +872,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Handles backspace in quantity mode - removes last typed digit.
+        /// Handles backspace in quantity mode - removes last typed character.
         /// </summary>
         private static bool HandleQuantityBackspace()
         {
@@ -727,16 +889,38 @@ namespace RimWorldAccess
                 TolkHelper.Speak("Cleared");
                 // Reset to min value
                 if (isFloatQuantity)
-                    floatQuantityValue = 0f;
+                    floatQuantityValue = floatQuantityMin;
                 else
                     quantityValue = quantityMin;
+            }
+            else if (quantityTypedBuffer.EndsWith("."))
+            {
+                // Buffer ends with decimal point - just announce what's before it
+                string beforeDecimal = quantityTypedBuffer.TrimEnd('.');
+                TolkHelper.Speak($"{beforeDecimal} point");
+            }
+            else if (quantityTypedBuffer.Contains(".") && float.TryParse(quantityTypedBuffer,
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float typedFloat))
+            {
+                // Buffer has decimal - parse as float
+                floatQuantityValue = Mathf.Clamp(typedFloat, floatQuantityMin, floatQuantityMax);
+                TolkHelper.Speak(typedFloat.ToString("F1"));
             }
             else if (int.TryParse(quantityTypedBuffer, out int typedValue))
             {
                 if (isFloatQuantity)
                 {
-                    floatQuantityValue = Mathf.Clamp01(typedValue / 100f);
-                    TolkHelper.Speak($"{typedValue}%");
+                    if (isPercentQuantity)
+                    {
+                        // Convert typed percentage to stored value and clamp to actual range
+                        floatQuantityValue = Mathf.Clamp(typedValue / 100f, floatQuantityMin, floatQuantityMax);
+                        TolkHelper.Speak($"{typedValue}%");
+                    }
+                    else
+                    {
+                        floatQuantityValue = Mathf.Clamp(typedValue, floatQuantityMin, floatQuantityMax);
+                        TolkHelper.Speak(FormatFloatValue(floatQuantityValue));
+                    }
                 }
                 else
                 {

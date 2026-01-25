@@ -142,6 +142,22 @@ namespace RimWorldAccess
             public string CurrentValue { get; set; }
             public object Data { get; set; } // For dropdown: list of options
             public Action<object> SetValue { get; set; } // Callback to set the value
+            /// <summary>
+            /// Optional callback to get the actual value after SetValue (for validation/clamping).
+            /// If set, this is called after SetValue to get the real stored value which may differ
+            /// from the requested value due to validation constraints.
+            /// </summary>
+            public Func<object> GetValue { get; set; }
+            /// <summary>
+            /// For Quantity fields: if true, the value is displayed as a percentage (value * 100 + "%")
+            /// even if the max range is greater than 1. Used for stat factors that can go above 100%.
+            /// </summary>
+            public bool IsPercentDisplay { get; set; }
+            /// <summary>
+            /// For Quantity fields with float[] Data: if true, display as integer (no decimal places)
+            /// even though the underlying value is a float. Used for days that are whole numbers.
+            /// </summary>
+            public bool IsIntegerDisplay { get; set; }
         }
 
         public enum FieldType { Dropdown, Quantity, Text, Checkbox }
@@ -873,8 +889,9 @@ namespace RimWorldAccess
                     {
                         Name = "Minimum Days",
                         Type = FieldType.Quantity,
-                        CurrentValue = currentMin.ToString("F1"),
+                        CurrentValue = currentMin.ToString("F0"),
                         Data = new float[] { 0f, 1000f },
+                        IsIntegerDisplay = true,
                         SetValue = (val) => minDaysField.SetValue(part, Convert.ToSingle(val))
                     });
                 }
@@ -888,8 +905,9 @@ namespace RimWorldAccess
                     {
                         Name = "Maximum Days",
                         Type = FieldType.Quantity,
-                        CurrentValue = currentMax.ToString("F1"),
+                        CurrentValue = currentMax.ToString("F0"),
                         Data = new float[] { 0f, 1000f },
+                        IsIntegerDisplay = true,
                         SetValue = (val) => maxDaysField.SetValue(part, Convert.ToSingle(val))
                     });
                 }
@@ -910,7 +928,8 @@ namespace RimWorldAccess
                 }
             }
             // Try to find IncidentDef field (generic handler for other incident parts)
-            else
+            // Exclude ScenPart_DisableIncident since it has its own specific handler below
+            else if (partType.Name != "ScenPart_DisableIncident")
             {
                 var incidentField = partType.GetField("incident", BindingFlags.NonPublic | BindingFlags.Instance);
                 if (incidentField != null && incidentField.FieldType == typeof(IncidentDef))
@@ -1074,7 +1093,8 @@ namespace RimWorldAccess
                         if (range.min > range.max - 4)
                             range.min = range.max - 4;
                         ageRangeField.SetValue(part, range);
-                    }
+                    },
+                    GetValue = () => ((IntRange)ageRangeField.GetValue(part)).min
                 });
                 fields.Add(new PartField
                 {
@@ -1090,7 +1110,8 @@ namespace RimWorldAccess
                         if (range.max < range.min + 4)
                             range.max = range.min + 4;
                         ageRangeField.SetValue(part, range);
-                    }
+                    },
+                    GetValue = () => ((IntRange)ageRangeField.GetValue(part)).max
                 });
             }
 
@@ -1202,6 +1223,7 @@ namespace RimWorldAccess
                 }
 
                 // factor field (displayed as percentage, stored as decimal)
+                // Game allows 0-100 (0% to 10000%), where 1.0 = 100% (normal)
                 var factorField = partType.GetField("factor", BindingFlags.NonPublic | BindingFlags.Instance);
                 if (factorField != null)
                 {
@@ -1212,7 +1234,8 @@ namespace RimWorldAccess
                         Type = FieldType.Quantity,
                         CurrentValue = $"{currentFactor * 100:F0}%",
                         Data = new float[] { 0f, 100f }, // 0-10000% range in game
-                        SetValue = (val) => factorField.SetValue(part, Convert.ToSingle(val))
+                        SetValue = (val) => factorField.SetValue(part, Convert.ToSingle(val)),
+                        IsPercentDisplay = true // Display as percentage even though max > 1
                     });
                 }
             }
@@ -1320,8 +1343,9 @@ namespace RimWorldAccess
                     {
                         Name = "Duration (Days)",
                         Type = FieldType.Quantity,
-                        CurrentValue = currentDuration.ToString("F1"),
+                        CurrentValue = currentDuration.ToString("F0"),
                         Data = new float[] { 0f, 1000f },
+                        IsIntegerDisplay = true,
                         SetValue = (val) => durationField.SetValue(part, Convert.ToSingle(val))
                     });
                 }
@@ -1368,11 +1392,14 @@ namespace RimWorldAccess
                 if (questDefField != null)
                 {
                     var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
+                    // LabelCap returns null when label is empty, fall back to defName
+                    string questLabel = currentQuest == null ? "None" :
+                        (currentQuest.label.NullOrEmpty() ? currentQuest.defName : (string)currentQuest.LabelCap);
                     fields.Add(new PartField
                     {
                         Name = "Quest",
                         Type = FieldType.Dropdown,
-                        CurrentValue = currentQuest?.LabelCap ?? "None",
+                        CurrentValue = questLabel,
                         Data = GetQuestScriptDefOptions(),
                         SetValue = (val) => questDefField.SetValue(part, val)
                     });
@@ -1386,11 +1413,14 @@ namespace RimWorldAccess
                 if (questDefField != null)
                 {
                     var currentQuest = questDefField.GetValue(part) as QuestScriptDef;
+                    // LabelCap returns null when label is empty, fall back to defName
+                    string questLabel = currentQuest == null ? "None" :
+                        (currentQuest.label.NullOrEmpty() ? currentQuest.defName : (string)currentQuest.LabelCap);
                     fields.Add(new PartField
                     {
                         Name = "Quest",
                         Type = FieldType.Dropdown,
-                        CurrentValue = currentQuest?.LabelCap ?? "None",
+                        CurrentValue = questLabel,
                         Data = GetQuestScriptDefOptions(),
                         SetValue = (val) => questDefField.SetValue(part, val)
                     });
@@ -1464,8 +1494,9 @@ namespace RimWorldAccess
                     {
                         Name = "Activation Delay (Days)",
                         Type = FieldType.Quantity,
-                        CurrentValue = currentDays.ToString("F1"),
+                        CurrentValue = currentDays.ToString("F0"),
                         Data = new float[] { 0f, 1000f },
+                        IsIntegerDisplay = true,
                         SetValue = (val) => {
                             float days = Convert.ToSingle(val);
                             int ticks = (int)(days * 60000f);
@@ -1773,9 +1804,11 @@ namespace RimWorldAccess
             var options = new List<(string, object)>();
             foreach (var quest in DefDatabase<QuestScriptDef>.AllDefs
                 .Where(q => q.IsRootAny)
-                .OrderBy(q => q.label))
+                .OrderBy(q => q.label ?? q.defName))
             {
-                options.Add((quest.LabelCap, quest));
+                // LabelCap returns null when label is empty, fall back to defName
+                string displayLabel = quest.label.NullOrEmpty() ? quest.defName : (string)quest.LabelCap;
+                options.Add((displayLabel, quest));
             }
             return options;
         }
@@ -3117,6 +3150,14 @@ namespace RimWorldAccess
                 int total = item.ParentPart.Fields.Count + item.ParentPart.ListItems.Count + 1;
                 return (total, total);
             }
+            // Handle parts (including single-field parts shown at level 0)
+            // NOTE: Must check IsPart before IsField because single-field parts have both
+            else if (item.IsPart)
+            {
+                // Count root parts
+                int position = partsHierarchy.IndexOf(item.AsPart) + 1;
+                return (position, partsHierarchy.Count);
+            }
             // Handle regular fields under expanded parts
             else if (item.IsField && item.ParentPart != null)
             {
@@ -3132,12 +3173,6 @@ namespace RimWorldAccess
                     }
                 }
                 return (position, total);
-            }
-            else if (item.IsPart)
-            {
-                // Count root parts
-                int position = partsHierarchy.IndexOf(item.AsPart) + 1;
-                return (position, partsHierarchy.Count);
             }
 
             return (1, 1);
@@ -3218,7 +3253,16 @@ namespace RimWorldAccess
                 // Strip trailing punctuation to avoid ". :" patterns
                 string partLabel = StripTrailingPunctuation(part.Label);
                 string fieldValue = StripTrailingPunctuation(field.CurrentValue);
-                announcement = $"{partLabel}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                // For checkboxes, use "checkbox, checked/unchecked" format instead of "Yes/No, checkbox"
+                if (field.Type == FieldType.Checkbox)
+                {
+                    string checkState = (fieldValue == "Yes" || fieldValue == "true" || fieldValue == "True") ? "checked" : "unchecked";
+                    announcement = $"{partLabel}, checkbox, {checkState}. Press Enter to toggle.";
+                }
+                else
+                {
+                    announcement = $"{partLabel}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                }
                 // Add Insert key hint for truncated Text fields
                 if (field.Type == FieldType.Text && field.Data is string fullText && fullText.Length > 60)
                 {
@@ -3266,7 +3310,16 @@ namespace RimWorldAccess
                                   field.Type == FieldType.Checkbox ? "checkbox" : "text";
                 string fieldName = StripTrailingPunctuation(field.Name);
                 string fieldValue = StripTrailingPunctuation(field.CurrentValue);
-                announcement = $"{fieldName}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                // For checkboxes, use "checkbox, checked/unchecked" format instead of "Yes/No, checkbox"
+                if (field.Type == FieldType.Checkbox)
+                {
+                    string checkState = (fieldValue == "Yes" || fieldValue == "true" || fieldValue == "True") ? "checked" : "unchecked";
+                    announcement = $"{fieldName}, checkbox, {checkState}. Press Enter to toggle.";
+                }
+                else
+                {
+                    announcement = $"{fieldName}: {fieldValue}. {typeHint}. Press Enter to edit.";
+                }
                 // Add Insert key hint for truncated Text fields
                 if (field.Type == FieldType.Text && field.Data is string fullText && fullText.Length > 60)
                 {
