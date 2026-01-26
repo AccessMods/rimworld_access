@@ -124,58 +124,14 @@ namespace RimWorldAccess
                     return false; // Skip original method - let our overlay handle the Escape
                 }
 
-                // Check for unsaved changes
-                if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsDirty())
-                {
-                    // Show confirmation dialog with 3 buttons
-                    ShowUnsavedChangesDialog(__instance);
-                    return false; // Block original method
-                }
+                // NOTE: We don't show unsaved changes dialog here because OnCancelKeyPressed
+                // never actually runs for Pages (closeOnCancel = false). The dialog is shown
+                // in ScenarioBuilderDoBackPatch which handles DoBack() called from DoBottomButtons.
             }
 
             return true; // Let original method run
         }
 
-        /// <summary>
-        /// Shows a confirmation dialog for unsaved changes with Save, Discard, and Cancel buttons.
-        /// Uses Dialog_MessageBox which gets intercepted by WindowlessDialogState for accessibility.
-        /// </summary>
-        private static void ShowUnsavedChangesDialog(Window editorWindow)
-        {
-            var dialog = new Dialog_MessageBox(
-                "You have unsaved changes to this scenario.",
-                "Save",
-                () =>
-                {
-                    // Save then close
-                    WindowlessScenarioSaveState.Open(ScenarioBuilderState.CurrentScenario, () =>
-                    {
-                        ScenarioBuilderState.Close();
-                        editorWindow?.Close();
-                    });
-                },
-                "Discard",
-                () =>
-                {
-                    // Discard changes and close
-                    TolkHelper.Speak("Changes discarded.");
-                    ScenarioBuilderState.Close();
-                    editorWindow?.Close();
-                },
-                "Unsaved Changes",
-                false
-            );
-
-            // Add a third button for Cancel
-            dialog.buttonCText = "Cancel";
-            dialog.buttonCAction = () =>
-            {
-                TolkHelper.Speak("Continuing to edit.");
-            };
-            dialog.buttonCClose = true;
-
-            Find.WindowStack.Add(dialog);
-        }
     }
 
     /// <summary>
@@ -248,6 +204,9 @@ namespace RimWorldAccess
         /// </summary>
         private static void ShowUnsavedChangesDialog(Window editorWindow)
         {
+            // Get the prev page so we can navigate back properly after discard
+            var prevPage = AccessTools.Field(typeof(Page), "prev")?.GetValue(editorWindow) as Page;
+
             var dialog = new Dialog_MessageBox(
                 "You have unsaved changes to this scenario.",
                 "Save",
@@ -264,10 +223,15 @@ namespace RimWorldAccess
                 "Discard",
                 () =>
                 {
-                    // Discard changes and close
+                    // Discard changes and navigate back to scenario list
                     TolkHelper.Speak("Changes discarded.");
                     ScenarioBuilderState.ResetDirty();
                     ScenarioBuilderState.Close();
+                    // Navigate back to previous page (scenario list) instead of just closing
+                    if (prevPage != null)
+                    {
+                        Find.WindowStack.Add(prevPage);
+                    }
                     editorWindow?.Close();
                 },
                 "Unsaved Changes",

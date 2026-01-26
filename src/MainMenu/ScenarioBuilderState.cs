@@ -1036,33 +1036,18 @@ namespace RimWorldAccess
                     var currentStagesObj = devStagesField.GetValue(part);
                     int currentStages = Convert.ToInt32(currentStagesObj);
 
-                    // DevelopmentalStage is a flags enum: Baby=1, Child=2, Adult=4
-                    bool allowBabies = (currentStages & 1) != 0;
-                    bool allowChildren = (currentStages & 2) != 0;
-                    bool allowAdults = (currentStages & 4) != 0;
+                    // DevelopmentalStage is a flags enum: Newborn=1, Baby=2, Child=4, Adult=8
+                    bool allowBabies = (currentStages & 2) != 0;
+                    bool allowChildren = (currentStages & 4) != 0;
+                    bool allowAdults = (currentStages & 8) != 0;
 
                     fields.Add(new PartField
                     {
                         Name = "Allow Babies",
-                        Type = FieldType.Dropdown,
+                        Type = FieldType.Checkbox,
                         CurrentValue = allowBabies ? "Yes" : "No",
-                        Data = GetYesNoOptions(),
                         SetValue = (val) => {
-                            bool enable = val?.ToString() == "Yes";
-                            int stages = Convert.ToInt32(devStagesField.GetValue(part));
-                            if (enable) stages |= 1; else stages &= ~1;
-                            devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
-                        }
-                    });
-
-                    fields.Add(new PartField
-                    {
-                        Name = "Allow Children",
-                        Type = FieldType.Dropdown,
-                        CurrentValue = allowChildren ? "Yes" : "No",
-                        Data = GetYesNoOptions(),
-                        SetValue = (val) => {
-                            bool enable = val?.ToString() == "Yes";
+                            bool enable = val is bool b ? b : val?.ToString() == "Yes";
                             int stages = Convert.ToInt32(devStagesField.GetValue(part));
                             if (enable) stages |= 2; else stages &= ~2;
                             devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
@@ -1071,14 +1056,26 @@ namespace RimWorldAccess
 
                     fields.Add(new PartField
                     {
-                        Name = "Allow Adults",
-                        Type = FieldType.Dropdown,
-                        CurrentValue = allowAdults ? "Yes" : "No",
-                        Data = GetYesNoOptions(),
+                        Name = "Allow Children",
+                        Type = FieldType.Checkbox,
+                        CurrentValue = allowChildren ? "Yes" : "No",
                         SetValue = (val) => {
-                            bool enable = val?.ToString() == "Yes";
+                            bool enable = val is bool b ? b : val?.ToString() == "Yes";
                             int stages = Convert.ToInt32(devStagesField.GetValue(part));
                             if (enable) stages |= 4; else stages &= ~4;
+                            devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
+                        }
+                    });
+
+                    fields.Add(new PartField
+                    {
+                        Name = "Allow Adults",
+                        Type = FieldType.Checkbox,
+                        CurrentValue = allowAdults ? "Yes" : "No",
+                        SetValue = (val) => {
+                            bool enable = val is bool b ? b : val?.ToString() == "Yes";
+                            int stages = Convert.ToInt32(devStagesField.GetValue(part));
+                            if (enable) stages |= 8; else stages &= ~8;
                             devStagesField.SetValue(part, Enum.ToObject(devStagesField.FieldType, stages));
                         }
                     });
@@ -3298,7 +3295,7 @@ namespace RimWorldAccess
                 if (field.Type == FieldType.Checkbox)
                 {
                     string checkState = (fieldValue == "Yes" || fieldValue == "true" || fieldValue == "True") ? "checked" : "unchecked";
-                    announcement = $"{partLabel}, checkbox, {checkState}. Press Enter to toggle.";
+                    announcement = $"{partLabel}, checkbox, {checkState}. Press Enter or Space to toggle.";
                 }
                 else
                 {
@@ -3355,7 +3352,7 @@ namespace RimWorldAccess
                 if (field.Type == FieldType.Checkbox)
                 {
                     string checkState = (fieldValue == "Yes" || fieldValue == "true" || fieldValue == "True") ? "checked" : "unchecked";
-                    announcement = $"{fieldName}, checkbox, {checkState}. Press Enter to toggle.";
+                    announcement = $"{fieldName}, checkbox, {checkState}. Press Enter or Space to toggle.";
                 }
                 else
                 {
@@ -4062,7 +4059,8 @@ namespace RimWorldAccess
                     return true;
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    // Enter activates the current item (edit field, expand, or feedback)
+                case KeyCode.Space:
+                    // Enter/Space activates the current item (edit field, expand, or feedback)
                     ActivateCurrentItem();
                     return true;
                 case KeyCode.Delete:

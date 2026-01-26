@@ -422,6 +422,9 @@ namespace RimWorldAccess
             // 2. Collect items by processing each ScenPart directly
             var startWithItems = new List<string>();      // From GetSummaryListEntries("PlayerStartsWith")
             var mapScatteredItems = new List<string>();   // From GetSummaryListEntries("MapScatteredWith")
+            var createIncidentItems = new List<string>(); // From GetSummaryListEntries("CreateIncident")
+            var disableIncidentItems = new List<string>(); // From GetSummaryListEntries("DisableIncident")
+            var permaGameConditionItems = new List<string>(); // From GetSummaryListEntries("PermaGameCondition")
             string pawnCountLine = null;                   // From ConfigureStartingPawns.Summary()
             var researchLines = new List<string>();        // From StartingResearch.Summary()
             var otherSummaries = new List<string>();       // Everything else
@@ -444,6 +447,24 @@ namespace RimWorldAccess
                         mapScatteredItems.Add(entry);
                 }
 
+                foreach (string entry in part.GetSummaryListEntries("CreateIncident"))
+                {
+                    if (!string.IsNullOrWhiteSpace(entry))
+                        createIncidentItems.Add(entry);
+                }
+
+                foreach (string entry in part.GetSummaryListEntries("DisableIncident"))
+                {
+                    if (!string.IsNullOrWhiteSpace(entry))
+                        disableIncidentItems.Add(entry);
+                }
+
+                foreach (string entry in part.GetSummaryListEntries("PermaGameCondition"))
+                {
+                    if (!string.IsNullOrWhiteSpace(entry))
+                        permaGameConditionItems.Add(entry);
+                }
+
                 // Categorize part by type name
                 string partTypeName = part.GetType().Name;
 
@@ -451,7 +472,10 @@ namespace RimWorldAccess
                 if (partTypeName.Contains("StartingThing") ||
                     partTypeName.Contains("StartingAnimal") ||
                     partTypeName.Contains("StartingMech") ||
-                    partTypeName.Contains("ScatterThings"))
+                    partTypeName.Contains("ScatterThings") ||
+                    partTypeName.Contains("CreateIncident") ||
+                    partTypeName.Contains("DisableIncident") ||
+                    partTypeName.Contains("GameCondition"))
                 {
                     continue;
                 }
@@ -557,6 +581,45 @@ namespace RimWorldAccess
                 detailItemsHierarchy.Add(mapScatteredSection);
             }
 
+            // 6. Build "Create incident" treeview
+            if (createIncidentItems.Count > 0)
+            {
+                var createIncidentSection = new DetailItem("Create incident", 0, true);
+                foreach (string label in createIncidentItems)
+                {
+                    var item = new DetailItem(label, 1, false);
+                    item.Parent = createIncidentSection;
+                    createIncidentSection.Children.Add(item);
+                }
+                detailItemsHierarchy.Add(createIncidentSection);
+            }
+
+            // 7. Build "Disable incident" treeview
+            if (disableIncidentItems.Count > 0)
+            {
+                var disableIncidentSection = new DetailItem("Disable incident", 0, true);
+                foreach (string label in disableIncidentItems)
+                {
+                    var item = new DetailItem(label, 1, false);
+                    item.Parent = disableIncidentSection;
+                    disableIncidentSection.Children.Add(item);
+                }
+                detailItemsHierarchy.Add(disableIncidentSection);
+            }
+
+            // 8. Build "Permanent game condition" treeview
+            if (permaGameConditionItems.Count > 0)
+            {
+                var permaGameConditionSection = new DetailItem("Permanent game condition", 0, true);
+                foreach (string label in permaGameConditionItems)
+                {
+                    var item = new DetailItem(label, 1, false);
+                    item.Parent = permaGameConditionSection;
+                    permaGameConditionSection.Children.Add(item);
+                }
+                detailItemsHierarchy.Add(permaGameConditionSection);
+            }
+
             // Fallback if nothing was added
             if (detailItemsHierarchy.Count == 0)
             {
@@ -575,7 +638,10 @@ namespace RimWorldAccess
 
             string lineLower = line.ToLowerInvariant();
             return lineLower.StartsWith("start with") ||
-                   lineLower.StartsWith("map is scattered");
+                   lineLower.StartsWith("map is scattered") ||
+                   lineLower.StartsWith("create incident") ||
+                   lineLower.StartsWith("disable incident") ||
+                   lineLower.StartsWith("permanent game condition");
         }
 
         /// <summary>

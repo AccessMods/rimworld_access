@@ -162,7 +162,7 @@ namespace RimWorldAccess
                 field.SetValue?.Invoke(newValue);
                 ScenarioBuilderState.SetDirty();
 
-                TolkHelper.Speak($"{field.Name}: {(newValue ? "Enabled" : "Disabled")}");
+                TolkHelper.Speak($"{field.Name}: {(newValue ? "checked" : "unchecked")}");
                 onCompleteCallback?.Invoke();
                 return; // Don't set IsActive - immediate toggle
             }

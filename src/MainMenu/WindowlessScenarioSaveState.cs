@@ -216,6 +216,9 @@ namespace RimWorldAccess
                 scenarioToSave.name = scenarioToSave.name ?? fileName;
                 GameDataSaveLoader.SaveScenario(scenarioToSave, fullPath);
 
+                // Reset dirty flag after successful save
+                ScenarioBuilderState.ResetDirty();
+
                 Close();
                 TolkHelper.Speak($"Saved as {fileName}");
                 onSaveComplete?.Invoke();
