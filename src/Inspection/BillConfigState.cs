@@ -20,6 +20,10 @@ namespace RimWorldAccess
         private static bool isActive = false;
         private static bool isEditing = false;
 
+        // Numeric input mode fields
+        private static string numericBuffer = "";
+        private static bool isNumericInputMode = false;
+
         private enum MenuItemType
         {
             RecipeInfo,
@@ -61,6 +65,7 @@ namespace RimWorldAccess
         public static bool HasActiveSearch => typeahead.HasActiveSearch;
         public static bool HasNoMatches => typeahead.HasNoMatches;
         public static bool IsEditing => isEditing;
+        public static bool IsNumericInputMode => isNumericInputMode;
 
         /// <summary>
         /// Opens the bill configuration menu.
@@ -97,6 +102,8 @@ namespace RimWorldAccess
             selectedIndex = 0;
             isActive = false;
             isEditing = false;
+            isNumericInputMode = false;
+            numericBuffer = "";
             typeahead.ClearSearch();
         }
 
@@ -185,6 +192,10 @@ namespace RimWorldAccess
 
         private static string GetTargetCountLabel()
         {
+            if (bill.targetCount >= 999999)
+            {
+                return "Target count: Infinite";
+            }
             return $"Target count: {bill.targetCount}";
         }
 
@@ -253,6 +264,27 @@ namespace RimWorldAccess
             else
             {
                 return $"Ingredient radius: {bill.ingredientSearchRadius:F0} tiles";
+            }
+        }
+
+        /// <summary>
+        /// Gets the label for a menu item type.
+        /// Used by JumpToMin/JumpToMax to update labels after value changes.
+        /// </summary>
+        private static string GetLabelForItem(MenuItemType type)
+        {
+            switch (type)
+            {
+                case MenuItemType.RepeatCount:
+                    return GetRepeatCountLabel();
+                case MenuItemType.TargetCount:
+                    return GetTargetCountLabel();
+                case MenuItemType.UnpauseAt:
+                    return GetUnpauseAtLabel();
+                case MenuItemType.IngredientSearchRadius:
+                    return GetIngredientRadiusLabel();
+                default:
+                    return "";
             }
         }
 
@@ -422,7 +454,7 @@ namespace RimWorldAccess
             TolkHelper.Speak(announcement);
         }
 
-        public static void AdjustValue(int direction)
+        public static void AdjustValue(int direction, int multiplier = 1)
         {
             if (menuItems == null || selectedIndex >= menuItems.Count)
                 return;
@@ -442,15 +474,15 @@ namespace RimWorldAccess
                     break;
 
                 case MenuItemType.RepeatCount:
-                    AdjustRepeatCount(direction);
+                    AdjustRepeatCount(direction, multiplier);
                     break;
 
                 case MenuItemType.TargetCount:
-                    AdjustTargetCount(direction);
+                    AdjustTargetCount(direction, multiplier);
                     break;
 
                 case MenuItemType.UnpauseAt:
-                    AdjustUnpauseAt(direction);
+                    AdjustUnpauseAt(direction, multiplier);
                     break;
 
                 case MenuItemType.AllowedSkillRange:
@@ -458,7 +490,7 @@ namespace RimWorldAccess
                     break;
 
                 case MenuItemType.IngredientSearchRadius:
-                    AdjustIngredientRadius(direction);
+                    AdjustIngredientRadius(direction, multiplier);
                     break;
 
                 default:
@@ -538,38 +570,352 @@ namespace RimWorldAccess
             AnnounceCurrentSelection();
         }
 
-        private static void AdjustRepeatCount(int direction)
+        private static void AdjustRepeatCount(int direction, int multiplier = 1)
         {
-            int step = direction > 0 ? 1 : -1;
+            int step = direction * multiplier;
+            int oldValue = bill.repeatCount;
             bill.repeatCount = Mathf.Max(1, bill.repeatCount + step);
 
+            // Check if we hit a boundary
+            if (bill.repeatCount == oldValue)
+            {
+                TolkHelper.Speak(direction > 0 ? "Maximum" : "Minimum");
+                return;
+            }
+            if (bill.repeatCount == 1 && direction < 0)
+            {
+                TolkHelper.Speak("1, minimum");
+            }
+            else
+            {
+                TolkHelper.Speak(bill.repeatCount.ToString());
+            }
+
             menuItems[selectedIndex].label = GetRepeatCountLabel();
-            TolkHelper.Speak(menuItems[selectedIndex].label);
         }
 
-        private static void AdjustTargetCount(int direction)
+        private static void AdjustTargetCount(int direction, int multiplier = 1)
         {
-            int step = direction > 0 ? 1 : -1;
+            int step = direction * multiplier;
+            int oldValue = bill.targetCount;
             bill.targetCount = Mathf.Max(1, bill.targetCount + step);
 
-            // Ensure unpause threshold doesn't exceed target (must be at least 1 less if pauseWhenSatisfied)
+            // Enforce unpauseAt constraint
             if (bill.pauseWhenSatisfied && bill.unpauseWhenYouHave >= bill.targetCount)
             {
                 bill.unpauseWhenYouHave = bill.targetCount - 1;
             }
 
+            // Check if we hit Infinite threshold
+            if (bill.targetCount >= 999999)
+            {
+                bill.targetCount = 999999;  // Normalize to exactly 999999
+                TolkHelper.Speak("Infinite");
+                menuItems[selectedIndex].label = GetTargetCountLabel();
+                return;
+            }
+
+            // Check if we hit a boundary
+            if (bill.targetCount == oldValue)
+            {
+                TolkHelper.Speak(direction > 0 ? "Maximum" : "Minimum");
+                return;
+            }
+            if (bill.targetCount == 1 && direction < 0)
+            {
+                TolkHelper.Speak("1, minimum");
+            }
+            else
+            {
+                TolkHelper.Speak(bill.targetCount.ToString());
+            }
+
             menuItems[selectedIndex].label = GetTargetCountLabel();
-            TolkHelper.Speak(menuItems[selectedIndex].label);
         }
 
-        private static void AdjustUnpauseAt(int direction)
+        private static void AdjustUnpauseAt(int direction, int multiplier = 1)
         {
-            int step = direction > 0 ? 1 : -1;
-            bill.unpauseWhenYouHave = Mathf.Clamp(bill.unpauseWhenYouHave + step, 0, bill.targetCount - 1);
+            int step = direction * multiplier;
+            int oldValue = bill.unpauseWhenYouHave;
+            int maxValue = bill.targetCount - 1;
+            bill.unpauseWhenYouHave = Mathf.Clamp(bill.unpauseWhenYouHave + step, 0, maxValue);
+
+            // Check if we hit a boundary
+            if (bill.unpauseWhenYouHave == oldValue)
+            {
+                TolkHelper.Speak(direction > 0 ? "Maximum" : "Minimum");
+                return;
+            }
+            if (bill.unpauseWhenYouHave == 0 && direction < 0)
+            {
+                TolkHelper.Speak("0, minimum");
+            }
+            else if (bill.unpauseWhenYouHave == maxValue && direction > 0)
+            {
+                TolkHelper.Speak($"{bill.unpauseWhenYouHave}, maximum");
+            }
+            else
+            {
+                TolkHelper.Speak(bill.unpauseWhenYouHave.ToString());
+            }
 
             menuItems[selectedIndex].label = GetUnpauseAtLabel();
-            TolkHelper.Speak(menuItems[selectedIndex].label);
         }
+
+        /// <summary>
+        /// Jumps to the minimum value for the current numeric field.
+        /// </summary>
+        public static void JumpToMin()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            switch (item.type)
+            {
+                case MenuItemType.RepeatCount:
+                    if (bill.repeatCount == 1)
+                    {
+                        TolkHelper.Speak("Already at minimum");
+                        return;
+                    }
+                    bill.repeatCount = 1;
+                    TolkHelper.Speak("1, minimum");
+                    break;
+
+                case MenuItemType.TargetCount:
+                    if (bill.targetCount == 1)
+                    {
+                        TolkHelper.Speak("Already at minimum");
+                        return;
+                    }
+                    bill.targetCount = 1;
+                    if (bill.pauseWhenSatisfied && bill.unpauseWhenYouHave >= bill.targetCount)
+                    {
+                        bill.unpauseWhenYouHave = 0;
+                    }
+                    TolkHelper.Speak("1, minimum");
+                    break;
+
+                case MenuItemType.UnpauseAt:
+                    if (bill.unpauseWhenYouHave == 0)
+                    {
+                        TolkHelper.Speak("Already at minimum");
+                        return;
+                    }
+                    bill.unpauseWhenYouHave = 0;
+                    TolkHelper.Speak("0, minimum");
+                    break;
+
+                case MenuItemType.IngredientSearchRadius:
+                    if (bill.ingredientSearchRadius <= 3f)
+                    {
+                        TolkHelper.Speak("Already at minimum");
+                        return;
+                    }
+                    bill.ingredientSearchRadius = 3f;
+                    TolkHelper.Speak("3, minimum");
+                    break;
+
+                default:
+                    TolkHelper.Speak("This field cannot be adjusted");
+                    return;
+            }
+
+            menuItems[selectedIndex].label = GetLabelForItem(item.type);
+        }
+
+        /// <summary>
+        /// Jumps to the maximum value for the current numeric field.
+        /// </summary>
+        public static void JumpToMax()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            switch (item.type)
+            {
+                case MenuItemType.RepeatCount:
+                    TolkHelper.Speak("No maximum limit. Use numeric input for large values.");
+                    return;
+
+                case MenuItemType.TargetCount:
+                    if (bill.targetCount >= 999999)
+                    {
+                        TolkHelper.Speak("Already at maximum");
+                        return;
+                    }
+                    bill.targetCount = 999999;
+                    TolkHelper.Speak("Infinite, maximum");
+                    break;
+
+                case MenuItemType.UnpauseAt:
+                    int maxValue = bill.targetCount - 1;
+                    if (bill.unpauseWhenYouHave == maxValue)
+                    {
+                        TolkHelper.Speak("Already at maximum");
+                        return;
+                    }
+                    bill.unpauseWhenYouHave = maxValue;
+                    TolkHelper.Speak($"{maxValue}, maximum");
+                    break;
+
+                case MenuItemType.IngredientSearchRadius:
+                    if (bill.ingredientSearchRadius >= 999f)
+                    {
+                        TolkHelper.Speak("Already at maximum");
+                        return;
+                    }
+                    bill.ingredientSearchRadius = 999f;
+                    TolkHelper.Speak("Unlimited, maximum");
+                    break;
+
+                default:
+                    TolkHelper.Speak("This field cannot be adjusted");
+                    return;
+            }
+
+            menuItems[selectedIndex].label = GetLabelForItem(item.type);
+        }
+
+        #endregion
+
+        #region Numeric Input Methods
+
+        /// <summary>
+        /// Starts numeric input mode for typing a value directly.
+        /// </summary>
+        public static void StartNumericInput()
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            // Only allow numeric input for numeric fields
+            if (item.type != MenuItemType.RepeatCount &&
+                item.type != MenuItemType.TargetCount &&
+                item.type != MenuItemType.UnpauseAt)
+            {
+                TolkHelper.Speak("This field does not support numeric input");
+                return;
+            }
+
+            numericBuffer = "";
+            isNumericInputMode = true;
+            TolkHelper.Speak("Type a number, then press Enter to confirm or Escape to cancel");
+        }
+
+        /// <summary>
+        /// Handles a digit input during numeric input mode.
+        /// </summary>
+        public static void HandleNumericDigit(char digit)
+        {
+            if (!isNumericInputMode) return;
+
+            numericBuffer += digit;
+            TolkHelper.Speak(numericBuffer, SpeechPriority.Low);
+        }
+
+        /// <summary>
+        /// Handles backspace during numeric input mode.
+        /// </summary>
+        public static void HandleNumericBackspace()
+        {
+            if (!isNumericInputMode || numericBuffer.Length == 0) return;
+
+            numericBuffer = numericBuffer.Substring(0, numericBuffer.Length - 1);
+            if (numericBuffer.Length > 0)
+            {
+                TolkHelper.Speak(numericBuffer, SpeechPriority.Low);
+            }
+            else
+            {
+                TolkHelper.Speak("Empty", SpeechPriority.Low);
+            }
+        }
+
+        /// <summary>
+        /// Confirms and applies the numeric input value.
+        /// </summary>
+        public static void ConfirmNumericInput()
+        {
+            if (!isNumericInputMode) return;
+
+            if (int.TryParse(numericBuffer, out int value) && value > 0)
+            {
+                ApplyNumericValue(value);
+            }
+            else
+            {
+                TolkHelper.Speak("Invalid number");
+            }
+
+            isNumericInputMode = false;
+            numericBuffer = "";
+        }
+
+        /// <summary>
+        /// Cancels numeric input mode without applying changes.
+        /// </summary>
+        public static void CancelNumericInput()
+        {
+            isNumericInputMode = false;
+            numericBuffer = "";
+            TolkHelper.Speak("Cancelled");
+        }
+
+        private static void ApplyNumericValue(int value)
+        {
+            if (menuItems == null || selectedIndex >= menuItems.Count)
+                return;
+
+            MenuItem item = menuItems[selectedIndex];
+
+            switch (item.type)
+            {
+                case MenuItemType.RepeatCount:
+                    bill.repeatCount = Mathf.Max(1, value);
+                    menuItems[selectedIndex].label = GetRepeatCountLabel();
+                    TolkHelper.Speak(menuItems[selectedIndex].label);
+                    break;
+
+                case MenuItemType.TargetCount:
+                    bill.targetCount = Mathf.Max(1, value);
+                    // Ensure unpause constraint
+                    if (bill.pauseWhenSatisfied && bill.unpauseWhenYouHave >= bill.targetCount)
+                    {
+                        bill.unpauseWhenYouHave = bill.targetCount - 1;
+                    }
+                    menuItems[selectedIndex].label = GetTargetCountLabel();
+                    if (bill.targetCount >= 999999)
+                    {
+                        bill.targetCount = 999999;
+                        TolkHelper.Speak("Infinite");
+                    }
+                    else
+                    {
+                        TolkHelper.Speak(bill.targetCount.ToString());
+                    }
+                    break;
+
+                case MenuItemType.UnpauseAt:
+                    // Clamp to valid range: 0 to targetCount - 1
+                    bill.unpauseWhenYouHave = Mathf.Clamp(value, 0, bill.targetCount - 1);
+                    menuItems[selectedIndex].label = GetUnpauseAtLabel();
+                    TolkHelper.Speak(menuItems[selectedIndex].label);
+                    break;
+
+                default:
+                    TolkHelper.Speak("Cannot apply numeric value to this field");
+                    break;
+            }
+        }
+
+        #endregion
 
         private static void AdjustSkillRange(int direction)
         {
@@ -619,32 +965,98 @@ namespace RimWorldAccess
             TolkHelper.Speak(menuItems[selectedIndex].label);
         }
 
-        private static void AdjustIngredientRadius(int direction)
+        private static void AdjustIngredientRadius(int direction, int multiplier = 1)
         {
-            float step = direction > 0 ? 1f : -1f;
+            float oldValue = bill.ingredientSearchRadius;
 
+            // Handle unlimited state
             if (bill.ingredientSearchRadius >= 999f)
             {
                 if (direction < 0)
                 {
                     bill.ingredientSearchRadius = 100f;
+                    TolkHelper.Speak("100");
                 }
+                else
+                {
+                    TolkHelper.Speak("Already at maximum");
+                }
+                menuItems[selectedIndex].label = GetIngredientRadiusLabel();
+                return;
+            }
+
+            // Translate multipliers for ingredient radius (range is only 3-100)
+            float step;
+            if (multiplier >= 1000)
+            {
+                // Shift+Ctrl = jump to 100 (or unlimited if already at 100)
+                if (direction > 0)
+                {
+                    if (bill.ingredientSearchRadius >= 100f)
+                    {
+                        bill.ingredientSearchRadius = 999f;
+                        TolkHelper.Speak("Unlimited, maximum");
+                    }
+                    else
+                    {
+                        bill.ingredientSearchRadius = 100f;
+                        TolkHelper.Speak("100");
+                    }
+                }
+                else
+                {
+                    // Shift+Ctrl+Down = jump to 3
+                    bill.ingredientSearchRadius = 3f;
+                    TolkHelper.Speak("3, minimum");
+                }
+                menuItems[selectedIndex].label = GetIngredientRadiusLabel();
+                return;
+            }
+            else if (multiplier >= 100)
+            {
+                // Ctrl = ±25 for ingredient radius
+                step = direction * 25f;
             }
             else
             {
-                bill.ingredientSearchRadius = Mathf.Clamp(bill.ingredientSearchRadius + step, 1f, 999f);
+                // Normal or Shift
+                step = direction * multiplier;
+            }
 
-                if (bill.ingredientSearchRadius >= 999f)
-                {
-                    bill.ingredientSearchRadius = 999999f; // Unlimited
-                }
+            bill.ingredientSearchRadius = Mathf.Clamp(bill.ingredientSearchRadius + step, 3f, 100f);
+
+            // Check if we should go to unlimited (at 100 and pressing up)
+            if (bill.ingredientSearchRadius >= 100f && direction > 0 && oldValue >= 100f)
+            {
+                bill.ingredientSearchRadius = 999f;
+                TolkHelper.Speak("Unlimited, maximum");
+                menuItems[selectedIndex].label = GetIngredientRadiusLabel();
+                return;
+            }
+
+            // Check if we hit a boundary
+            if (bill.ingredientSearchRadius == oldValue)
+            {
+                TolkHelper.Speak(direction > 0 ? "Maximum" : "Minimum");
+                return;
+            }
+
+            // Announce the new value
+            if (bill.ingredientSearchRadius == 3f && direction < 0)
+            {
+                TolkHelper.Speak("3, minimum");
+            }
+            else if (bill.ingredientSearchRadius >= 100f)
+            {
+                TolkHelper.Speak("100");
+            }
+            else
+            {
+                TolkHelper.Speak($"{bill.ingredientSearchRadius:F0}");
             }
 
             menuItems[selectedIndex].label = GetIngredientRadiusLabel();
-            TolkHelper.Speak(menuItems[selectedIndex].label);
         }
-
-        #endregion
 
         #region Submenu Methods
 

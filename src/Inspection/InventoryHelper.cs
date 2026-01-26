@@ -67,6 +67,7 @@ namespace RimWorldAccess
 
             public string GetDisplayLabel()
             {
+                if (CategoryDef == null) return "Uncategorized";
                 if (Items.Count > 0)
                 {
                     return $"{CategoryDef.LabelCap} ({Items.Count} types)";
@@ -333,6 +334,27 @@ namespace RimWorldAccess
                 }
             }
 
+            // Collect uncategorized items (items with no thingCategories)
+            List<InventoryItem> uncategorizedItems = new List<InventoryItem>();
+            foreach (var kvp in aggregatedItems)
+            {
+                ThingDef thingDef = kvp.Value.Def;
+                if (thingDef.thingCategories == null || thingDef.thingCategories.Count == 0)
+                {
+                    uncategorizedItems.Add(kvp.Value);
+                }
+            }
+            if (pawnCarriedItems != null)
+            {
+                foreach (InventoryItem item in pawnCarriedItems)
+                {
+                    if (item.Def.thingCategories == null || item.Def.thingCategories.Count == 0)
+                    {
+                        uncategorizedItems.Add(item);
+                    }
+                }
+            }
+
             // Build the tree structure by linking parents and children
             foreach (var kvp in categoryNodes)
             {
@@ -376,6 +398,19 @@ namespace RimWorldAccess
 
             // Sort subcategories and items within each node
             SortCategoryNode(rootCategories);
+
+            // Add uncategorized node if there are any uncategorized items
+            if (uncategorizedItems.Count > 0)
+            {
+                var uncategorizedNode = new CategoryNode(null); // null signals uncategorized
+                foreach (var item in uncategorizedItems)
+                {
+                    uncategorizedNode.Items.Add(item);
+                }
+                uncategorizedNode.TotalItemCount = uncategorizedItems.Count;
+                uncategorizedNode.Items.Sort((a, b) => string.Compare(a.Def.label, b.Def.label));
+                rootCategories.Add(uncategorizedNode);
+            }
 
             return rootCategories;
         }

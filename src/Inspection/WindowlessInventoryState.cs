@@ -1110,8 +1110,11 @@ namespace RimWorldAccess
         private static string GetNodeKey(TreeNode node)
         {
             // For categories, use the category def name (stable across refreshes)
-            if (node.Type == TreeNode.NodeType.Category && node.CategoryData?.CategoryDef != null)
+            if (node.Type == TreeNode.NodeType.Category && node.CategoryData != null)
             {
+                // When CategoryDef is null, return a fixed key for "Uncategorized" category
+                if (node.CategoryData.CategoryDef == null)
+                    return "cat:uncategorized";
                 return "cat:" + node.CategoryData.CategoryDef.defName;
             }
             // For items, use the item def name and carrier info (for carried items)

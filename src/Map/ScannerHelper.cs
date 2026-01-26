@@ -406,6 +406,9 @@ namespace RimWorldAccess
         {
             var categories = new List<ScannerCategory>();
 
+            // Track all things that get categorized
+            var categorizedThings = new HashSet<Thing>();
+
             // Initialize all categories with dash-formatted names
 
             // Pawns category (renamed from Colonists)
@@ -568,6 +571,7 @@ namespace RimWorldAccess
                     {
                         // Mechanoids subcategory (all mechanoids regardless of faction)
                         pawnsMechanoidsSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (pawn.RaceProps.Humanlike)
                     {
@@ -575,10 +579,12 @@ namespace RimWorldAccess
                         if (pawn.Faction == playerFaction)
                         {
                             pawnsPlayerSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             pawnsNPCSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                     else if (pawn.RaceProps.Animal)
@@ -590,10 +596,12 @@ namespace RimWorldAccess
                             if (pawn.Roamer)
                             {
                                 tamePenSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                             else
                             {
                                 tameNonPenSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                         }
                         else
@@ -602,10 +610,12 @@ namespace RimWorldAccess
                             if (pawn.HostileTo(playerFaction))
                             {
                                 wildHostileSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                             else
                             {
                                 wildPassiveSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                         }
                     }
@@ -614,6 +624,7 @@ namespace RimWorldAccess
                 {
                     // Fire hazard
                     fireSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (thing is Plant plant)
                 {
@@ -629,10 +640,12 @@ namespace RimWorldAccess
                         if (plant.def.plant.harvestYield > 0)
                         {
                             harvestableTreesSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             nonHarvestableTreesSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                     else
@@ -641,11 +654,13 @@ namespace RimWorldAccess
                         if (plant.HarvestableNow || plant.def.plant.harvestYield > 0)
                         {
                             harvestablePlantsSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             // Debris (grass, etc.)
                             debrisSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                 }
@@ -653,6 +668,7 @@ namespace RimWorldAccess
                 {
                     // Blueprints and frames (construction projects) go to Orders-Construction
                     ordersConstructionSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (thing is Building building)
                 {
@@ -664,6 +680,7 @@ namespace RimWorldAccess
                     if (IsTravelingBuilding(building))
                     {
                         travelingSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else
                     {
@@ -705,11 +722,13 @@ namespace RimWorldAccess
                                     structureSubcat.Items.Add(item);
                                     break;
                             }
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             // No designation category - default to structure
                             structureSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                 }
@@ -717,6 +736,7 @@ namespace RimWorldAccess
                 {
                     // Stone chunks go to mineable chunks subcategory
                     mineableChunksSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (!IsDebrisItem(thing))
                 {
@@ -724,21 +744,25 @@ namespace RimWorldAccess
                     if (thing.IsForbidden(Faction.OfPlayer))
                     {
                         itemsForbiddenSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (IsUninstalledFurniture(thing))
                     {
                         // Uninstalled furniture
                         itemsFurnitureSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (IsInStorage(thing, map))
                     {
                         // Items in stockpiles/shelves
                         itemsStoredSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else
                     {
                         // Scattered items not in storage
                         itemsScatteredSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                 }
             }
@@ -771,6 +795,7 @@ namespace RimWorldAccess
                         if (!mineableRareByDef.ContainsKey(defKey))
                             mineableRareByDef[defKey] = new List<(IntVec3, Thing)>();
                         mineableRareByDef[defKey].Add((cell, edifice));
+                        categorizedThings.Add(edifice);
                     }
                     else
                     {
@@ -778,6 +803,7 @@ namespace RimWorldAccess
                         if (!mineableStoneByDef.ContainsKey(defKey))
                             mineableStoneByDef[defKey] = new List<(IntVec3, Thing)>();
                         mineableStoneByDef[defKey].Add((cell, edifice));
+                        categorizedThings.Add(edifice);
                     }
                 }
 
@@ -940,11 +966,35 @@ namespace RimWorldAccess
             roomsAllSubcat.Items.AddRange(
                 visibleIndoorRooms.Select(room => new ScannerItem(room, cursorPosition)));
 
+            // Collect all map things not yet categorized
+            var uncategorizedCategory = new ScannerCategory("Uncategorized");
+            var uncategorizedByDef = new Dictionary<string, ScannerSubcategory>();
+
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (!categorizedThings.Contains(thing) &&
+                    thing.Spawned &&
+                    thing.Position.IsValid &&
+                    thing.def.selectable &&
+                    !thing.Position.Fogged(map))
+                {
+                    // Group by def label as subcategory
+                    string subcat = thing.def.label ?? thing.def.defName;
+                    if (!uncategorizedByDef.ContainsKey(subcat))
+                    {
+                        var newSubcat = new ScannerSubcategory($"Uncategorized-{subcat}");
+                        uncategorizedByDef[subcat] = newSubcat;
+                        uncategorizedCategory.Subcategories.Add(newSubcat);
+                    }
+                    uncategorizedByDef[subcat].Items.Add(new ScannerItem(thing, cursorPosition));
+                }
+            }
+
             // Group identical items and sort all subcategories by distance
             foreach (var category in new[] { pawnsCategory, tameAnimalsCategory, wildAnimalsCategory,
                                              hazardsCategory, buildingsCategory, treesCategory, plantsCategory,
                                              itemsCategory, terrainCategory, mineableCategory, ordersCategory,
-                                             zonesCategory, roomsCategory })
+                                             zonesCategory, roomsCategory, uncategorizedCategory })
             {
                 foreach (var subcat in category.Subcategories)
                 {
@@ -970,6 +1020,7 @@ namespace RimWorldAccess
             categories.Add(ordersCategory);
             categories.Add(zonesCategory);
             categories.Add(roomsCategory);
+            categories.Add(uncategorizedCategory);
 
             // Remove empty categories
             categories.RemoveAll(c => c.IsEmpty);
