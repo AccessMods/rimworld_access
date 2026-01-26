@@ -795,12 +795,14 @@ namespace RimWorldAccess
 
             MenuItem item = menuItems[selectedIndex];
 
-            // Only allow numeric input for numeric fields
+            // Only allow numeric input for numeric fields - otherwise execute the action
             if (item.type != MenuItemType.RepeatCount &&
                 item.type != MenuItemType.TargetCount &&
-                item.type != MenuItemType.UnpauseAt)
+                item.type != MenuItemType.UnpauseAt &&
+                item.type != MenuItemType.IngredientSearchRadius)
             {
-                TolkHelper.Speak("This field does not support numeric input");
+                // Not a numeric field - execute the action instead
+                ExecuteSelected();
                 return;
             }
 
@@ -907,6 +909,21 @@ namespace RimWorldAccess
                     bill.unpauseWhenYouHave = Mathf.Clamp(value, 0, bill.targetCount - 1);
                     menuItems[selectedIndex].label = GetUnpauseAtLabel();
                     TolkHelper.Speak(menuItems[selectedIndex].label);
+                    break;
+
+                case MenuItemType.IngredientSearchRadius:
+                    // Valid range is 3-100, anything over 100 becomes unlimited (999)
+                    if (value > 100)
+                    {
+                        bill.ingredientSearchRadius = 999f;
+                        TolkHelper.Speak("Unlimited");
+                    }
+                    else
+                    {
+                        bill.ingredientSearchRadius = Mathf.Clamp(value, 3, 100);
+                        TolkHelper.Speak(bill.ingredientSearchRadius.ToString("F0"));
+                    }
+                    menuItems[selectedIndex].label = GetIngredientRadiusLabel();
                     break;
 
                 default:
