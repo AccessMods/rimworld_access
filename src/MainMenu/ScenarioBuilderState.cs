@@ -3430,13 +3430,27 @@ namespace RimWorldAccess
             var field = item.Field;
 
             // Open the appropriate editor based on field type
-            ScenarioBuilderPartEditState.Open(field, () =>
+            // For checkboxes, pass a simpler callback that doesn't re-announce
+            // (checkbox toggle already announces the state change)
+            if (field.Type == FieldType.Checkbox)
             {
-                // Callback when edit is complete - refresh the tree and re-announce
-                BuildPartsTree();
-                FlattenPartsTree();
-                AnnounceCurrentTreeItem();
-            });
+                ScenarioBuilderPartEditState.Open(field, () =>
+                {
+                    // Just refresh the tree without re-announcing
+                    BuildPartsTree();
+                    FlattenPartsTree();
+                });
+            }
+            else
+            {
+                ScenarioBuilderPartEditState.Open(field, () =>
+                {
+                    // Callback when edit is complete - refresh the tree and re-announce
+                    BuildPartsTree();
+                    FlattenPartsTree();
+                    AnnounceCurrentTreeItem();
+                });
+            }
         }
 
         /// <summary>

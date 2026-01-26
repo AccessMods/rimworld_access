@@ -24,8 +24,20 @@ namespace RimWorldAccess
         /// </summary>
         private static int openedOnFrame = -1;
 
+        /// <summary>
+        /// Tracks the frame number when the dialog was closed.
+        /// Used to prevent the same Escape key from re-triggering actions (like DoBack).
+        /// </summary>
+        private static int closedOnFrame = -1;
+
         public static bool IsActive => currentDialog != null;
         public static bool IsEditingTextField => editingElement != null;
+
+        /// <summary>
+        /// Returns true if the dialog was closed on the current frame.
+        /// Used to prevent Escape from immediately triggering other actions.
+        /// </summary>
+        public static bool WasClosedThisFrame => closedOnFrame == UnityEngine.Time.frameCount;
 
         /// <summary>
         /// Tracks whether the current intercepted dialog has forcePause set.
@@ -129,6 +141,7 @@ namespace RimWorldAccess
             editingElement = null;
             ShouldForcePause = false;
             openedOnFrame = -1;
+            closedOnFrame = UnityEngine.Time.frameCount;
         }
 
         /// <summary>

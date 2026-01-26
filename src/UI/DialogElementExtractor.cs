@@ -338,6 +338,7 @@ namespace RimWorldAccess
                         {
                             messageBox.buttonCAction?.Invoke();
                         },
+                        IsCancel = messageBox.buttonCText.ToLower().Contains("cancel"),
                         IsClose = messageBox.buttonCClose
                     };
                     elements.Add(buttonC);

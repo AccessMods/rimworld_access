@@ -62,6 +62,17 @@ namespace RimWorldAccess
                     return false; // Block DoNext() - stay on scenario builder
                 }
             }
+
+            // Handle Page_SelectScenario - block DoNext when windowless dialog is active or was just closed
+            // This prevents Enter in delete confirmation from advancing to storyteller selection
+            if (__instance is Page_SelectScenario)
+            {
+                if (WindowlessDialogState.IsActive || WindowlessDialogState.WasClosedThisFrame)
+                {
+                    return false; // Block DoNext()
+                }
+            }
+
             return true; // Let original method run (advances to next page normally)
         }
     }
@@ -147,6 +158,14 @@ namespace RimWorldAccess
         {
             if (__instance is Page_ScenarioEditor)
             {
+                // Block going back when windowless dialog is active or just closed
+                // This prevents DoBack() from being triggered by the same Escape that closed the dialog
+                if (WindowlessDialogState.IsActive || WindowlessDialogState.WasClosedThisFrame)
+                {
+                    __result = false;
+                    return false;
+                }
+
                 // Block going back when any overlay state is active
                 if (ScenarioBuilderAddPartState.IsActive ||
                     ScenarioBuilderPartEditState.IsActive ||
@@ -167,6 +186,18 @@ namespace RimWorldAccess
 
                 // NOTE: Do NOT block here when dirty - let DoBack() be called so it can show the dialog
             }
+
+            // Handle Page_SelectScenario - block going back when windowless dialog is active or just closed
+            // This prevents Escape in delete confirmation from returning to main menu
+            if (__instance is Page_SelectScenario)
+            {
+                if (WindowlessDialogState.IsActive || WindowlessDialogState.WasClosedThisFrame)
+                {
+                    __result = false;
+                    return false;
+                }
+            }
+
             return true;
         }
     }
@@ -189,6 +220,12 @@ namespace RimWorldAccess
             // Only intercept for Page_ScenarioEditor
             if (__instance is Page_ScenarioEditor)
             {
+                // Skip if a dialog was just closed this frame (prevent Escape from re-triggering)
+                if (WindowlessDialogState.WasClosedThisFrame)
+                {
+                    return false; // Block - dialog was just dismissed, don't show again
+                }
+
                 // Check for unsaved changes
                 if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsDirty())
                 {
@@ -247,7 +284,6 @@ namespace RimWorldAccess
             dialog.buttonCClose = true;
 
             Find.WindowStack.Add(dialog);
-            TolkHelper.Speak("You have unsaved changes. Save, Discard, or Cancel?", SpeechPriority.High);
         }
     }
 }

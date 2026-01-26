@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using RimWorld;
 using Verse;
 using Verse.Sound;
+using Verse.Steam;
 
 namespace RimWorldAccess
 {
@@ -1038,6 +1040,176 @@ namespace RimWorldAccess
             announcement += MenuHelper.GetLevelSuffix(LevelTrackingKey, item.IndentLevel);
 
             TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Checks if the currently selected scenario can be deleted.
+        /// Only CustomLocal scenarios can be deleted directly.
+        /// </summary>
+        /// <returns>True if the selected scenario is CustomLocal and can be deleted</returns>
+        public static bool CanDeleteSelectedScenario()
+        {
+            Scenario selected = SelectedScenario;
+            if (selected == null) return false;
+
+            return selected.Category == ScenarioCategory.CustomLocal;
+        }
+
+        /// <summary>
+        /// Checks if the currently selected scenario is from Steam Workshop.
+        /// </summary>
+        /// <returns>True if the selected scenario is from Steam Workshop</returns>
+        public static bool IsWorkshopScenario()
+        {
+            Scenario selected = SelectedScenario;
+            if (selected == null) return false;
+
+            return selected.Category == ScenarioCategory.SteamWorkshop;
+        }
+
+        /// <summary>
+        /// Shows confirmation dialog and deletes the selected custom scenario.
+        /// After deletion, refreshes the list and adjusts selection.
+        /// </summary>
+        /// <param name="page">The Page_SelectScenario instance to update after deletion</param>
+        public static void DeleteSelectedScenario(Page_SelectScenario page)
+        {
+            Scenario selected = SelectedScenario;
+            if (selected == null || selected.Category != ScenarioCategory.CustomLocal)
+            {
+                TolkHelper.Speak("Cannot delete this scenario");
+                return;
+            }
+
+            string fileName = selected.File?.Name ?? selected.name;
+            string scenarioName = selected.name;
+
+            Find.WindowStack.Add(Dialog_MessageBox.CreateConfirmation(
+                "ConfirmDelete".Translate(fileName),
+                delegate
+                {
+                    // Delete the file
+                    selected.File.Delete();
+
+                    // Mark the scenario list as dirty to refresh
+                    ScenarioLister.MarkDirty();
+
+                    // Get updated list of scenarios
+                    List<Scenario> allScenarios = new List<Scenario>();
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.FromDef).Where(s => s.showInUI));
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.CustomLocal).Where(s => s.showInUI));
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.SteamWorkshop).Where(s => s.showInUI));
+
+                    // Adjust selection index if needed
+                    if (selectedIndex >= allScenarios.Count)
+                    {
+                        selectedIndex = allScenarios.Count > 0 ? allScenarios.Count - 1 : 0;
+                    }
+
+                    // Reinitialize with the new list (force reinitialization)
+                    initialized = false;
+                    flatScenarioList = new List<Scenario>(allScenarios);
+                    initialized = true;
+
+                    // Update the page's current scenario selection
+                    Scenario newSelection = SelectedScenario;
+                    if (newSelection != null)
+                    {
+                        AccessTools.Field(typeof(Page_SelectScenario), "curScen").SetValue(page, newSelection);
+                    }
+
+                    TolkHelper.Speak($"Deleted {scenarioName}");
+
+                    // Announce the new selection
+                    if (newSelection != null)
+                    {
+                        AnnounceCurrentSelection();
+                    }
+                    else if (IsScenarioBuilderSelected)
+                    {
+                        AnnounceScenarioBuilder();
+                    }
+                },
+                destructive: true
+            ));
+        }
+
+        /// <summary>
+        /// Shows confirmation dialog and unsubscribes from the selected Steam Workshop scenario.
+        /// After unsubscription, refreshes the list and adjusts selection.
+        /// </summary>
+        /// <param name="page">The Page_SelectScenario instance to update after unsubscription</param>
+        public static void UnsubscribeSelectedScenario(Page_SelectScenario page)
+        {
+            Scenario selected = SelectedScenario;
+            if (selected == null || selected.Category != ScenarioCategory.SteamWorkshop)
+            {
+                TolkHelper.Speak("Cannot unsubscribe from this scenario");
+                return;
+            }
+
+            string fileName = selected.File?.Name ?? selected.name;
+            string scenarioName = selected.name;
+
+            Find.WindowStack.Add(Dialog_MessageBox.CreateConfirmation(
+                "ConfirmUnsubscribeFrom".Translate(fileName),
+                delegate
+                {
+                    // Disable and unsubscribe using reflection (Workshop is internal)
+                    selected.enabled = false;
+
+                    // Call Workshop.Unsubscribe(WorkshopUploadable) via reflection
+                    var workshopType = AccessTools.TypeByName("Verse.Steam.Workshop");
+                    if (workshopType != null)
+                    {
+                        var unsubscribeMethod = AccessTools.Method(workshopType, "Unsubscribe", new[] { typeof(WorkshopUploadable) });
+                        if (unsubscribeMethod != null)
+                        {
+                            unsubscribeMethod.Invoke(null, new object[] { selected });
+                        }
+                    }
+
+                    // Mark the scenario list as dirty to refresh
+                    ScenarioLister.MarkDirty();
+
+                    // Get updated list of scenarios
+                    List<Scenario> allScenarios = new List<Scenario>();
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.FromDef).Where(s => s.showInUI));
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.CustomLocal).Where(s => s.showInUI));
+                    allScenarios.AddRange(ScenarioLister.ScenariosInCategory(ScenarioCategory.SteamWorkshop).Where(s => s.showInUI));
+
+                    // Adjust selection index if needed
+                    if (selectedIndex >= allScenarios.Count)
+                    {
+                        selectedIndex = allScenarios.Count > 0 ? allScenarios.Count - 1 : 0;
+                    }
+
+                    // Reinitialize with the new list (force reinitialization)
+                    initialized = false;
+                    flatScenarioList = new List<Scenario>(allScenarios);
+                    initialized = true;
+
+                    // Update the page's current scenario selection
+                    Scenario newSelection = SelectedScenario;
+                    if (newSelection != null)
+                    {
+                        AccessTools.Field(typeof(Page_SelectScenario), "curScen").SetValue(page, newSelection);
+                    }
+
+                    TolkHelper.Speak($"Unsubscribed from {scenarioName}");
+
+                    // Announce the new selection
+                    if (newSelection != null)
+                    {
+                        AnnounceCurrentSelection();
+                    }
+                    else if (IsScenarioBuilderSelected)
+                    {
+                        AnnounceScenarioBuilder();
+                    }
+                },
+                destructive: true
+            ));
         }
     }
 }

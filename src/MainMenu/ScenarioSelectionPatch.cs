@@ -117,7 +117,8 @@ namespace RimWorldAccess
                 }
 
                 // Handle keyboard input
-                if (Event.current.type == EventType.KeyDown)
+                // Skip if a dialog is active - let the dialog handle input
+                if (Event.current.type == EventType.KeyDown && !WindowlessDialogState.IsActive)
                 {
                     KeyCode keyCode = Event.current.keyCode;
 
@@ -301,6 +302,28 @@ namespace RimWorldAccess
                         else if (keyCode == KeyCode.Tab)
                         {
                             ScenarioNavigationState.ToggleDetailPanel();
+                            Event.current.Use();
+                            patchActive = true;
+                        }
+                        else if (keyCode == KeyCode.Delete)
+                        {
+                            // Delete key: delete custom scenarios or unsubscribe from workshop scenarios
+                            if (ScenarioNavigationState.IsScenarioBuilderSelected)
+                            {
+                                TolkHelper.Speak("Cannot delete Scenario Builder entry");
+                            }
+                            else if (ScenarioNavigationState.CanDeleteSelectedScenario())
+                            {
+                                ScenarioNavigationState.DeleteSelectedScenario(__instance);
+                            }
+                            else if (ScenarioNavigationState.IsWorkshopScenario())
+                            {
+                                ScenarioNavigationState.UnsubscribeSelectedScenario(__instance);
+                            }
+                            else
+                            {
+                                TolkHelper.Speak("Cannot delete built-in scenarios");
+                            }
                             Event.current.Use();
                             patchActive = true;
                         }
