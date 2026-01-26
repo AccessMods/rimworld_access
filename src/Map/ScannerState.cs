@@ -592,9 +592,14 @@ namespace RimWorldAccess
             {
                 // Get the actual thing to jump to (considering bulk index)
                 Thing targetThing = currentItem.Thing;
-                if (currentItem.IsBulkGroup && currentBulkIndex < currentItem.BulkCount)
+                if (currentItem.IsBulkGroup && currentItem.BulkThings != null && currentBulkIndex < currentItem.BulkThings.Count)
                 {
                     targetThing = currentItem.BulkThings[currentBulkIndex];
+                }
+                if (targetThing == null)
+                {
+                    TolkHelper.Speak("Item no longer exists", SpeechPriority.High);
+                    return;
                 }
                 targetPosition = targetThing.Position;
             }
