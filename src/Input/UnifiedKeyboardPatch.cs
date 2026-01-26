@@ -747,7 +747,8 @@ namespace RimWorldAccess
                     (key == KeyCode.H && Event.current.alt) ||
                     (key == KeyCode.N && Event.current.alt) ||
                     (key == KeyCode.B && Event.current.alt) ||
-                    (key == KeyCode.F && Event.current.alt))
+                    (key == KeyCode.F && Event.current.alt) ||
+                    (key == KeyCode.R && Event.current.alt))
                 {
                     // These keys should not work in world view - they're map-specific
                     // Must consume the event to prevent game from opening its inaccessible menus
@@ -3219,7 +3220,7 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 6: Toggle draft mode with R key (if pawn is selected) =====
-            if (key == KeyCode.R)
+            if (key == KeyCode.R && !Event.current.alt)
             {
                 // Only toggle draft if:
                 // 1. We're in gameplay (not at main menu)
@@ -3355,6 +3356,61 @@ namespace RimWorldAccess
                     GearState.DisplayGearInfo();
 
                     // Prevent the default G key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 6.528: Rename pawn with Alt+R =====
+            if (key == KeyCode.R && Event.current.alt)
+            {
+                // Only rename if:
+                // 1. We're in gameplay
+                // 2. Map is loaded
+                // 3. No dialog blocking
+                // 4. Not in zone creation mode
+                // 5. Not in placement mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !ArchitectState.IsInPlacementMode &&
+                    !ViewingModeState.IsActive &&
+                    !ShapePlacementState.IsActive)
+                {
+                    // Get pawn at cursor
+                    Pawn pawn = null;
+                    if (MapNavigationState.IsInitialized)
+                    {
+                        IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
+                        if (cursorPosition.IsValid && cursorPosition.InBounds(Find.CurrentMap))
+                        {
+                            pawn = Find.CurrentMap.thingGrid.ThingsListAt(cursorPosition)
+                                .OfType<Pawn>().FirstOrDefault();
+                        }
+                    }
+
+                    // Fall back to selected pawn
+                    if (pawn == null)
+                        pawn = Find.Selector?.SingleSelectedObject as Pawn;
+
+                    if (pawn == null)
+                    {
+                        TolkHelper.Speak("No pawn at cursor");
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Check if pawn can be renamed
+                    if (!CanPawnBeRenamed(pawn))
+                    {
+                        TolkHelper.Speak("This pawn cannot be renamed");
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Open rename dialog
+                    Find.WindowStack.Add(pawn.NamePawnDialog());
                     Event.current.Use();
                     return;
                 }
@@ -4058,6 +4114,21 @@ namespace RimWorldAccess
             // Reset text settings
             Text.Anchor = TextAnchor.UpperLeft;
             Text.Font = GameFont.Small;
+        }
+
+        /// <summary>
+        /// Checks if a pawn can be renamed by the player.
+        /// </summary>
+        private static bool CanPawnBeRenamed(Pawn pawn)
+        {
+            if (pawn == null) return false;
+            // Colonists and colony subhumans (slaves, etc.) can be renamed
+            if (pawn.IsColonist || pawn.IsColonySubhuman) return true;
+            // Player-owned animals and mechanoids can be renamed
+            if (pawn.Faction == Faction.OfPlayer &&
+                (pawn.RaceProps.Animal || pawn.RaceProps.IsMechanoid))
+                return true;
+            return false;
         }
 
         /// <summary>

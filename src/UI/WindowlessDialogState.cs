@@ -16,6 +16,7 @@ namespace RimWorldAccess
         private static List<DialogElement> elements = new List<DialogElement>();
         private static int selectedIndex = 0;
         private static DialogElement editingElement = null;
+        private static bool replaceOnFirstKeystroke = false;
 
         /// <summary>
         /// Tracks the frame number when the dialog was opened.
@@ -253,6 +254,7 @@ namespace RimWorldAccess
             }
             else if (key == KeyCode.Backspace)
             {
+                replaceOnFirstKeystroke = false;  // Cancel replace mode on backspace
                 if (textField.Value.Length > 0)
                 {
                     textField.Value = textField.Value.Substring(0, textField.Value.Length - 1);
@@ -270,6 +272,13 @@ namespace RimWorldAccess
             }
             else if (evt.character != '\0' && evt.character != '\n' && evt.character != '\r')
             {
+                // First keystroke replaces all existing text
+                if (replaceOnFirstKeystroke)
+                {
+                    textField.Value = "";
+                    replaceOnFirstKeystroke = false;
+                }
+
                 // Add character to text field
                 if (textField.Value.Length < textField.MaxLength)
                 {
@@ -327,7 +336,9 @@ namespace RimWorldAccess
             {
                 // Enter editing mode
                 editingElement = textField;
-                TolkHelper.Speak($"Editing {textField.Label}. Current value: {textField.Value}. Type to change, Enter to confirm, Escape to cancel.");
+                replaceOnFirstKeystroke = !string.IsNullOrEmpty(textField.Value);
+                string replaceHint = replaceOnFirstKeystroke ? " Type to replace." : "";
+                TolkHelper.Speak($"Editing {textField.Label}. Current value: {textField.Value}.{replaceHint} Enter to confirm, Escape to cancel.");
             }
         }
 
@@ -352,9 +363,10 @@ namespace RimWorldAccess
             int actionCount = hasDescription ? elements.Count - 1 : elements.Count;
 
             string position = MenuHelper.FormatPosition(actionIndex, actionCount);
+            string baseAnnouncement = element.GetAnnouncement().TrimEnd('.', ' ');
             string announcement = string.IsNullOrEmpty(position)
                 ? element.GetAnnouncement()
-                : $"{element.GetAnnouncement()}. {position}";
+                : $"{baseAnnouncement}. {position}";
             TolkHelper.Speak(announcement);
         }
 
@@ -497,7 +509,12 @@ namespace RimWorldAccess
 
         public override string GetAnnouncement()
         {
-            return $"Label: {Text}";
+            // Use the Label property (inherited from DialogElement) if available
+            if (!string.IsNullOrEmpty(Label))
+            {
+                return $"{Label} {Text}. Cannot be edited.";
+            }
+            return Text;
         }
     }
 

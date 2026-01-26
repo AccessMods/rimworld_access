@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using RimWorld;
 using Verse;
@@ -110,7 +111,22 @@ namespace RimWorldAccess
                 object descObj = descTextField.GetValue(dialog);
                 if (descObj != null)
                 {
-                    return descObj.ToString();
+                    string description = descObj.ToString();
+
+                    // Don't show parent info if both parents are unknown (not useful for adult pawns)
+                    // Baby naming dialogs will have at least one known parent
+                    if (description.Contains("Unknown") &&
+                        description.Count(c => c == '\n') <= 1)  // Only mother/father lines
+                    {
+                        // Check if BOTH lines contain "Unknown"
+                        var lines = description.Split('\n');
+                        if (lines.All(line => line.Contains("Unknown")))
+                        {
+                            return null;  // Don't show useless parent info
+                        }
+                    }
+
+                    return description;
                 }
             }
             return null;
