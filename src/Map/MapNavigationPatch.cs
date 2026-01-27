@@ -370,78 +370,94 @@ namespace RimWorldAccess
 
             // Handle mouse movement for automatic tile announcement
             // Only if not using keyboard navigation recently (to avoid double announcements)
+            // AND only if left Ctrl is held down
             if (!MapNavigationState.SuppressMapNavigation && Find.CurrentMap != null)
             {
-                // Get current mouse cell
-                IntVec3 mouseCell = UI.MouseCell();
+                // Check if left Ctrl is held down
+                bool ctrlHeldForMouse = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
-                // Check if mouse cell is within map bounds
-                if (mouseCell.InBounds(Find.CurrentMap))
+                if (ctrlHeldForMouse)
                 {
-                    // Check if mouse moved to a new cell or changed map
-                    bool mouseCellChanged = mouseCell != lastMouseCell || Find.CurrentMap.uniqueID != lastMouseCellMapId;
+                    // Get current mouse cell
+                    IntVec3 mouseCell = UI.MouseCell();
 
-                    // Check time since last arrow key press (to avoid announcing when using keyboard)
-                    float timeSinceArrowKey = Time.time - lastArrowKeyPressTime;
-                    bool keyboardIdle = timeSinceArrowKey > 0.5f; // 0.5 seconds threshold
-
-                    if (mouseCellChanged && keyboardIdle)
+                    // Check if mouse cell is within map bounds
+                    if (mouseCell.InBounds(Find.CurrentMap))
                     {
-                        // Get tile information
-                        string tileInfo = TileInfoHelper.GetTileSummary(mouseCell, Find.CurrentMap);
+                        // Check if mouse moved to a new cell or changed map
+                        bool mouseCellChanged = mouseCell != lastMouseCell || Find.CurrentMap.uniqueID != lastMouseCellMapId;
 
-                        // If in zone creation mode, prepend selection state
-                        if (ZoneCreationState.IsInCreationMode)
-                        {
-                            if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(mouseCell))
-                            {
-                                tileInfo = "Preview, " + tileInfo;
-                            }
-                            else if (ZoneCreationState.IsCellSelected(mouseCell))
-                            {
-                                tileInfo = "Selected, " + tileInfo;
-                            }
-                        }
-                        // If in area painting mode, prepend selection/preview state
-                        else if (AreaPaintingState.IsActive)
-                        {
-                            if (AreaPaintingState.IsInPreviewMode && AreaPaintingState.PreviewCells.Contains(mouseCell))
-                            {
-                                tileInfo = "Preview, " + tileInfo;
-                            }
-                            else if (AreaPaintingState.StagedCells.Contains(mouseCell))
-                            {
-                                tileInfo = "Selected, " + tileInfo;
-                            }
-                        }
-                        // If in architect mode zone placement, prepend selection/preview state
-                        else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
-                        {
-                            if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(mouseCell))
-                            {
-                                tileInfo = "Preview, " + tileInfo;
-                            }
-                            else if (ArchitectState.SelectedCells.Contains(mouseCell))
-                            {
-                                tileInfo = "Selected, " + tileInfo;
-                            }
-                        }
+                        // Check time since last arrow key press (to avoid announcing when using keyboard)
+                        float timeSinceArrowKey = Time.time - lastArrowKeyPressTime;
+                        bool keyboardIdle = timeSinceArrowKey > 0.5f; // 0.5 seconds threshold
 
-                        // Announce tile info with interrupt to cut off previous speech
-                        TolkHelper.Speak(tileInfo, SpeechPriority.High);
-                        MapNavigationState.LastAnnouncedInfo = tileInfo;
-                        hasAnnouncedThisFrame = true;
+                        if (mouseCellChanged && keyboardIdle)
+                        {
+                            // Get tile information
+                            string tileInfo = TileInfoHelper.GetTileSummary(mouseCell, Find.CurrentMap);
 
-                        // Update mouse tracking
-                        lastMouseCell = mouseCell;
-                        lastMouseCellMapId = Find.CurrentMap.uniqueID;
+                            // If in zone creation mode, prepend selection state
+                            if (ZoneCreationState.IsInCreationMode)
+                            {
+                                if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (ZoneCreationState.IsCellSelected(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+                            // If in area painting mode, prepend selection/preview state
+                            else if (AreaPaintingState.IsActive)
+                            {
+                                if (AreaPaintingState.IsInPreviewMode && AreaPaintingState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (AreaPaintingState.StagedCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+                            // If in architect mode zone placement, prepend selection/preview state
+                            else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
+                            {
+                                if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (ArchitectState.SelectedCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+
+                            // Announce tile info with interrupt to cut off previous speech
+                            TolkHelper.Speak(tileInfo, SpeechPriority.High);
+                            MapNavigationState.LastAnnouncedInfo = tileInfo;
+                            hasAnnouncedThisFrame = true;
+
+                            // Update mouse tracking
+                            lastMouseCell = mouseCell;
+                            lastMouseCellMapId = Find.CurrentMap.uniqueID;
+                        }
+                    }
+                    else if (lastMouseCell.IsValid || lastMouseCellMapId != -1)
+                    {
+                        // Mouse left map bounds, reset tracking
+                        lastMouseCell = IntVec3.Invalid;
+                        lastMouseCellMapId = -1;
                     }
                 }
-                else if (lastMouseCell.IsValid || lastMouseCellMapId != -1)
+                else
                 {
-                    // Mouse left map bounds, reset tracking
-                    lastMouseCell = IntVec3.Invalid;
-                    lastMouseCellMapId = -1;
+                    // Ctrl is not held - reset tracking to ensure clean state
+                    if (lastMouseCell.IsValid || lastMouseCellMapId != -1)
+                    {
+                        lastMouseCell = IntVec3.Invalid;
+                        lastMouseCellMapId = -1;
+                    }
                 }
             }
 
