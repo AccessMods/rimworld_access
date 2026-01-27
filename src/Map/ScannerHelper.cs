@@ -178,7 +178,15 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = Thing.LabelNoParenthesis ?? Thing.def.label ?? "Unknown";
+                try
+                {
+                    Label = Thing.LabelNoParenthesis ?? Thing.def.label ?? "Unknown";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = Thing.def?.label ?? "Corrupted object";
+                }
             }
         }
 
@@ -250,7 +258,15 @@ namespace RimWorldAccess
 
             if (designation.target.HasThing && designation.target.Thing != null)
             {
-                Label = $"{designation.target.Thing.LabelNoParenthesis} ({defLabel})";
+                try
+                {
+                    Label = $"{designation.target.Thing.LabelNoParenthesis} ({defLabel})";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = $"{designation.target.Thing.def?.label ?? "Corrupted object"} ({defLabel})";
+                }
             }
             else
             {
@@ -261,7 +277,15 @@ namespace RimWorldAccess
                     var edifice = Position.GetEdifice(map);
                     if (edifice != null)
                     {
-                        Label = $"{edifice.LabelNoParenthesis} ({defLabel})";
+                        try
+                        {
+                            Label = $"{edifice.LabelNoParenthesis} ({defLabel})";
+                        }
+                        catch (Exception)
+                        {
+                            // Handle corrupted edifices
+                            Label = $"{edifice.def?.label ?? "Corrupted object"} ({defLabel})";
+                        }
                     }
                     else
                     {
