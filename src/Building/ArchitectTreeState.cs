@@ -137,25 +137,34 @@ namespace RimWorldAccess
             bool hasRightClickOptions = designator.RightClickFloatMenuOptions.Any();
             string rightClickHint = hasRightClickOptions ? " (right bracket for more options)" : "";
 
-            // Add cost and description for build designators
+            // Add cost, skill, and description for build designators
             if (designator is Designator_Build buildDesignator)
             {
                 BuildableDef buildable = buildDesignator.PlacingDef;
                 if (buildable != null)
                 {
                     string costInfo = ArchitectHelper.GetBriefCostInfo(buildable);
+                    string skillInfo = ArchitectHelper.GetSkillRequirement(buildable);
                     string description = ArchitectHelper.GetDescription(buildable);
 
-                    // Format: "Name (right bracket hint): cost. description"
+                    // Build combined info (cost, skill)
+                    var infoParts = new List<string>();
+                    if (!string.IsNullOrEmpty(costInfo))
+                        infoParts.Add(costInfo);
+                    if (!string.IsNullOrEmpty(skillInfo))
+                        infoParts.Add(skillInfo);
+                    string combinedInfo = string.Join(", ", infoParts);
+
+                    // Format: "Name (right bracket hint): cost, skill. description"
                     // Note: Descriptions from RimWorld typically include their own terminal punctuation
                     label += rightClickHint;
-                    if (!string.IsNullOrEmpty(costInfo) && !string.IsNullOrEmpty(description))
+                    if (!string.IsNullOrEmpty(combinedInfo) && !string.IsNullOrEmpty(description))
                     {
-                        label += $": {costInfo}. {description}";
+                        label += $": {combinedInfo}. {description}";
                     }
-                    else if (!string.IsNullOrEmpty(costInfo))
+                    else if (!string.IsNullOrEmpty(combinedInfo))
                     {
-                        label += $": {costInfo}";
+                        label += $": {combinedInfo}";
                     }
                     else if (!string.IsNullOrEmpty(description))
                     {

@@ -1861,7 +1861,8 @@ namespace RimWorldAccess
             // to handle WindowlessFloatMenuState which can be active at the same time as BillsMenuState.
 
             // ===== PRIORITY 4.55: Handle schedule menu if active =====
-            if (WindowlessScheduleState.IsActive)
+            // Skip if float menu is open (e.g., right bracket context menu in Areas column)
+            if (WindowlessScheduleState.IsActive && !WindowlessFloatMenuState.IsActive)
             {
                 bool handled = false;
                 bool shift = Event.current.shift;

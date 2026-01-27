@@ -108,7 +108,7 @@ namespace RimWorldAccess
                 }
             }
 
-            TolkHelper.Speak("Schedule");
+            TolkHelper.Speak("Schedule. Control Tab for Allowed Areas.");
             UpdateClipboard();
         }
 

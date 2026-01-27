@@ -339,7 +339,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Gets the skill requirement for a buildable, if any.
         /// </summary>
-        private static string GetSkillRequirement(BuildableDef buildable)
+        public static string GetSkillRequirement(BuildableDef buildable)
         {
             if (buildable is ThingDef thingDef && thingDef.constructionSkillPrerequisite > 0)
             {
