@@ -130,6 +130,9 @@ namespace RimWorldAccess
                         {
                             foreach (Thing item in slotGroup.HeldThings)
                             {
+                                // Skip minified things that already have an install blueprint
+                                if (item is MinifiedThing && InstallBlueprintUtility.ExistingBlueprintFor(item) != null)
+                                    continue;
                                 uniqueItems.Add(item);
                             }
                         }
@@ -147,6 +150,9 @@ namespace RimWorldAccess
                     {
                         foreach (Thing item in slotGroup.HeldThings)
                         {
+                            // Skip minified things that already have an install blueprint
+                            if (item is MinifiedThing && InstallBlueprintUtility.ExistingBlueprintFor(item) != null)
+                                continue;
                             uniqueItems.Add(item);
                         }
                     }
@@ -180,6 +186,9 @@ namespace RimWorldAccess
                 {
                     if (item != null)
                     {
+                        // Skip minified things that already have an install blueprint
+                        if (item is MinifiedThing && InstallBlueprintUtility.ExistingBlueprintFor(item) != null)
+                            continue;
                         carriedItems[item] = pawn;
                     }
                 }
