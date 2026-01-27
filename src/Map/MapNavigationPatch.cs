@@ -345,7 +345,7 @@ namespace RimWorldAccess
                     // Only announce if different from last announcement (avoids spam when hitting map edge)
                     if (tileInfo != MapNavigationState.LastAnnouncedInfo)
                     {
-                        TolkHelper.Speak(tileInfo);
+                        TolkHelper.Speak(tileInfo, SpeechPriority.High);
                         MapNavigationState.LastAnnouncedInfo = tileInfo;
                         hasAnnouncedThisFrame = true;
                     }
@@ -355,7 +355,7 @@ namespace RimWorldAccess
                     // Cursor at map boundary - optionally announce boundary
                     if (!hasAnnouncedThisFrame)
                     {
-                        TolkHelper.Speak("Map boundary");
+                        TolkHelper.Speak("Map boundary", SpeechPriority.High);
                         hasAnnouncedThisFrame = true;
                     }
                 }
@@ -427,8 +427,8 @@ namespace RimWorldAccess
                             }
                         }
 
-                        // Announce tile info
-                        TolkHelper.Speak(tileInfo);
+                        // Announce tile info with interrupt to cut off previous speech
+                        TolkHelper.Speak(tileInfo, SpeechPriority.High);
                         MapNavigationState.LastAnnouncedInfo = tileInfo;
                         hasAnnouncedThisFrame = true;
 
