@@ -351,6 +351,28 @@ namespace RimWorldAccess
             AnnounceDropdownOption();
         }
 
+        private static void DropdownNextMatch()
+        {
+            if (!dropdownTypeahead.HasActiveSearch) return;
+            int next = dropdownTypeahead.GetNextMatch(selectedOptionIndex);
+            if (next >= 0)
+            {
+                selectedOptionIndex = next;
+                AnnounceDropdownOption();
+            }
+        }
+
+        private static void DropdownPreviousMatch()
+        {
+            if (!dropdownTypeahead.HasActiveSearch) return;
+            int prev = dropdownTypeahead.GetPreviousMatch(selectedOptionIndex);
+            if (prev >= 0)
+            {
+                selectedOptionIndex = prev;
+                AnnounceDropdownOption();
+            }
+        }
+
         private static bool HandleDropdownTypeahead(char character)
         {
             if (dropdownOptions == null || dropdownOptions.Count == 0) return false;
@@ -553,10 +575,16 @@ namespace RimWorldAccess
             switch (key)
             {
                 case KeyCode.UpArrow:
-                    DropdownPrevious();
+                    if (dropdownTypeahead.HasActiveSearch)
+                        DropdownPreviousMatch();
+                    else
+                        DropdownPrevious();
                     return true;
                 case KeyCode.DownArrow:
-                    DropdownNext();
+                    if (dropdownTypeahead.HasActiveSearch)
+                        DropdownNextMatch();
+                    else
+                        DropdownNext();
                     return true;
                 case KeyCode.Home:
                     DropdownHome();
