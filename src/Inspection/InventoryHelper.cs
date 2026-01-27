@@ -11,11 +11,15 @@ namespace RimWorldAccess
     public static class InventoryHelper
     {
         /// <summary>
-        /// Represents an aggregated inventory item with its total quantity and storage locations
+        /// Represents an aggregated inventory item with its total quantity and storage locations.
+        /// Items are grouped by ThingDef + Stuff (material) + Quality to avoid incorrectly
+        /// combining items like "steel knife (excellent)" with "plasteel knife (poor)".
         /// </summary>
         public class InventoryItem
         {
             public ThingDef Def { get; set; }
+            public ThingDef Stuff { get; set; } // Material the item is made of (null if no stuff)
+            public QualityCategory? Quality { get; set; } // Quality level (null if no quality component)
             public int TotalQuantity { get; set; }
             public List<IntVec3> StorageLocations { get; set; }
             public List<Thing> Things { get; set; } // Actual thing references for actions like Install
@@ -27,9 +31,11 @@ namespace RimWorldAccess
             /// </summary>
             public bool IsCarried => CarrierPawn != null;
 
-            public InventoryItem(ThingDef def)
+            public InventoryItem(ThingDef def, ThingDef stuff = null, QualityCategory? quality = null)
             {
                 Def = def;
+                Stuff = stuff;
+                Quality = quality;
                 TotalQuantity = 0;
                 StorageLocations = new List<IntVec3>();
                 Things = new List<Thing>();
@@ -39,11 +45,31 @@ namespace RimWorldAccess
 
             public string GetDisplayLabel()
             {
+                // Build label with material prefix if applicable
+                string itemName;
+                if (Stuff != null)
+                {
+                    itemName = $"{Stuff.LabelAsStuff} {Def.label}";
+                }
+                else
+                {
+                    itemName = Def.label;
+                }
+
+                // Capitalize first letter
+                if (!string.IsNullOrEmpty(itemName))
+                {
+                    itemName = char.ToUpper(itemName[0]) + itemName.Substring(1);
+                }
+
+                // Add quality if applicable
+                string qualitySuffix = Quality.HasValue ? $" ({Quality.Value})" : "";
+
                 if (IsCarried)
                 {
-                    return $"{Def.LabelCap} x{TotalQuantity} (carried by {CarrierPawn.LabelShort})";
+                    return $"{itemName}{qualitySuffix} x{TotalQuantity} (carried by {CarrierPawn.LabelShort})";
                 }
-                return $"{Def.LabelCap} x{TotalQuantity}";
+                return $"{itemName}{qualitySuffix} x{TotalQuantity}";
             }
         }
 
@@ -163,36 +189,51 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Aggregates items by ThingDef, summing quantities and tracking locations.
-        /// For MinifiedThings (uninstalled furniture), uses the inner thing's def.
+        /// Aggregates items by ThingDef + Stuff (material) + Quality, summing quantities and tracking locations.
+        /// This ensures items like "steel knife (excellent)" and "plasteel knife (poor)" are shown separately.
+        /// For MinifiedThings (uninstalled furniture), uses the inner thing's properties.
         /// </summary>
-        public static Dictionary<ThingDef, InventoryItem> AggregateStacks(List<Thing> items)
+        public static List<InventoryItem> AggregateStacks(List<Thing> items)
         {
-            Dictionary<ThingDef, InventoryItem> aggregated = new Dictionary<ThingDef, InventoryItem>();
+            // Key: (ThingDef, Stuff, Quality) - keeps items with different materials/quality separate
+            Dictionary<(ThingDef, ThingDef, QualityCategory?), InventoryItem> aggregated =
+                new Dictionary<(ThingDef, ThingDef, QualityCategory?), InventoryItem>();
 
             foreach (Thing item in items)
             {
                 if (item?.def == null) continue;
 
-                // For MinifiedThings, use the inner thing's def for categorization
-                ThingDef defToUse = item.def;
+                // For MinifiedThings, use the inner thing's properties for categorization
+                Thing thingToCheck = item;
                 bool isMinified = item is MinifiedThing;
                 if (isMinified)
                 {
                     Thing innerThing = item.GetInnerIfMinified();
-                    if (innerThing?.def != null)
+                    if (innerThing != null)
                     {
-                        defToUse = innerThing.def;
+                        thingToCheck = innerThing;
                     }
                 }
 
-                if (!aggregated.ContainsKey(defToUse))
+                ThingDef defToUse = thingToCheck.def;
+                ThingDef stuffToUse = thingToCheck.Stuff;
+
+                // Get quality if the item has a quality component
+                QualityCategory? qualityToUse = null;
+                var qualityComp = thingToCheck.TryGetComp<CompQuality>();
+                if (qualityComp != null)
                 {
-                    aggregated[defToUse] = new InventoryItem(defToUse);
-                    aggregated[defToUse].IsMinifiedThing = isMinified;
+                    qualityToUse = qualityComp.Quality;
                 }
 
-                InventoryItem invItem = aggregated[defToUse];
+                var key = (defToUse, stuffToUse, qualityToUse);
+                if (!aggregated.ContainsKey(key))
+                {
+                    aggregated[key] = new InventoryItem(defToUse, stuffToUse, qualityToUse);
+                    aggregated[key].IsMinifiedThing = isMinified;
+                }
+
+                InventoryItem invItem = aggregated[key];
                 invItem.TotalQuantity += item.stackCount;
 
                 // Store reference to actual thing (for Install action)
@@ -212,17 +253,18 @@ namespace RimWorldAccess
                 }
             }
 
-            return aggregated;
+            return aggregated.Values.ToList();
         }
 
         /// <summary>
         /// Aggregates pawn-carried items, keeping items from different pawns separate.
-        /// Each pawn+thingdef combination becomes a separate InventoryItem.
+        /// Each pawn + ThingDef + Stuff + Quality combination becomes a separate InventoryItem.
         /// </summary>
         public static List<InventoryItem> AggregatePawnCarriedItems(Dictionary<Thing, Pawn> carriedItems)
         {
-            // Key: (ThingDef, Pawn) - keeps items from different pawns separate
-            Dictionary<(ThingDef, Pawn), InventoryItem> aggregated = new Dictionary<(ThingDef, Pawn), InventoryItem>();
+            // Key: (ThingDef, Stuff, Quality, Pawn) - keeps items from different pawns and with different properties separate
+            Dictionary<(ThingDef, ThingDef, QualityCategory?, Pawn), InventoryItem> aggregated =
+                new Dictionary<(ThingDef, ThingDef, QualityCategory?, Pawn), InventoryItem>();
 
             foreach (var kvp in carriedItems)
             {
@@ -231,22 +273,33 @@ namespace RimWorldAccess
 
                 if (item?.def == null || carrier == null) continue;
 
-                // For MinifiedThings, use the inner thing's def for categorization
-                ThingDef defToUse = item.def;
+                // For MinifiedThings, use the inner thing's properties for categorization
+                Thing thingToCheck = item;
                 bool isMinified = item is MinifiedThing;
                 if (isMinified)
                 {
                     Thing innerThing = item.GetInnerIfMinified();
-                    if (innerThing?.def != null)
+                    if (innerThing != null)
                     {
-                        defToUse = innerThing.def;
+                        thingToCheck = innerThing;
                     }
                 }
 
-                var key = (defToUse, carrier);
+                ThingDef defToUse = thingToCheck.def;
+                ThingDef stuffToUse = thingToCheck.Stuff;
+
+                // Get quality if the item has a quality component
+                QualityCategory? qualityToUse = null;
+                var qualityComp = thingToCheck.TryGetComp<CompQuality>();
+                if (qualityComp != null)
+                {
+                    qualityToUse = qualityComp.Quality;
+                }
+
+                var key = (defToUse, stuffToUse, qualityToUse, carrier);
                 if (!aggregated.ContainsKey(key))
                 {
-                    aggregated[key] = new InventoryItem(defToUse)
+                    aggregated[key] = new InventoryItem(defToUse, stuffToUse, qualityToUse)
                     {
                         CarrierPawn = carrier,
                         IsMinifiedThing = isMinified
@@ -275,9 +328,9 @@ namespace RimWorldAccess
         /// <summary>
         /// Groups inventory items by their categories, building a hierarchical tree
         /// </summary>
-        /// <param name="aggregatedItems">Storage items aggregated by ThingDef</param>
+        /// <param name="storageItems">Storage items aggregated by ThingDef + Stuff + Quality</param>
         /// <param name="pawnCarriedItems">Optional list of pawn-carried items (kept separate per pawn)</param>
-        public static List<CategoryNode> BuildCategoryTree(Dictionary<ThingDef, InventoryItem> aggregatedItems, List<InventoryItem> pawnCarriedItems = null)
+        public static List<CategoryNode> BuildCategoryTree(List<InventoryItem> storageItems, List<InventoryItem> pawnCarriedItems = null)
         {
             // Build a dictionary of all categories that have items
             Dictionary<ThingCategoryDef, CategoryNode> categoryNodes = new Dictionary<ThingCategoryDef, CategoryNode>();
@@ -320,9 +373,9 @@ namespace RimWorldAccess
             }
 
             // Add storage items
-            foreach (var kvp in aggregatedItems)
+            foreach (InventoryItem item in storageItems)
             {
-                AddItemToCategories(kvp.Value);
+                AddItemToCategories(item);
             }
 
             // Add pawn-carried items (if any)
@@ -336,12 +389,12 @@ namespace RimWorldAccess
 
             // Collect uncategorized items (items with no thingCategories)
             List<InventoryItem> uncategorizedItems = new List<InventoryItem>();
-            foreach (var kvp in aggregatedItems)
+            foreach (InventoryItem item in storageItems)
             {
-                ThingDef thingDef = kvp.Value.Def;
+                ThingDef thingDef = item.Def;
                 if (thingDef.thingCategories == null || thingDef.thingCategories.Count == 0)
                 {
-                    uncategorizedItems.Add(kvp.Value);
+                    uncategorizedItems.Add(item);
                 }
             }
             if (pawnCarriedItems != null)

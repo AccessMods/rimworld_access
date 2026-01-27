@@ -108,8 +108,8 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Aggregate storage items by type
-            Dictionary<ThingDef, InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
+            // Aggregate storage items by type (now groups by ThingDef + Stuff + Quality)
+            List<InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
 
             // Build category tree (includes both storage and pawn-carried items)
             List<InventoryHelper.CategoryNode> categoryTree = InventoryHelper.BuildCategoryTree(aggregatedStorageItems, pawnCarriedItems);
@@ -1117,13 +1117,24 @@ namespace RimWorldAccess
                     return "cat:uncategorized";
                 return "cat:" + node.CategoryData.CategoryDef.defName;
             }
-            // For items, use the item def name and carrier info (for carried items)
+            // For items, use the item def name, stuff, quality, and carrier info
             if (node.Type == TreeNode.NodeType.Item && node.ItemData != null)
             {
                 string key = "item:" + node.ItemData.Def.defName;
+                // Include stuff (material) in key
+                if (node.ItemData.Stuff != null)
+                {
+                    key += ":" + node.ItemData.Stuff.defName;
+                }
+                // Include quality in key
+                if (node.ItemData.Quality.HasValue)
+                {
+                    key += ":" + node.ItemData.Quality.Value.ToString();
+                }
+                // Include carrier for carried items
                 if (node.ItemData.IsCarried && node.ItemData.CarrierPawn != null)
                 {
-                    key += ":" + node.ItemData.CarrierPawn.ThingID;
+                    key += ":carried:" + node.ItemData.CarrierPawn.ThingID;
                 }
                 return key;
             }
@@ -1216,8 +1227,8 @@ namespace RimWorldAccess
             Dictionary<Thing, Pawn> pawnCarriedThings = InventoryHelper.GetAllPawnCarriedItems();
             List<InventoryHelper.InventoryItem> pawnCarriedItems = InventoryHelper.AggregatePawnCarriedItems(pawnCarriedThings);
 
-            // Aggregate and rebuild tree
-            Dictionary<ThingDef, InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
+            // Aggregate and rebuild tree (groups by ThingDef + Stuff + Quality)
+            List<InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
             List<InventoryHelper.CategoryNode> categoryTree = InventoryHelper.BuildCategoryTree(aggregatedStorageItems, pawnCarriedItems);
             rootNodes = BuildTreeNodes(categoryTree);
 
