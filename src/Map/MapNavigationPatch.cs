@@ -19,6 +19,11 @@ namespace RimWorldAccess
         private static bool hasAnnouncedThisFrame = false;
         private static int lastProcessedFrame = -1;
 
+        // Mouse navigation tracking
+        private static IntVec3 lastMouseCell = IntVec3.Invalid;
+        private static int lastMouseCellMapId = -1;
+        private static float lastArrowKeyPressTime = 0f;
+
         /// <summary>
         /// Updates the map navigation suppression flag based on active menus.
         /// </summary>
@@ -94,6 +99,8 @@ namespace RimWorldAccess
             if (Find.CurrentMap == null)
             {
                 MapNavigationState.Reset();
+                lastMouseCell = IntVec3.Invalid;
+                lastMouseCellMapId = -1;
                 return true; // Let original run
             }
 
@@ -338,7 +345,7 @@ namespace RimWorldAccess
                     // Only announce if different from last announcement (avoids spam when hitting map edge)
                     if (tileInfo != MapNavigationState.LastAnnouncedInfo)
                     {
-                        TolkHelper.Speak(tileInfo);
+                        TolkHelper.Speak(tileInfo, SpeechPriority.High);
                         MapNavigationState.LastAnnouncedInfo = tileInfo;
                         hasAnnouncedThisFrame = true;
                     }
@@ -348,7 +355,7 @@ namespace RimWorldAccess
                     // Cursor at map boundary - optionally announce boundary
                     if (!hasAnnouncedThisFrame)
                     {
-                        TolkHelper.Speak("Map boundary");
+                        TolkHelper.Speak("Map boundary", SpeechPriority.High);
                         hasAnnouncedThisFrame = true;
                     }
                 }
@@ -356,6 +363,102 @@ namespace RimWorldAccess
                 // Consume the arrow key event to prevent default camera panning
                 // This is done by preventing the KeyBindingDefOf checks from succeeding
                 // Note: We're using Input.GetKeyDown instead of KeyBindingDefOf to intercept earlier
+
+                // Update last arrow key press time for mouse navigation suppression
+                lastArrowKeyPressTime = Time.time;
+            }
+
+            // Handle mouse movement for automatic tile announcement
+            // Only if not using keyboard navigation recently (to avoid double announcements)
+            // AND only if left Ctrl is held down
+            if (!MapNavigationState.SuppressMapNavigation && Find.CurrentMap != null)
+            {
+                // Check if left Ctrl is held down
+                bool ctrlHeldForMouse = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
+                if (ctrlHeldForMouse)
+                {
+                    // Get current mouse cell
+                    IntVec3 mouseCell = UI.MouseCell();
+
+                    // Check if mouse cell is within map bounds
+                    if (mouseCell.InBounds(Find.CurrentMap))
+                    {
+                        // Check if mouse moved to a new cell or changed map
+                        bool mouseCellChanged = mouseCell != lastMouseCell || Find.CurrentMap.uniqueID != lastMouseCellMapId;
+
+                        // Check time since last arrow key press (to avoid announcing when using keyboard)
+                        float timeSinceArrowKey = Time.time - lastArrowKeyPressTime;
+                        bool keyboardIdle = timeSinceArrowKey > 0.5f; // 0.5 seconds threshold
+
+                        if (mouseCellChanged && keyboardIdle)
+                        {
+                            // Get tile information
+                            string tileInfo = TileInfoHelper.GetTileSummary(mouseCell, Find.CurrentMap);
+
+                            // If in zone creation mode, prepend selection state
+                            if (ZoneCreationState.IsInCreationMode)
+                            {
+                                if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (ZoneCreationState.IsCellSelected(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+                            // If in area painting mode, prepend selection/preview state
+                            else if (AreaPaintingState.IsActive)
+                            {
+                                if (AreaPaintingState.IsInPreviewMode && AreaPaintingState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (AreaPaintingState.StagedCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+                            // If in architect mode zone placement, prepend selection/preview state
+                            else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
+                            {
+                                if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Preview, " + tileInfo;
+                                }
+                                else if (ArchitectState.SelectedCells.Contains(mouseCell))
+                                {
+                                    tileInfo = "Selected, " + tileInfo;
+                                }
+                            }
+
+                            // Announce tile info with interrupt to cut off previous speech
+                            TolkHelper.Speak(tileInfo, SpeechPriority.High);
+                            MapNavigationState.LastAnnouncedInfo = tileInfo;
+                            hasAnnouncedThisFrame = true;
+
+                            // Update mouse tracking
+                            lastMouseCell = mouseCell;
+                            lastMouseCellMapId = Find.CurrentMap.uniqueID;
+                        }
+                    }
+                    else if (lastMouseCell.IsValid || lastMouseCellMapId != -1)
+                    {
+                        // Mouse left map bounds, reset tracking
+                        lastMouseCell = IntVec3.Invalid;
+                        lastMouseCellMapId = -1;
+                    }
+                }
+                else
+                {
+                    // Ctrl is not held - reset tracking to ensure clean state
+                    if (lastMouseCell.IsValid || lastMouseCellMapId != -1)
+                    {
+                        lastMouseCell = IntVec3.Invalid;
+                        lastMouseCellMapId = -1;
+                    }
+                }
             }
 
             // Let original CameraDriver.Update() run for non-arrow-key functionality
