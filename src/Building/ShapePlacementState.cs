@@ -600,6 +600,7 @@ namespace RimWorldAccess
             bool isBuildDesignator = ShapeHelper.IsBuildDesignator(activeDesignator);
             bool isAreaDesignator = ShapeHelper.IsAreaDesignator(activeDesignator);
             bool isBuiltInAreaDesignator = ShapeHelper.IsBuiltInAreaDesignator(activeDesignator);
+            bool isOrderDesignator = ShapeHelper.IsOrderDesignator(activeDesignator);
 
             // Capture area state before painting for undo support
             if (isAreaDesignator && Designator_AreaAllowed.selectedArea != null)
@@ -622,6 +623,13 @@ namespace RimWorldAccess
             BuildableDef buildableDef = isBuildDesignator ? GetBuildableDefFromDesignator(activeDesignator) : null;
             int costPerCell = GetCostPerCell(buildableDef);
             string resourceName = GetResourceName(buildableDef);
+
+            // Capture designation state before placement for order designators
+            // This allows us to diff and find exactly which designations were created
+            if (isOrderDesignator)
+            {
+                OrderUndoTracker.CaptureBeforeState(map);
+            }
 
             // Place designation for each cell
             foreach (IntVec3 cell in previewHelper.PreviewCells)
@@ -676,6 +684,12 @@ namespace RimWorldAccess
                     result.ObstacleCells.Add(cell);
                     result.ObstacleCount++;
                 }
+            }
+
+            // Capture designation state after placement for order designators
+            if (isOrderDesignator)
+            {
+                OrderUndoTracker.CaptureAfterState(map);
             }
 
             // Calculate total resource cost (only for Build designators)

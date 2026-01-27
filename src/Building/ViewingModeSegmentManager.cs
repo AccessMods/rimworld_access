@@ -159,6 +159,8 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Removes designations from DesignationManager for Orders/Cells designators.
+        /// Uses OrderUndoTracker to remove actual Designation objects, which correctly
+        /// handles both thing-based (Hunt, Haul, Tame) and cell-based (Mine) designators.
         /// </summary>
         private static int RemoveDesignationSegmentItems(
             int segmentIndex,
@@ -166,34 +168,21 @@ namespace RimWorldAccess
             Map map,
             Designator activeDesignator)
         {
-            int removedCount = 0;
+            if (map == null)
+                return 0;
 
-            if (map != null)
+            if (segmentIndex >= 0)
             {
-                if (segmentIndex >= 0 && segmentIndex < cellSegments.Count)
-                {
-                    // Remove single segment
-                    foreach (IntVec3 cell in cellSegments[segmentIndex])
-                    {
-                        if (RemoveDesignationAtCell(cell, map, activeDesignator))
-                            removedCount++;
-                    }
-                }
-                else if (segmentIndex == -1)
-                {
-                    // Remove all segments
-                    foreach (var cellSegment in cellSegments)
-                    {
-                        foreach (IntVec3 cell in cellSegment)
-                        {
-                            if (RemoveDesignationAtCell(cell, map, activeDesignator))
-                                removedCount++;
-                        }
-                    }
-                }
+                // Remove single segment (last one)
+                return OrderUndoTracker.UndoLastSegment(map);
+            }
+            else if (segmentIndex == -1)
+            {
+                // Remove all segments
+                return OrderUndoTracker.UndoAll(map);
             }
 
-            return removedCount;
+            return 0;
         }
 
         /// <summary>

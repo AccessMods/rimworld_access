@@ -272,6 +272,12 @@ namespace RimWorldAccess
                 {
                     CollectOrderTargets(result.PlacedCells, designator);
                 }
+
+                // Store order undo segment for undo support
+                if (isOrderDesignator && OrderUndoTracker.HasPendingRecord)
+                {
+                    OrderUndoTracker.AddSegment();
+                }
             }
 
             // Track shape type for this segment
@@ -972,6 +978,9 @@ namespace RimWorldAccess
         {
             // Clear zone undo tracker data
             ZoneUndoTracker.Clear();
+
+            // Clear order undo tracker data
+            OrderUndoTracker.Clear();
 
             isActive = false;
             isAddingMore = false;
