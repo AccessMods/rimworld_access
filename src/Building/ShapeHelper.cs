@@ -226,6 +226,82 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Checks if a designator is an Area designator (expand or clear allowed areas).
+        /// These require an area to be selected before placement can begin.
+        /// Examples: Designator_AreaAllowedExpand, Designator_AreaAllowedClear
+        /// </summary>
+        public static bool IsAreaDesignator(Designator designator)
+        {
+            return InheritsFromTypeName(designator, "Designator_AreaAllowed");
+        }
+
+        /// <summary>
+        /// Checks if a designator is a built-in area designator (Snow/Sand, Roof, Home).
+        /// These operate on fixed Area objects from the map's AreaManager.
+        /// Examples: Designator_AreaSnowClear, Designator_AreaBuildRoof, Designator_AreaHome
+        /// </summary>
+        public static bool IsBuiltInAreaDesignator(Designator designator)
+        {
+            if (designator == null)
+                return false;
+
+            // Check for each built-in area type
+            return InheritsFromTypeName(designator, "Designator_AreaSnowClear") ||
+                   InheritsFromTypeName(designator, "Designator_AreaHome") ||
+                   InheritsFromTypeName(designator, "Designator_AreaBuildRoof") ||
+                   InheritsFromTypeName(designator, "Designator_AreaNoRoof") ||
+                   InheritsFromTypeName(designator, "Designator_AreaIgnoreRoof") ||
+                   InheritsFromTypeName(designator, "Designator_AreaPollutionClear");
+        }
+
+        /// <summary>
+        /// Checks if a designator is any type of area designator (Allowed OR Built-in).
+        /// </summary>
+        public static bool IsAnyAreaDesignator(Designator designator)
+        {
+            return IsAreaDesignator(designator) || IsBuiltInAreaDesignator(designator);
+        }
+
+        /// <summary>
+        /// Checks if a built-in area designator is in "expand" mode (adds cells) vs "clear" mode (removes cells).
+        /// </summary>
+        public static bool IsBuiltInAreaExpanding(Designator designator)
+        {
+            if (designator == null)
+                return true;
+
+            string typeName = designator.GetType().Name;
+            // "Clear" designators remove cells, others add cells
+            // Special case: Designator_AreaIgnoreRoof is a "clear" operation (removes from both BuildRoof and NoRoof)
+            return !typeName.Contains("Clear") && !typeName.Contains("IgnoreRoof");
+        }
+
+        /// <summary>
+        /// Gets the Area object for a built-in area designator from the map's AreaManager.
+        /// Returns null if not a built-in area designator or no map available.
+        /// </summary>
+        public static Area GetBuiltInAreaForDesignator(Designator designator, Map map)
+        {
+            if (designator == null || map?.areaManager == null)
+                return null;
+
+            string typeName = designator.GetType().Name;
+
+            if (typeName.Contains("SnowClear") || typeName.Contains("SandClear"))
+                return map.areaManager.SnowOrSandClear;
+            if (typeName.Contains("AreaHome"))
+                return map.areaManager.Home;
+            if (typeName.Contains("BuildRoof"))
+                return map.areaManager.BuildRoof;
+            if (typeName.Contains("NoRoof") || typeName.Contains("IgnoreRoof"))
+                return map.areaManager.NoRoof;
+            if (typeName.Contains("PollutionClear"))
+                return map.areaManager.PollutionClear; // Returns null if Biotech DLC not active
+
+            return null;
+        }
+
+        /// <summary>
         /// Checks if a designator is a Cells designator (multi-cell selection like Mine).
         /// </summary>
         public static bool IsCellsDesignator(Designator designator)
@@ -242,11 +318,17 @@ namespace RimWorldAccess
             if (designator == null)
                 return false;
 
-            // Orders are designators that have DrawStyleCategory but are not Build, Place, Zone, or Cells
+            // Orders are designators that have DrawStyleCategory but are not Build, Place, Zone, Cells, or Areas
             // They designate Things at cells (like Hunt, Haul, Tame, etc.)
             if (designator is Designator_Place)
                 return false;
             if (IsCellsDesignator(designator))
+                return false;
+            if (IsZoneDesignator(designator))
+                return false;
+            if (IsAreaDesignator(designator))
+                return false;
+            if (IsBuiltInAreaDesignator(designator))
                 return false;
 
             // If it has a DrawStyleCategory, it's an order-type designator

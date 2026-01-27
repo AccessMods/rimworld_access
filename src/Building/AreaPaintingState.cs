@@ -119,7 +119,6 @@ namespace RimWorldAccess
                 ? "Box selection mode"
                 : "Single tile selection mode";
             TolkHelper.Speak(modeName);
-            Log.Message($"Area painting: Switched to {modeName}");
         }
 
         /// <summary>
@@ -137,7 +136,6 @@ namespace RimWorldAccess
                 previewHelper.SetCurrentShape(shape);
                 string shapeName = ShapeHelper.GetShapeName(shape);
                 TolkHelper.Speak($"Shape: {shapeName}");
-                Log.Message($"Area painting: Shape set to {shapeName}");
             }
             else
             {
@@ -166,8 +164,6 @@ namespace RimWorldAccess
         /// <param name="designator">Optional designator that initiated the area painting (for shape validation)</param>
         public static void EnterExpandMode(Area area, Designator designator = null)
         {
-            Log.Message($"RimWorld Access: EnterExpandMode called for area: {area?.Label ?? "null"}");
-
             isActive = true;
             targetArea = area;
             isExpanding = true;
@@ -180,8 +176,6 @@ namespace RimWorldAccess
             currentShape = designator != null ? ShapeHelper.GetDefaultShape(designator) : ShapeType.FilledRectangle;
             previewHelper.SetCurrentShape(currentShape);
 
-            Log.Message($"RimWorld Access: isActive set to {isActive}, targetArea set to {targetArea?.Label}");
-
             // Ensure map navigation is initialized
             if (!MapNavigationState.IsInitialized && area.Map != null)
             {
@@ -191,7 +185,6 @@ namespace RimWorldAccess
 
             string shapeName = ShapeHelper.GetShapeName(currentShape);
             TolkHelper.Speak($"Expanding area: {area.Label}. {shapeName} mode. Tab to switch mode. Enter to confirm, Escape to cancel.");
-            Log.Message("RimWorld Access: Area painting mode entered");
         }
 
         /// <summary>
@@ -298,8 +291,6 @@ namespace RimWorldAccess
             }
 
             TolkHelper.Speak(announcement);
-
-            Log.Message($"[AreaPaintingState] Shape confirmed: {addedCount} cells added, total staged: {stagedCells.Count}");
         }
 
         /// <summary>
@@ -321,7 +312,6 @@ namespace RimWorldAccess
             }
 
             previewHelper.Cancel();
-            Log.Message("[AreaPaintingState] Shape cancelled");
         }
 
         /// <summary>
@@ -337,21 +327,16 @@ namespace RimWorldAccess
         /// </summary>
         public static void ToggleStageCell()
         {
-            Log.Message($"RimWorld Access: ToggleStageCell called, isActive={isActive}, targetArea={targetArea?.Label ?? "null"}");
-
             if (!isActive || targetArea == null)
             {
-                Log.Message("RimWorld Access: Not active or no target area");
                 return;
             }
 
             IntVec3 currentPos = MapNavigationState.CurrentCursorPosition;
-            Log.Message($"RimWorld Access: Current position: {currentPos}");
 
             if (!currentPos.InBounds(targetArea.Map))
             {
                 TolkHelper.Speak("Position out of bounds");
-                Log.Message("RimWorld Access: Position out of bounds");
                 return;
             }
 
@@ -360,13 +345,11 @@ namespace RimWorldAccess
             {
                 stagedCells.Remove(currentPos);
                 TolkHelper.Speak($"Deselected, {currentPos.x}, {currentPos.z}");
-                Log.Message($"RimWorld Access: Deselected cell at {currentPos}");
             }
             else
             {
                 stagedCells.Add(currentPos);
                 TolkHelper.Speak($"Selected, {currentPos.x}, {currentPos.z}");
-                Log.Message($"RimWorld Access: Selected cell at {currentPos}");
             }
         }
 
@@ -375,11 +358,8 @@ namespace RimWorldAccess
         /// </summary>
         public static void Confirm()
         {
-            Log.Message("RimWorld Access: Confirm() called");
-
             if (!isActive || targetArea == null)
             {
-                Log.Message("RimWorld Access: Not active or no target area");
                 return;
             }
 
@@ -409,7 +389,6 @@ namespace RimWorldAccess
 
             string action = isExpanding ? "added to" : "removed from";
             TolkHelper.Speak($"{stagedCells.Count} cells {action} {targetArea.Label}. Total cells: {targetArea.TrueCount}");
-            Log.Message($"RimWorld Access: Applied {stagedCells.Count} changes");
 
             isActive = false;
             targetArea = null;
@@ -424,8 +403,6 @@ namespace RimWorldAccess
         /// </summary>
         public static void Cancel()
         {
-            Log.Message("RimWorld Access: Cancel() called");
-
             if (targetArea != null)
             {
                 TolkHelper.Speak("Area editing cancelled");
@@ -437,8 +414,6 @@ namespace RimWorldAccess
             previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
             currentDesignator = null; // Clear designator reference
-
-            Log.Message("RimWorld Access: Area painting cancelled");
         }
 
         /// <summary>
@@ -446,16 +421,12 @@ namespace RimWorldAccess
         /// </summary>
         private static void Exit()
         {
-            Log.Message("RimWorld Access: AreaPaintingState.Exit() called");
-
             isActive = false;
             targetArea = null;
             stagedCells.Clear();
             previewHelper.Reset();
             selectionMode = AreaSelectionMode.BoxSelection; // Reset to default mode
             currentDesignator = null; // Clear designator reference
-
-            Log.Message("RimWorld Access: Area painting mode exited");
         }
 
         /// <summary>

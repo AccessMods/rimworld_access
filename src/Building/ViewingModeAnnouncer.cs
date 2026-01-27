@@ -40,6 +40,9 @@ namespace RimWorldAccess
         /// <param name="wasZoneExpansion">Whether this was an expansion of existing zone</param>
         /// <param name="targetZone">The target zone being edited (if any)</param>
         /// <param name="createdZones">Set of zones created/modified</param>
+        /// <param name="isAreaDesignator">Whether this is an area designator (Allowed Areas)</param>
+        /// <param name="targetArea">The target area for area designators</param>
+        /// <param name="isBuiltInAreaDesignator">Whether this is a built-in area designator (Snow/Sand, Roof, Home)</param>
         /// <returns>The announcement string</returns>
         public static string BuildEntryAnnouncement(
             Designator designator,
@@ -59,7 +62,10 @@ namespace RimWorldAccess
             List<Thing> placedBlueprints,
             bool wasZoneExpansion,
             Zone targetZone,
-            HashSet<Zone> createdZones)
+            HashSet<Zone> createdZones,
+            bool isAreaDesignator = false,
+            Area targetArea = null,
+            bool isBuiltInAreaDesignator = false)
         {
             // Use shape type counts for multi-segment, empty for single segment
             string shapeInfo = FormatShapeTypeCounts(segmentShapeTypes);
@@ -114,6 +120,12 @@ namespace RimWorldAccess
                 }
 
                 return $"Viewing mode. {mainPart}{segmentInfo}. {hintsStr}.";
+            }
+            else if (isAreaDesignator || isBuiltInAreaDesignator)
+            {
+                // Build area-specific announcement (Allowed Areas and Built-in Areas like Snow/Sand, Roof, Home)
+                return BuildAreaDesignatorAnnouncement(
+                    designator, totalPlaced, segmentInfo, placedCells, lastSegmentCells, targetArea, isBuiltInAreaDesignator);
             }
             else if (isZoneDesignator)
             {
@@ -553,6 +565,143 @@ namespace RimWorldAccess
 
             // True fallback - should be very rare
             return "blocked cell";
+        }
+
+        #endregion
+
+        #region Area-Specific Announcements
+
+        /// <summary>
+        /// Builds the announcement specifically for area designators (Allowed Areas and Built-in Areas).
+        /// Uses "Expanded" for expand designators and "Cleared" for clear designators.
+        /// Examples:
+        /// - "Expanded Kitchen by 7 by 4" (adding to allowed area)
+        /// - "Cleared Kitchen by 12 cells" (removing from allowed area)
+        /// - "Marked 4 by 5 for snow and sand removal" (built-in area)
+        /// - "Unmarked 4 by 5 from snow and sand removal area" (built-in area clear)
+        /// </summary>
+        /// <param name="designator">The area designator</param>
+        /// <param name="totalPlaced">Total count of cells affected</param>
+        /// <param name="segmentInfo">Shape segment info string</param>
+        /// <param name="placedCells">List of all placed cells</param>
+        /// <param name="lastSegmentCells">List of cells from the most recent segment</param>
+        /// <param name="targetArea">The target area being edited</param>
+        /// <param name="isBuiltInAreaDesignator">Whether this is a built-in area (Snow/Sand, Roof, Home)</param>
+        /// <returns>The announcement string</returns>
+        public static string BuildAreaDesignatorAnnouncement(
+            Designator designator,
+            int totalPlaced,
+            string segmentInfo,
+            List<IntVec3> placedCells,
+            List<IntVec3> lastSegmentCells,
+            Area targetArea,
+            bool isBuiltInAreaDesignator = false)
+        {
+            var parts = new List<string>();
+
+            // Get the area name - for built-in areas, use the designator label or area label
+            string areaName;
+            if (isBuiltInAreaDesignator)
+            {
+                // Use the area's label (e.g., "Snow clear area", "Home area", "Build roof area")
+                // or fall back to a name derived from the designator
+                areaName = targetArea?.Label ?? GetBuiltInAreaName(designator);
+            }
+            else
+            {
+                areaName = targetArea?.Label ?? "area";
+            }
+
+            // Determine the action verb based on designator type
+            string action;
+            if (isBuiltInAreaDesignator)
+            {
+                // For built-in areas: "Marked" for expand, "Unmarked" for clear
+                bool isExpanding = ShapeHelper.IsBuiltInAreaExpanding(designator);
+                action = isExpanding ? "Marked" : "Unmarked";
+            }
+            else
+            {
+                // For allowed areas: "Expanded" or "Cleared"
+                action = designator is Designator_AreaAllowedExpand ? "Expanded" : "Cleared";
+            }
+
+            if (totalPlaced > 0)
+            {
+                // Use lastSegmentCells if available for the most recent shape size,
+                // fall back to placedCells for all cells
+                var cellsForSize = lastSegmentCells != null && lastSegmentCells.Count > 0
+                    ? lastSegmentCells
+                    : placedCells;
+                string sizeString = ShapeHelper.FormatShapeSize(cellsForSize);
+
+                if (isBuiltInAreaDesignator)
+                {
+                    // Built-in area format: "Marked 4 by 5 for snow and sand removal" or "Unmarked 4 by 5 from home area"
+                    bool isExpanding = ShapeHelper.IsBuiltInAreaExpanding(designator);
+                    string preposition = isExpanding ? "for" : "from";
+                    parts.Add($"{action} {sizeString} {preposition} {areaName}{segmentInfo}");
+                }
+                else
+                {
+                    // Allowed area format: "Expanded Kitchen by 4 by 5"
+                    parts.Add($"{action} {areaName} by {sizeString}{segmentInfo}");
+                }
+            }
+            else
+            {
+                parts.Add($"No area cells {action.ToLower()}{segmentInfo}");
+            }
+
+            // Add control hints
+            var hints = new List<string>();
+            hints.Add("Equals to add another shape");
+            hints.Add("Minus to undo last");
+            hints.Add("Enter to confirm");
+            parts.Add(string.Join(", ", hints));
+
+            return $"Viewing mode. {string.Join(". ", parts)}.";
+        }
+
+        /// <summary>
+        /// Gets a readable name for a built-in area designator.
+        /// </summary>
+        private static string GetBuiltInAreaName(Designator designator)
+        {
+            if (designator == null)
+                return "area";
+
+            // Use the designator's label if available, which is usually descriptive
+            // e.g., "Expand snow clear area", "Clear home area", "Build roof area"
+            string label = designator.Label;
+            if (!string.IsNullOrEmpty(label))
+            {
+                // Clean up the label - remove "Expand " or "Clear " prefix if present
+                label = label.ToLower();
+                if (label.StartsWith("expand "))
+                    label = label.Substring(7);
+                else if (label.StartsWith("clear "))
+                    label = label.Substring(6);
+
+                return label;
+            }
+
+            // Fallback based on type name
+            string typeName = designator.GetType().Name;
+            if (typeName.Contains("SnowClear") || typeName.Contains("SandClear"))
+                return "snow and sand removal";
+            if (typeName.Contains("Home"))
+                return "home area";
+            if (typeName.Contains("BuildRoof"))
+                return "build roof area";
+            if (typeName.Contains("NoRoof"))
+                return "no roof area";
+            if (typeName.Contains("IgnoreRoof"))
+                return "roof areas";
+            if (typeName.Contains("PollutionClear"))
+                return "pollution clear area";
+
+            return "area";
         }
 
         #endregion

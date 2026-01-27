@@ -72,6 +72,10 @@ namespace RimWorldAccess
             if (ShapeSelectionMenuState.IsActive)
                 return;
 
+            // Don't process when area selection menu is active
+            if (AreaSelectionMenuState.IsActive)
+                return;
+
             if (ViewingModeState.IsActive && !ShapePlacementState.IsActive)
                 return;
 

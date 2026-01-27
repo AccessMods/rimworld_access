@@ -49,6 +49,12 @@ namespace RimWorldAccess
                 Log.Message("[DesignatorDeselectedPatch] Cleaning up GizmoZoneEditState on true deselect");
                 GizmoZoneEditState.Reset();
             }
+
+            // Clean up area designator selected area to prevent stale selection
+            if (Designator_AreaAllowed.selectedArea != null)
+            {
+                Designator_AreaAllowed.ClearSelectedArea();
+            }
         }
     }
 
@@ -147,9 +153,38 @@ namespace RimWorldAccess
         /// Routes a designator to the accessible placement system.
         /// Always uses ShapePlacementState for consistent UX, even for single-cell buildings.
         /// Works with both placement designators (Build, Install) and zone designators.
+        /// Area designators (Expand/Clear allowed area) prompt for area selection first.
         /// </summary>
         /// <param name="designator">The designator to route</param>
         private static void RouteToAccessiblePlacement(Designator designator)
+        {
+            if (ShapeHelper.IsAreaDesignator(designator))
+            {
+                // If an area is already selected (e.g., from WindowlessAreaState),
+                // skip the selection menu and go directly to placement
+                if (Designator_AreaAllowed.selectedArea != null)
+                {
+                    EnterPlacementWithDesignator(designator);
+                    return;
+                }
+
+                // No area selected yet - show selection menu
+                AreaSelectionMenuState.Open(designator, (area) => {
+                    Designator_AreaAllowed.selectedArea = area;
+                    EnterPlacementWithDesignator(designator);
+                });
+                return;
+            }
+
+            EnterPlacementWithDesignator(designator);
+        }
+
+        /// <summary>
+        /// Enters the shape placement system with the given designator.
+        /// Determines the default shape and starts ShapePlacementState.
+        /// </summary>
+        /// <param name="designator">The designator to place with</param>
+        private static void EnterPlacementWithDesignator(Designator designator)
         {
             var availableShapes = ShapeHelper.GetAvailableShapes(designator);
             ShapeType defaultShape = availableShapes.Count > 0 ? availableShapes[0] : ShapeType.Manual;

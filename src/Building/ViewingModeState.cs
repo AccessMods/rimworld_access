@@ -84,6 +84,15 @@ namespace RimWorldAccess
         // Track whether this is a delete/shrink designator (removes cells, no obstacles possible)
         private static bool isDeleteDesignator = false;
 
+        // Track whether this is an Area designator (Allowed Area expand/shrink)
+        private static bool isAreaDesignator = false;
+
+        // Track whether this is a built-in area designator (Snow/Sand, Roof, Home)
+        private static bool isBuiltInAreaDesignator = false;
+
+        // Store the target area for area designators
+        private static Area targetArea = null;
+
         // Frame-based timing guard for confirmation - prevents G key from being blocked
         // when it's pressed in the same frame as Enter key completes Confirm()
         private static int confirmationFrame = -1;
@@ -161,6 +170,21 @@ namespace RimWorldAccess
         public static bool IsZoneDesignator => isZoneDesignator;
 
         /// <summary>
+        /// Whether the current designator is an Area type (Allowed Area expand/shrink).
+        /// </summary>
+        public static bool IsAreaDesignator => isAreaDesignator;
+
+        /// <summary>
+        /// Whether the current designator is a built-in area type (Snow/Sand, Roof, Home).
+        /// </summary>
+        public static bool IsBuiltInAreaDesignator => isBuiltInAreaDesignator;
+
+        /// <summary>
+        /// The target area for area designators.
+        /// </summary>
+        public static Area TargetArea => targetArea;
+
+        /// <summary>
         /// Returns true if Confirm() was just called within the last frame.
         /// Used to prevent G key from being blocked when pressed immediately after Enter.
         /// </summary>
@@ -192,6 +216,17 @@ namespace RimWorldAccess
             isOrderDesignator = ShapeHelper.IsOrderDesignator(designator);
             isZoneDesignator = ShapeHelper.IsZoneDesignator(designator);
             isDeleteDesignator = ShapeHelper.IsDeleteDesignator(designator);
+            isAreaDesignator = ShapeHelper.IsAreaDesignator(designator);
+            isBuiltInAreaDesignator = ShapeHelper.IsBuiltInAreaDesignator(designator);
+            if (isAreaDesignator)
+            {
+                targetArea = Designator_AreaAllowed.selectedArea;
+            }
+            else if (isBuiltInAreaDesignator)
+            {
+                // Built-in areas (Snow/Sand, Roof, Home) have fixed Area objects on the map
+                targetArea = ShapeHelper.GetBuiltInAreaForDesignator(designator, Find.CurrentMap);
+            }
 
             // First time entering - save cursor and initialize
             // But if we're adding more shapes, keep existing segments
@@ -349,7 +384,10 @@ namespace RimWorldAccess
                 PlacedBlueprints,
                 ZoneUndoTracker.WasZoneExpansion,
                 targetZone,
-                createdZones);
+                createdZones,
+                isAreaDesignator,
+                targetArea,
+                isBuiltInAreaDesignator);
             TolkHelper.Speak(announcement, SpeechPriority.Normal);
 
             int totalPlaced = PlacedCount;
@@ -605,7 +643,7 @@ namespace RimWorldAccess
             // Remove the last segment using centralized helper
             int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
             int removedCount = ViewingModeSegmentManager.RemoveSegmentItems(
-                lastIndex, segments, cellSegments, isBuildDesignator, isZoneDesignator, activeDesignator, targetZone);
+                lastIndex, segments, cellSegments, isBuildDesignator, isZoneDesignator, isAreaDesignator, isBuiltInAreaDesignator, activeDesignator, targetZone);
 
             // Remove the segment from the list
             if (isBuildDesignator)
@@ -745,7 +783,7 @@ namespace RimWorldAccess
                 // Remove the last segment using centralized helper
                 int lastIndex = isBuildDesignator ? segments.Count - 1 : cellSegments.Count - 1;
                 removedCount = ViewingModeSegmentManager.RemoveSegmentItems(
-                    lastIndex, segments, cellSegments, isBuildDesignator, isZoneDesignator, activeDesignator, targetZone);
+                    lastIndex, segments, cellSegments, isBuildDesignator, isZoneDesignator, isAreaDesignator, isBuiltInAreaDesignator, activeDesignator, targetZone);
 
                 // Remove the segment from the list
                 if (isBuildDesignator)
@@ -802,7 +840,7 @@ namespace RimWorldAccess
 
             // Remove all segments using centralized helper (-1 = all segments)
             int removedCount = ViewingModeSegmentManager.RemoveSegmentItems(
-                -1, segments, cellSegments, isBuildDesignator, isZoneDesignator, activeDesignator, targetZone);
+                -1, segments, cellSegments, isBuildDesignator, isZoneDesignator, isAreaDesignator, isBuiltInAreaDesignator, activeDesignator, targetZone);
 
             string itemType = ViewingModeSegmentManager.GetItemTypeForCount(removedCount, isBuildDesignator, isZoneDesignator);
             string allWord = removedCount == 1 ? "" : "all ";
@@ -889,7 +927,7 @@ namespace RimWorldAccess
                 {
                     // Remove all segments using centralized helper (-1 = all segments)
                     int removedCount = ViewingModeSegmentManager.RemoveSegmentItems(
-                        -1, segments, cellSegments, isBuildDesignator, isZoneDesignator, activeDesignator, targetZone);
+                        -1, segments, cellSegments, isBuildDesignator, isZoneDesignator, isAreaDesignator, isBuiltInAreaDesignator, activeDesignator, targetZone);
 
                     string itemType = ViewingModeSegmentManager.GetItemTypeForCount(removedCount, isBuildDesignator, isZoneDesignator);
                     string allWord = removedCount == 1 ? "" : "all ";
@@ -941,6 +979,9 @@ namespace RimWorldAccess
             isOrderDesignator = false;
             isZoneDesignator = false;
             isDeleteDesignator = false;
+            isAreaDesignator = false;
+            isBuiltInAreaDesignator = false;
+            targetArea = null;
             segments.Clear();
             cellSegments.Clear();
             segmentShapeTypes.Clear();

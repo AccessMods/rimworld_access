@@ -253,6 +253,44 @@ namespace RimWorldAccess
                 return "Selected, " + tileInfo;
             }
 
+            // Area designator - show area membership when navigating
+            // This helps users understand which cells are already in the area during expand/shrink
+            // Works for both Allowed Areas and Built-in Areas (Snow/Sand, Roof, Home)
+            if (ShapePlacementState.IsActive)
+            {
+                Designator activeDesignator = ShapePlacementState.ActiveDesignator;
+                if (activeDesignator != null)
+                {
+                    Area targetArea = null;
+
+                    if (ShapeHelper.IsAreaDesignator(activeDesignator))
+                    {
+                        // Allowed areas - get from static selectedArea
+                        targetArea = Designator_AreaAllowed.selectedArea;
+                    }
+                    else if (ShapeHelper.IsBuiltInAreaDesignator(activeDesignator))
+                    {
+                        // Built-in areas - get from map's AreaManager
+                        targetArea = ShapeHelper.GetBuiltInAreaForDesignator(activeDesignator, Find.CurrentMap);
+                    }
+
+                    if (targetArea != null && targetArea.Map != null &&
+                        position.InBounds(targetArea.Map) && targetArea[position])
+                    {
+                        return "In area, " + tileInfo;
+                    }
+                }
+            }
+            else if (ViewingModeState.IsActive && (ViewingModeState.IsAreaDesignator || ViewingModeState.IsBuiltInAreaDesignator))
+            {
+                Area targetArea = ViewingModeState.TargetArea;
+                if (targetArea != null && targetArea.Map != null &&
+                    position.InBounds(targetArea.Map) && targetArea[position])
+                {
+                    return "In area, " + tileInfo;
+                }
+            }
+
             return tileInfo;
         }
     }

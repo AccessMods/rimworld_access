@@ -595,6 +595,25 @@ namespace RimWorldAccess
         private static void PlaceNonZoneDesignations(PlacementResult result, Map map, List<Thing> placedThisOperation)
         {
             bool isBuildDesignator = ShapeHelper.IsBuildDesignator(activeDesignator);
+            bool isAreaDesignator = ShapeHelper.IsAreaDesignator(activeDesignator);
+            bool isBuiltInAreaDesignator = ShapeHelper.IsBuiltInAreaDesignator(activeDesignator);
+
+            // Capture area state before painting for undo support
+            if (isAreaDesignator && Designator_AreaAllowed.selectedArea != null)
+            {
+                bool isExpanding = activeDesignator is Designator_AreaAllowedExpand;
+                AreaUndoTracker.CaptureBeforeState(Designator_AreaAllowed.selectedArea, isExpanding);
+            }
+            else if (isBuiltInAreaDesignator)
+            {
+                // Built-in areas (Snow/Sand, Roof, Home) have fixed Area objects on the map
+                Area builtInArea = ShapeHelper.GetBuiltInAreaForDesignator(activeDesignator, map);
+                if (builtInArea != null)
+                {
+                    bool isExpanding = ShapeHelper.IsBuiltInAreaExpanding(activeDesignator);
+                    AreaUndoTracker.CaptureBeforeState(builtInArea, isExpanding);
+                }
+            }
 
             // Get building info for cost calculation (only applies to Build designators)
             BuildableDef buildableDef = isBuildDesignator ? GetBuildableDefFromDesignator(activeDesignator) : null;
@@ -661,6 +680,12 @@ namespace RimWorldAccess
             {
                 result.TotalResourceCost = result.PlacedCount * costPerCell;
                 result.ResourceName = resourceName;
+            }
+
+            // Capture area state after painting
+            if (isAreaDesignator || isBuiltInAreaDesignator)
+            {
+                AreaUndoTracker.CaptureAfterState();
             }
         }
 

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using RimWorld;
+using UnityEngine;
 using Verse;
 
 namespace RimWorldAccess
@@ -16,7 +17,7 @@ namespace RimWorldAccess
         #region Segment Removal
 
         /// <summary>
-        /// Removes items from a single segment (blueprints, zone cells, or designations).
+        /// Removes items from a single segment (blueprints, zone cells, area cells, or designations).
         /// This is the core removal logic for all segment types.
         /// </summary>
         /// <param name="segmentIndex">Index of the segment to remove, or -1 to process all segments</param>
@@ -24,6 +25,8 @@ namespace RimWorldAccess
         /// <param name="cellSegments">List of cell segments (for non-Build designators)</param>
         /// <param name="isBuildDesignator">Whether this is a Build designator</param>
         /// <param name="isZoneDesignator">Whether this is a Zone designator</param>
+        /// <param name="isAreaDesignator">Whether this is an Area designator (Allowed Areas)</param>
+        /// <param name="isBuiltInAreaDesignator">Whether this is a built-in Area designator (Snow/Sand, Roof, Home)</param>
         /// <param name="activeDesignator">The active designator (for designation removal)</param>
         /// <param name="targetZone">The target zone (for zone undo cell count calculation)</param>
         /// <returns>The count of items that were removed</returns>
@@ -33,11 +36,21 @@ namespace RimWorldAccess
             List<List<IntVec3>> cellSegments,
             bool isBuildDesignator,
             bool isZoneDesignator,
+            bool isAreaDesignator,
+            bool isBuiltInAreaDesignator,
             Designator activeDesignator,
             Zone targetZone)
         {
             int removedCount = 0;
             Map map = Find.CurrentMap;
+
+            // Check for area designator first (areas use AreaUndoTracker, not segments)
+            // This includes both Allowed Areas and Built-in Areas (Snow/Sand, Roof, Home)
+            if (isAreaDesignator || isBuiltInAreaDesignator)
+            {
+                removedCount = RemoveAreaSegmentItems(map);
+                return removedCount;
+            }
 
             if (isBuildDesignator)
             {
@@ -131,6 +144,17 @@ namespace RimWorldAccess
             }
 
             return removedCount;
+        }
+
+        /// <summary>
+        /// Removes the last segment of area cell changes using AreaUndoTracker.
+        /// </summary>
+        private static int RemoveAreaSegmentItems(Map map)
+        {
+            if (!AreaUndoTracker.HasUndoData)
+                return 0;
+
+            return AreaUndoTracker.Undo();
         }
 
         /// <summary>

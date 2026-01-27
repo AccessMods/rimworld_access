@@ -17,6 +17,7 @@ namespace RimWorldAccess
         private static int selectedIndex = 0;
         private static DialogElement editingElement = null;
         private static bool replaceOnFirstKeystroke = false;
+        private static bool isFirstKeystrokeAfterEdit = false;
 
         /// <summary>
         /// Tracks the frame number when the dialog was opened.
@@ -87,8 +88,12 @@ namespace RimWorldAccess
                 elements.Insert(0, new DialogDescriptionElement { Title = title, Message = message });
             }
 
-            // Start on the first action (element 1), not the description (element 0)
-            selectedIndex = elements.Count > 1 ? 1 : 0;
+            // Start on the first action, skipping the description if one was added
+            // Description is only added if descriptionText is not empty (line 62-65)
+            // For Dialog_RenameArea and similar dialogs with no title/message,
+            // the first element IS the action (text field), not the description
+            bool hasDescription = !string.IsNullOrEmpty(descriptionText);
+            selectedIndex = (hasDescription && elements.Count > 1) ? 1 : 0;
             editingElement = null;
 
             // Announce dialog opened with full description
@@ -140,6 +145,7 @@ namespace RimWorldAccess
             elements.Clear();
             selectedIndex = 0;
             editingElement = null;
+            isFirstKeystrokeAfterEdit = false;
             ShouldForcePause = false;
             openedOnFrame = -1;
             closedOnFrame = UnityEngine.Time.frameCount;
@@ -240,6 +246,7 @@ namespace RimWorldAccess
             {
                 // Close editing mode
                 editingElement = null;
+                isFirstKeystrokeAfterEdit = false;
                 TolkHelper.Speak($"Editing complete. Current value: {textField.Value}");
                 evt.Use();
                 return true;
@@ -248,13 +255,16 @@ namespace RimWorldAccess
             {
                 // Cancel editing
                 editingElement = null;
+                isFirstKeystrokeAfterEdit = false;
                 TolkHelper.Speak("Editing cancelled");
                 evt.Use();
                 return true;
             }
             else if (key == KeyCode.Backspace)
             {
-                replaceOnFirstKeystroke = false;  // Cancel replace mode on backspace
+                // Cancel replace mode on backspace
+                replaceOnFirstKeystroke = false;
+                isFirstKeystrokeAfterEdit = false;
                 if (textField.Value.Length > 0)
                 {
                     textField.Value = textField.Value.Substring(0, textField.Value.Length - 1);
@@ -265,6 +275,8 @@ namespace RimWorldAccess
             }
             else if (key == KeyCode.Delete)
             {
+                // Delete clears the field, so disable "first keystroke clears"
+                isFirstKeystrokeAfterEdit = false;
                 textField.Value = "";
                 TolkHelper.Speak("Cleared");
                 evt.Use();
@@ -273,10 +285,12 @@ namespace RimWorldAccess
             else if (evt.character != '\0' && evt.character != '\n' && evt.character != '\r')
             {
                 // First keystroke replaces all existing text
-                if (replaceOnFirstKeystroke)
+                // This allows "type to replace" behavior that users expect in rename dialogs
+                if (replaceOnFirstKeystroke || isFirstKeystrokeAfterEdit)
                 {
                     textField.Value = "";
                     replaceOnFirstKeystroke = false;
+                    isFirstKeystrokeAfterEdit = false;
                 }
 
                 // Add character to text field
@@ -337,6 +351,7 @@ namespace RimWorldAccess
                 // Enter editing mode
                 editingElement = textField;
                 replaceOnFirstKeystroke = !string.IsNullOrEmpty(textField.Value);
+                isFirstKeystrokeAfterEdit = !string.IsNullOrEmpty(textField.Value);
                 string replaceHint = replaceOnFirstKeystroke ? " Type to replace." : "";
                 TolkHelper.Speak($"Editing {textField.Label}. Current value: {textField.Value}.{replaceHint} Enter to confirm, Escape to cancel.");
             }

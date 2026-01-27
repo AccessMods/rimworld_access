@@ -88,6 +88,7 @@ namespace RimWorldAccess
                 || SplitCaravanState.IsActive
                 || GearEquipMenuState.IsActive
                 || QuantityMenuState.IsActive
+                || AreaSelectionMenuState.IsActive
                 // History tab
                 || HistoryState.IsActive
                 || HistoryStatisticsState.IsActive
