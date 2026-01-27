@@ -21,6 +21,9 @@ namespace RimWorldAccess
         private static List<object> submenuOptions = new List<object>();
         private static TypeaheadSearchHelper submenuTypeahead = new TypeaheadSearchHelper();
 
+        // Last applied area for bulk operations (null = Unrestricted)
+        private static Area lastAppliedArea = null;
+
         public static TypeaheadSearchHelper Typeahead => tableHelper?.Typeahead;
         public static TypeaheadSearchHelper SubmenuTypeahead => submenuTypeahead;
         public static int CurrentAnimalIndex => tableHelper?.CurrentRowIndex ?? 0;
@@ -605,7 +608,9 @@ namespace RimWorldAccess
                 case SubmenuType.AllowedArea:
                     if (currentAnimal.playerSettings != null)
                     {
-                        currentAnimal.playerSettings.AreaRestrictionInPawnCurrentMap = selectedOption as Area;
+                        Area area = selectedOption as Area;
+                        currentAnimal.playerSettings.AreaRestrictionInPawnCurrentMap = area;
+                        lastAppliedArea = area;  // Store for bulk operations
                     }
                     break;
 
@@ -738,6 +743,82 @@ namespace RimWorldAccess
             tableHelper.JumpToLast(animalsList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        #endregion
+
+        #region Bulk Area Apply
+
+        /// <summary>
+        /// Checks if the current column is the AllowedArea column.
+        /// </summary>
+        private static bool IsOnAllowedAreaColumn()
+        {
+            int currentColumnIndex = tableHelper.CurrentColumnIndex;
+            int fixedColumnsBeforeTraining = 8;
+            int trainingCount = AnimalsMenuHelper.GetAllTrainables().Count;
+
+            // AllowedArea is in the fixed columns after training
+            if (currentColumnIndex < fixedColumnsBeforeTraining + trainingCount)
+                return false;
+
+            int fixedIndex = currentColumnIndex - fixedColumnsBeforeTraining - trainingCount;
+            AnimalsMenuHelper.ColumnType type = (AnimalsMenuHelper.ColumnType)(fixedColumnsBeforeTraining + fixedIndex);
+            return type == AnimalsMenuHelper.ColumnType.AllowedArea;
+        }
+
+        /// <summary>
+        /// Applies the last-used area to the next animal and moves down.
+        /// Only works when on Allowed Area column and not in a submenu.
+        /// </summary>
+        public static void ApplyLastAreaToNextAnimal()
+        {
+            if (activeSubmenu != SubmenuType.None) return;
+            if (!IsOnAllowedAreaColumn()) return;
+            if (animalsList.Count <= 1) return;
+
+            // Move to next animal
+            tableHelper.SelectNextRow(animalsList.Count);
+            Pawn animal = animalsList[tableHelper.CurrentRowIndex];
+
+            // Apply last area
+            if (animal.playerSettings != null)
+            {
+                animal.playerSettings.AreaRestrictionInPawnCurrentMap = lastAppliedArea;
+            }
+
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            string areaName = lastAppliedArea?.Label ?? "Unrestricted";
+            string position = MenuHelper.FormatPosition(tableHelper.CurrentRowIndex, animalsList.Count);
+            TolkHelper.Speak($"{animal.LabelShort}: {areaName} applied. {position}");
+        }
+
+        /// <summary>
+        /// Applies the last-used area to the previous animal and moves up.
+        /// Only works when on Allowed Area column and not in a submenu.
+        /// </summary>
+        public static void ApplyLastAreaToPreviousAnimal()
+        {
+            if (activeSubmenu != SubmenuType.None) return;
+            if (!IsOnAllowedAreaColumn()) return;
+            if (animalsList.Count <= 1) return;
+
+            // Move to previous animal
+            tableHelper.SelectPreviousRow(animalsList.Count);
+            Pawn animal = animalsList[tableHelper.CurrentRowIndex];
+
+            // Apply last area
+            if (animal.playerSettings != null)
+            {
+                animal.playerSettings.AreaRestrictionInPawnCurrentMap = lastAppliedArea;
+            }
+
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            string areaName = lastAppliedArea?.Label ?? "Unrestricted";
+            string position = MenuHelper.FormatPosition(tableHelper.CurrentRowIndex, animalsList.Count);
+            TolkHelper.Speak($"{animal.LabelShort}: {areaName} applied. {position}");
         }
 
         #endregion
