@@ -147,7 +147,15 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = thing.LabelNoParenthesis ?? thing.def.label ?? "Unknown";
+                try
+                {
+                    Label = thing.LabelNoParenthesis ?? thing.def.label ?? "Unknown";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = thing.def?.label ?? "Corrupted object";
+                }
             }
         }
 
