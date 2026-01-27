@@ -465,6 +465,17 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 0.29: Handle area selection menu if active =====
+            // This prompts for area selection when an area designator is chosen from Architect
+            if (AreaSelectionMenuState.IsActive)
+            {
+                if (AreaSelectionMenuState.HandleInput(key))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0.3: Handle caravan formation dialog if active =====
             // BUT: Skip if windowless dialog, inspection, or quantity menu is active - they take priority
             if (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination && !WindowlessDialogState.IsActive && !WindowlessInspectionState.IsActive && !QuantityMenuState.IsActive)
@@ -757,12 +768,6 @@ namespace RimWorldAccess
                 }
             }
 
-            // Log if area painting is active
-            if (AreaPaintingState.IsActive)
-            {
-                Log.Message($"RimWorld Access: UnifiedKeyboardPatch - Area painting is ACTIVE, key={key}");
-            }
-
             // ===== PRIORITY 1: Handle delete confirmation if active =====
             if (WindowlessDeleteConfirmationState.IsActive)
             {
@@ -922,11 +927,112 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 2.4: Handle windowless area manager if active =====
+            if (WindowlessAreaState.IsActive)
+            {
+                bool areaHandled = false;
+                var mode = WindowlessAreaState.CurrentMode;
+
+                if (mode == WindowlessAreaState.NavigationMode.AreaList)
+                {
+                    // Area list mode
+                    if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessAreaState.SelectPreviousArea();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessAreaState.SelectNextArea();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.RightBracket)
+                    {
+                        WindowlessAreaState.EnterActionsMode();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Escape)
+                    {
+                        WindowlessAreaState.Close();
+                        areaHandled = true;
+                    }
+                }
+                else if (mode == WindowlessAreaState.NavigationMode.AreaActions)
+                {
+                    // Actions menu mode
+                    // Escape - clear search first, then return to area list
+                    if (key == KeyCode.Escape)
+                    {
+                        if (WindowlessAreaState.HasActiveActionsSearch)
+                        {
+                            WindowlessAreaState.ClearActionsSearch();
+                            areaHandled = true;
+                        }
+                        else
+                        {
+                            WindowlessAreaState.ReturnToAreaList();
+                            areaHandled = true;
+                        }
+                    }
+                    // Backspace for search
+                    else if (key == KeyCode.Backspace && WindowlessAreaState.HasActiveActionsSearch)
+                    {
+                        WindowlessAreaState.HandleActionsBackspace();
+                        areaHandled = true;
+                    }
+                    // Up arrow - navigate with search awareness
+                    else if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessAreaState.SelectPreviousActionMatch();
+                        areaHandled = true;
+                    }
+                    // Down arrow - navigate with search awareness
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessAreaState.SelectNextActionMatch();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessAreaState.SelectFirstAction();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessAreaState.SelectLastAction();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        WindowlessAreaState.ExecuteAction();
+                        areaHandled = true;
+                    }
+                    // Typeahead characters (letters and numbers)
+                    else
+                    {
+                        bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                        bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                        if (isLetter || isNumber)
+                        {
+                            char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                            WindowlessAreaState.HandleActionsTypeahead(c);
+                            areaHandled = true;
+                        }
+                    }
+                }
+
+                if (areaHandled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 2.5: Handle area painting mode if active =====
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (AreaPaintingState.IsActive && !WindowlessDialogState.IsActive)
             {
-                Log.Message($"RimWorld Access: Area painting active, handling key {key}");
                 bool handled = false;
 
                 // Tab key - toggle between box selection and single tile selection modes
@@ -943,7 +1049,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Space)
                 {
-                    Log.Message("RimWorld Access: Space pressed in area painting mode");
                     IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
                     if (AreaPaintingState.SelectionMode == AreaSelectionMode.SingleTile)
@@ -976,7 +1081,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
-                    Log.Message("RimWorld Access: Enter pressed in area painting mode");
                     // If in preview mode, confirm the rectangle first
                     if (AreaPaintingState.IsInPreviewMode)
                     {
@@ -988,7 +1092,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Escape)
                 {
-                    Log.Message("RimWorld Access: Escape pressed in area painting mode");
                     if (AreaPaintingState.HasRectangleStart)
                     {
                         // Cancel current rectangle selection
@@ -1764,81 +1867,145 @@ namespace RimWorldAccess
                 bool shift = Event.current.shift;
                 bool ctrl = Event.current.control;
 
-                if (key == KeyCode.UpArrow)
+                // Ctrl+Tab: Switch columns
+                if (key == KeyCode.Tab && ctrl && !shift)
                 {
-                    WindowlessScheduleState.MoveUp();
+                    WindowlessScheduleState.SwitchToNextColumn();
                     handled = true;
                 }
-                else if (key == KeyCode.DownArrow)
+                else if (key == KeyCode.Tab && ctrl && shift)
                 {
-                    WindowlessScheduleState.MoveDown();
+                    WindowlessScheduleState.SwitchToPreviousColumn();
                     handled = true;
                 }
-                else if (key == KeyCode.LeftArrow)
+                // Column-dependent navigation
+                else if (WindowlessScheduleState.IsInAreasColumn)
                 {
-                    WindowlessScheduleState.MoveLeft();
-                    handled = true;
-                }
-                else if (key == KeyCode.RightArrow)
-                {
-                    if (shift)
+                    // AREAS COLUMN
+                    if (key == KeyCode.UpArrow && !shift)
                     {
-                        WindowlessScheduleState.FillRow();
+                        WindowlessScheduleState.MoveUp();
+                        handled = true;
                     }
-                    else
+                    else if (key == KeyCode.DownArrow && !shift)
+                    {
+                        WindowlessScheduleState.MoveDown();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow)
+                    {
+                        WindowlessScheduleState.SelectPreviousArea();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightArrow)
+                    {
+                        WindowlessScheduleState.SelectNextArea();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.UpArrow && shift)
+                    {
+                        WindowlessScheduleState.ApplyAreaToPawnAbove();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.DownArrow && shift)
+                    {
+                        WindowlessScheduleState.ApplyAreaToPawnBelow();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightBracket)
+                    {
+                        WindowlessScheduleState.OpenAreaContextMenu();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessScheduleState.JumpToFirstPawn();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessScheduleState.JumpToLastPawn();
+                        handled = true;
+                    }
+                }
+                else
+                {
+                    // SCHEDULE COLUMN (existing behavior)
+                    if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessScheduleState.MoveUp();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessScheduleState.MoveDown();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow)
+                    {
+                        WindowlessScheduleState.MoveLeft();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightArrow && !shift)
                     {
                         WindowlessScheduleState.MoveRight();
+                        handled = true;
                     }
-                    handled = true;
-                }
-                else if (key == KeyCode.Tab)
-                {
-                    if (shift)
+                    else if (key == KeyCode.RightArrow && shift)
                     {
-                        WindowlessScheduleState.CycleAssignmentBackward();
+                        WindowlessScheduleState.FillRow();
+                        handled = true;
                     }
-                    else
+                    else if (key == KeyCode.Tab && !ctrl && !shift)
                     {
                         WindowlessScheduleState.CycleAssignment();
+                        handled = true;
                     }
-                    handled = true;
+                    else if (key == KeyCode.Tab && !ctrl && shift)
+                    {
+                        WindowlessScheduleState.CycleAssignmentBackward();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Space)
+                    {
+                        WindowlessScheduleState.ApplyAssignment();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessScheduleState.JumpToFirstHour();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessScheduleState.JumpToLastHour();
+                        handled = true;
+                    }
                 }
-                else if (key == KeyCode.Space)
+
+                // Common keys for both columns
+                if (!handled)
                 {
-                    WindowlessScheduleState.ApplyAssignment();
-                    handled = true;
-                }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    // Confirm and close
-                    WindowlessScheduleState.Confirm();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    // Cancel and close
-                    WindowlessScheduleState.Cancel();
-                    handled = true;
-                }
-                else if (ctrl && key == KeyCode.C)
-                {
-                    WindowlessScheduleState.CopySchedule();
-                    handled = true;
-                }
-                else if (ctrl && key == KeyCode.V)
-                {
-                    WindowlessScheduleState.PasteSchedule();
-                    handled = true;
-                }
-                else if (key == KeyCode.Home)
-                {
-                    WindowlessScheduleState.JumpToFirstHour();
-                    handled = true;
-                }
-                else if (key == KeyCode.End)
-                {
-                    WindowlessScheduleState.JumpToLastHour();
-                    handled = true;
+                    if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        WindowlessScheduleState.Confirm();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Escape)
+                    {
+                        WindowlessScheduleState.Cancel();
+                        handled = true;
+                    }
+                    else if (ctrl && key == KeyCode.C)
+                    {
+                        WindowlessScheduleState.CopySchedule();
+                        handled = true;
+                    }
+                    else if (ctrl && key == KeyCode.V)
+                    {
+                        WindowlessScheduleState.PasteSchedule();
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -2464,6 +2631,18 @@ namespace RimWorldAccess
                 else if (key == KeyCode.Backspace)
                 {
                     AnimalsMenuState.HandleBackspace();
+                    handled = true;
+                }
+                // Handle Shift+Down - apply last area to next animal (only on Allowed Area column)
+                else if (key == KeyCode.DownArrow && Event.current.shift)
+                {
+                    AnimalsMenuState.ApplyLastAreaToNextAnimal();
+                    handled = true;
+                }
+                // Handle Shift+Up - apply last area to previous animal (only on Allowed Area column)
+                else if (key == KeyCode.UpArrow && Event.current.shift)
+                {
+                    AnimalsMenuState.ApplyLastAreaToPreviousAnimal();
                     handled = true;
                 }
                 // Handle Down arrow - navigate animals (use typeahead if active with matches)
