@@ -181,13 +181,37 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Enters the shape placement system with the given designator.
-        /// Determines the default shape and starts ShapePlacementState.
+        /// Determines the default shape based on RimWorld's "Remember Draw Styles" setting
+        /// and starts ShapePlacementState.
         /// </summary>
         /// <param name="designator">The designator to place with</param>
         private static void EnterPlacementWithDesignator(Designator designator)
         {
             var availableShapes = ShapeHelper.GetAvailableShapes(designator);
-            ShapeType defaultShape = availableShapes.Count > 0 ? availableShapes[0] : ShapeType.Manual;
+            ShapeType defaultShape = ShapeType.Manual;
+
+            // Read game's remembered/selected style (set by DesignatorManager.Select())
+            // This respects RimWorld's "Remember Draw Styles" setting automatically
+            var designatorManager = Find.DesignatorManager;
+            if (designatorManager?.SelectedStyle != null)
+            {
+                ShapeType rememberedShape = ShapeHelper.DrawStyleDefToShapeType(designatorManager.SelectedStyle);
+
+                // Use remembered shape if available for this designator
+                if (availableShapes.Contains(rememberedShape))
+                {
+                    defaultShape = rememberedShape;
+                }
+                else if (availableShapes.Count > 0)
+                {
+                    defaultShape = availableShapes[0];
+                }
+            }
+            else if (availableShapes.Count > 0)
+            {
+                defaultShape = availableShapes[0];
+            }
+
             ShapePlacementState.Enter(designator, defaultShape);
         }
     }

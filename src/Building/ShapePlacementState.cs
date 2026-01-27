@@ -191,6 +191,9 @@ namespace RimWorldAccess
             previewHelper.SetCurrentShape(shape);
             hasViewingModeOnStack = fromViewingMode;
 
+            // Sync shape selection to game's SelectedStyle for "Remember Draw Styles" setting
+            SyncShapeToGameStyle(designator, shape);
+
             // Store cursor position for zone expand/create decision
             // This ensures the zone selection matches what's announced on entry
             entryCursorPosition = MapNavigationState.CurrentCursorPosition;
@@ -906,6 +909,30 @@ namespace RimWorldAccess
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Syncs the mod's shape selection to the game's SelectedStyle.
+        /// This ensures RimWorld's "Remember Draw Styles" setting works correctly.
+        /// Setting SelectedStyle automatically updates the game's previouslySelected dictionary.
+        /// </summary>
+        private static void SyncShapeToGameStyle(Designator designator, ShapeType shape)
+        {
+            if (designator == null)
+                return;
+
+            var designatorManager = Find.DesignatorManager;
+            if (designatorManager == null)
+                return;
+
+            // Get the DrawStyleDef for this shape (null for Manual mode)
+            DrawStyleDef styleDef = ShapeHelper.GetDrawStyleDef(designator, shape);
+
+            // Setting SelectedStyle automatically updates the previouslySelected dictionary
+            if (styleDef != null)
+            {
+                designatorManager.SelectedStyle = styleDef;
+            }
+        }
 
         /// <summary>
         /// Gets the currently selected zone from Find.Selector.
