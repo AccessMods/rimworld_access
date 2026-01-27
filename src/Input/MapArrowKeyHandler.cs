@@ -231,11 +231,14 @@ namespace RimWorldAccess
                 if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells.Contains(position))
                 {
                     // Only label endpoints, not intermediate tiles
+                    // For second point, only announce if it's been confirmed (Previewing phase),
+                    // not while still being selected (SettingSecondCorner phase)
                     if (ShapePlacementState.FirstPoint.HasValue && position == ShapePlacementState.FirstPoint.Value)
                     {
                         return "First point, " + tileInfo;
                     }
-                    else if (ShapePlacementState.SecondPoint.HasValue && position == ShapePlacementState.SecondPoint.Value)
+                    else if (ShapePlacementState.CurrentPhase == PlacementPhase.Previewing &&
+                             ShapePlacementState.SecondPoint.HasValue && position == ShapePlacementState.SecondPoint.Value)
                     {
                         return "Second point, " + tileInfo;
                     }
