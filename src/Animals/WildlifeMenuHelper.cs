@@ -61,7 +61,7 @@ namespace RimWorldAccess
             ColumnType type = (ColumnType)columnIndex;
             switch (type)
             {
-                case ColumnType.Name: return GetAnimalName(pawn);
+                case ColumnType.Name: return GetAnimalNameWithActivity(pawn);
                 case ColumnType.Gender: return GetGender(pawn);
                 case ColumnType.LifeStage: return GetLifeStage(pawn);
                 case ColumnType.Age: return GetAge(pawn);
@@ -86,10 +86,39 @@ namespace RimWorldAccess
 
         // === Column Accessors ===
 
+        /// <summary>
+        /// Gets the basic animal name without activity (used for row labels).
+        /// </summary>
         public static string GetAnimalName(Pawn pawn)
         {
             // Wild animals typically don't have individual names, just species
-            string name = pawn.Name != null ? pawn.Name.ToStringShort : pawn.def.LabelCap.ToString();
+            return pawn.Name != null ? pawn.Name.ToStringShort : pawn.def.LabelCap.ToString();
+        }
+
+        /// <summary>
+        /// Gets the animal name with current activity (used for Name column value).
+        /// </summary>
+        public static string GetAnimalNameWithActivity(Pawn pawn)
+        {
+            string name = GetAnimalName(pawn);
+
+            // Add current activity if available
+            if (pawn.CurJob != null)
+            {
+                try
+                {
+                    string activity = pawn.CurJob.GetReport(pawn);
+                    if (!string.IsNullOrEmpty(activity))
+                    {
+                        return $"{name} - {activity}";
+                    }
+                }
+                catch
+                {
+                    // Job report can sometimes fail, just skip it
+                }
+            }
+
             return name;
         }
 
