@@ -7,12 +7,12 @@ namespace RimWorldAccess
     /// <summary>
     /// Manages zone renaming with text input.
     /// Allows typing a new zone name with Enter to confirm and Escape to cancel.
+    /// Uses TextInputHelper for shared text input logic.
     /// </summary>
     public static class ZoneRenameState
     {
         private static bool isActive = false;
         private static Zone currentZone = null;
-        private static string currentText = "";
         private static string originalName = "";
 
         public static bool IsActive => isActive;
@@ -30,10 +30,10 @@ namespace RimWorldAccess
 
             currentZone = zone;
             originalName = zone.label;
-            currentText = zone.label;
+            TextInputHelper.SetText("");  // Start empty
             isActive = true;
 
-            TolkHelper.Speak($"Renaming {originalName}. Current name: {currentText}. Type new name and press Enter to confirm, Escape to cancel.");
+            TolkHelper.Speak($"Renaming {originalName}. Type new name and press Enter, Escape to cancel.");
             Log.Message($"Opened rename dialog for zone: {originalName}");
         }
 
@@ -44,8 +44,8 @@ namespace RimWorldAccess
         {
             isActive = false;
             currentZone = null;
-            currentText = "";
             originalName = "";
+            TextInputHelper.Clear();
         }
 
         /// <summary>
@@ -56,11 +56,7 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
-            // Add character to current text
-            currentText += character;
-
-            // Announce the character
-            TolkHelper.Speak(character.ToString(), SpeechPriority.High);
+            TextInputHelper.HandleCharacter(character);
         }
 
         /// <summary>
@@ -68,16 +64,10 @@ namespace RimWorldAccess
         /// </summary>
         public static void HandleBackspace()
         {
-            if (!isActive || string.IsNullOrEmpty(currentText))
+            if (!isActive)
                 return;
 
-            // Remove last character
-            if (currentText.Length > 0)
-            {
-                char removed = currentText[currentText.Length - 1];
-                currentText = currentText.Substring(0, currentText.Length - 1);
-                TolkHelper.Speak($"Deleted {removed}", SpeechPriority.High);
-            }
+            TextInputHelper.HandleBackspace();
         }
 
         /// <summary>
@@ -88,14 +78,7 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
-            if (string.IsNullOrEmpty(currentText))
-            {
-                TolkHelper.Speak("Empty");
-            }
-            else
-            {
-                TolkHelper.Speak(currentText);
-            }
+            TextInputHelper.ReadCurrentText();
         }
 
         /// <summary>
@@ -106,8 +89,10 @@ namespace RimWorldAccess
             if (!isActive || currentZone == null)
                 return;
 
+            string newName = TextInputHelper.CurrentText;
+
             // Validate name
-            if (string.IsNullOrWhiteSpace(currentText))
+            if (string.IsNullOrWhiteSpace(newName))
             {
                 TolkHelper.Speak("Cannot set empty name. Enter a name or press Escape to cancel.", SpeechPriority.High);
                 return;
@@ -116,9 +101,9 @@ namespace RimWorldAccess
             try
             {
                 // Set the new name
-                currentZone.label = currentText;
-                TolkHelper.Speak($"Renamed to {currentText}", SpeechPriority.High);
-                Log.Message($"Renamed zone from '{originalName}' to '{currentText}'");
+                currentZone.label = newName;
+                TolkHelper.Speak($"Renamed to {newName}", SpeechPriority.High);
+                Log.Message($"Renamed zone from '{originalName}' to '{newName}'");
             }
             catch (Exception ex)
             {
@@ -139,8 +124,8 @@ namespace RimWorldAccess
             if (!isActive)
                 return;
 
-            TolkHelper.Speak("Cancelled rename");
-            Log.Message("Cancelled zone rename");
+            TolkHelper.Speak("Rename cancelled");
+            Log.Message("Zone rename cancelled");
             Close();
         }
     }

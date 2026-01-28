@@ -93,22 +93,26 @@ namespace RimWorldAccess
             typeahead.ClearSearch();
 
             // Collect all stored items
-            List<Thing> allItems = InventoryHelper.GetAllStoredItems();
+            List<Thing> allStoredItems = InventoryHelper.GetAllStoredItems();
 
-            if (allItems.Count == 0)
+            // Collect pawn-carried items
+            Dictionary<Thing, Pawn> pawnCarriedThings = InventoryHelper.GetAllPawnCarriedItems();
+            List<InventoryHelper.InventoryItem> pawnCarriedItems = InventoryHelper.AggregatePawnCarriedItems(pawnCarriedThings);
+
+            if (allStoredItems.Count == 0 && pawnCarriedItems.Count == 0)
             {
-                TolkHelper.Speak("Inventory menu opened. No items in colony storage.");
+                TolkHelper.Speak("Inventory menu opened. No items in colony storage or carried by pawns.");
                 rootNodes = new List<TreeNode>();
                 flattenedVisibleNodes = new List<TreeNode>();
                 SoundDefOf.TabOpen.PlayOneShotOnCamera();
                 return;
             }
 
-            // Aggregate items by type
-            Dictionary<ThingDef, InventoryHelper.InventoryItem> aggregatedItems = InventoryHelper.AggregateStacks(allItems);
+            // Aggregate storage items by type (now groups by ThingDef + Stuff + Quality)
+            List<InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
 
-            // Build category tree
-            List<InventoryHelper.CategoryNode> categoryTree = InventoryHelper.BuildCategoryTree(aggregatedItems);
+            // Build category tree (includes both storage and pawn-carried items)
+            List<InventoryHelper.CategoryNode> categoryTree = InventoryHelper.BuildCategoryTree(aggregatedStorageItems, pawnCarriedItems);
 
             // Convert to TreeNode structure
             rootNodes = BuildTreeNodes(categoryTree);
@@ -116,8 +120,17 @@ namespace RimWorldAccess
             // Flatten to get initially visible nodes
             RebuildFlattenedList();
 
-            // Announce opening
-            string announcement = $"Colony inventory opened. {aggregatedItems.Count} item types in storage. {rootNodes.Count} categories.";
+            // Announce opening with both storage and carried item counts
+            int totalItemTypes = aggregatedStorageItems.Count + pawnCarriedItems.Count;
+            string announcement;
+            if (pawnCarriedItems.Count > 0)
+            {
+                announcement = $"Colony inventory opened. {aggregatedStorageItems.Count} item types in storage, {pawnCarriedItems.Count} carried by pawns. {rootNodes.Count} categories.";
+            }
+            else
+            {
+                announcement = $"Colony inventory opened. {aggregatedStorageItems.Count} item types in storage. {rootNodes.Count} categories.";
+            }
             TolkHelper.Speak(announcement);
             SoundDefOf.TabOpen.PlayOneShotOnCamera();
 
@@ -186,37 +199,74 @@ namespace RimWorldAccess
         {
             List<TreeNode> actions = new List<TreeNode>();
 
-            // Action: Install at (FIRST for minified furniture)
-            if (item.IsMinifiedThing && item.Things.Count > 0)
+            if (item.IsCarried)
             {
-                TreeNode installAction = new TreeNode
+                // Actions for pawn-carried items
+                // NO "Install at" - must drop first to access gizmos (game parity)
+
+                // Action: Jump to pawn
+                TreeNode jumpToPawnAction = new TreeNode
                 {
                     Type = TreeNode.NodeType.Action,
-                    Label = "Install at",
+                    Label = "Jump to pawn (Alt+J)",
                     Depth = depth,
                     Parent = parent,
                     CanExpand = false,
-                    OnActivate = () => InstallItem(item)
+                    OnActivate = () => JumpToCarrier(item)
                 };
-                actions.Add(installAction);
-            }
+                actions.Add(jumpToPawnAction);
 
-            // Action: Jump to location
-            if (item.StorageLocations.Count > 0)
-            {
-                TreeNode jumpAction = new TreeNode
+                // Action: Drop item
+                if (item.Things.Count > 0)
                 {
-                    Type = TreeNode.NodeType.Action,
-                    Label = "Jump to location",
-                    Depth = depth,
-                    Parent = parent,
-                    CanExpand = false,
-                    OnActivate = () => JumpToItem(item)
-                };
-                actions.Add(jumpAction);
+                    TreeNode dropAction = new TreeNode
+                    {
+                        Type = TreeNode.NodeType.Action,
+                        Label = "Drop (Delete)",
+                        Depth = depth,
+                        Parent = parent,
+                        CanExpand = false,
+                        OnActivate = () => DropCarriedItem(item)
+                    };
+                    actions.Add(dropAction);
+                }
+            }
+            else
+            {
+                // Actions for storage items
+
+                // Action: Install at (FIRST for minified furniture)
+                if (item.IsMinifiedThing && item.Things.Count > 0)
+                {
+                    TreeNode installAction = new TreeNode
+                    {
+                        Type = TreeNode.NodeType.Action,
+                        Label = "Install at",
+                        Depth = depth,
+                        Parent = parent,
+                        CanExpand = false,
+                        OnActivate = () => InstallItem(item)
+                    };
+                    actions.Add(installAction);
+                }
+
+                // Action: Jump to location
+                if (item.StorageLocations.Count > 0)
+                {
+                    TreeNode jumpAction = new TreeNode
+                    {
+                        Type = TreeNode.NodeType.Action,
+                        Label = "Jump to location (Alt+J)",
+                        Depth = depth,
+                        Parent = parent,
+                        CanExpand = false,
+                        OnActivate = () => JumpToItem(item)
+                    };
+                    actions.Add(jumpAction);
+                }
             }
 
-            // Action: View details
+            // Action: View details (available for both carried and storage items)
             TreeNode detailsAction = new TreeNode
             {
                 Type = TreeNode.NodeType.Action,
@@ -399,12 +449,60 @@ namespace RimWorldAccess
                 return true;
             }
 
-            // Handle * key - expand all sibling categories (WCAG tree view pattern)
+            // Handle * key - expand all categories (except items) for quick searching
             bool isStar = key == KeyCode.KeypadMultiply || (ev.shift && key == KeyCode.Alpha8);
             if (isStar)
             {
-                ExpandAllSiblings();
+                ExpandAllCategories();
                 ev.Use();
+                return true;
+            }
+
+            // Delete key - drop carried item without closing menu (works on item node or action children)
+            if (key == KeyCode.Delete)
+            {
+                ev.Use();
+                InventoryHelper.InventoryItem item = GetCurrentOrParentItem();
+                if (item != null && item.IsCarried)
+                {
+                    TryDropItem(item);
+                }
+                else if (item != null && !item.IsCarried)
+                {
+                    TolkHelper.Speak("This item is in storage, not carried by a pawn.");
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                }
+                else
+                {
+                    TolkHelper.Speak("Select a carried item to drop.");
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                }
+                return true;
+            }
+
+            // Alt+J - Jump to item/pawn based on context (works on item node or action children)
+            if (ev.alt && key == KeyCode.J)
+            {
+                ev.Use();
+                InventoryHelper.InventoryItem item = GetCurrentOrParentItem();
+                if (item == null)
+                {
+                    TolkHelper.Speak("Select an item to jump to.");
+                    SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                    return true;
+                }
+
+                // Clear typeahead before jumping
+                typeahead.ClearSearch();
+
+                if (item.IsCarried)
+                {
+                    JumpToCarrier(item);  // Already closes inventory
+                }
+                else
+                {
+                    JumpToItem(item);     // Already closes inventory
+                }
                 return true;
             }
 
@@ -511,6 +609,28 @@ namespace RimWorldAccess
                 labels.Add(node.Label ?? "");
             }
             return labels;
+        }
+
+        /// <summary>
+        /// Gets the InventoryItem for the current selection, whether it's an Item node or an Action child.
+        /// Returns null if the selection is not related to an inventory item.
+        /// </summary>
+        private static InventoryHelper.InventoryItem GetCurrentOrParentItem()
+        {
+            if (flattenedVisibleNodes.Count == 0 || selectedIndex >= flattenedVisibleNodes.Count)
+                return null;
+
+            TreeNode current = flattenedVisibleNodes[selectedIndex];
+
+            // If on an Item node, return its ItemData
+            if (current.Type == TreeNode.NodeType.Item && current.ItemData != null)
+                return current.ItemData;
+
+            // If on an Action node, return parent's ItemData
+            if (current.Type == TreeNode.NodeType.Action && current.Parent?.ItemData != null)
+                return current.Parent.ItemData;
+
+            return null;
         }
 
         /// <summary>
@@ -646,31 +766,19 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Expands all sibling categories at the same level as the current item.
-        /// WCAG tree view pattern: * key expands all siblings.
+        /// Expands all category nodes in the entire tree recursively.
+        /// Does NOT expand item nodes (so their actions stay hidden).
+        /// This allows quick searching through the entire inventory.
         /// </summary>
-        public static void ExpandAllSiblings()
+        public static void ExpandAllCategories()
         {
-            if (flattenedVisibleNodes.Count == 0 || selectedIndex >= flattenedVisibleNodes.Count)
-                return;
-
-            TreeNode currentItem = flattenedVisibleNodes[selectedIndex];
-            TreeNode parent = currentItem.Parent; // null means root level
-
-            // Get siblings list (either from parent's children or root nodes)
-            List<TreeNode> siblings = parent != null ? parent.Children : rootNodes;
-
-            // Find all collapsed sibling nodes that can be expanded
-            int expandedCount = 0;
-            foreach (TreeNode sibling in siblings)
+            if (rootNodes.Count == 0)
             {
-                // Must be expandable and currently collapsed
-                if (sibling.CanExpand && !sibling.IsExpanded)
-                {
-                    sibling.IsExpanded = true;
-                    expandedCount++;
-                }
+                TolkHelper.Speak("No categories to expand.");
+                return;
             }
+
+            int expandedCount = ExpandCategoriesRecursively(rootNodes);
 
             if (expandedCount > 0)
             {
@@ -684,22 +792,36 @@ namespace RimWorldAccess
             }
             else
             {
-                // Check if there are any expandable sibling nodes at all
-                bool hasAnyExpandableSiblings = false;
-                foreach (TreeNode sibling in siblings)
+                TolkHelper.Speak("All categories already expanded");
+            }
+        }
+
+        /// <summary>
+        /// Recursively expands all category nodes but not item nodes.
+        /// Returns the count of newly expanded nodes.
+        /// </summary>
+        private static int ExpandCategoriesRecursively(List<TreeNode> nodes)
+        {
+            int expandedCount = 0;
+
+            foreach (TreeNode node in nodes)
+            {
+                // Only expand Category nodes, not Item nodes
+                // (Item nodes expand to show actions - we want those to stay collapsed)
+                if (node.Type == TreeNode.NodeType.Category && node.CanExpand && !node.IsExpanded)
                 {
-                    if (sibling.CanExpand)
-                    {
-                        hasAnyExpandableSiblings = true;
-                        break;
-                    }
+                    node.IsExpanded = true;
+                    expandedCount++;
                 }
 
-                if (hasAnyExpandableSiblings)
-                    TolkHelper.Speak("All categories already expanded at this level");
-                else
-                    TolkHelper.Speak("No categories to expand at this level");
+                // Recurse into children (whether currently visible or not)
+                if (node.Children.Count > 0)
+                {
+                    expandedCount += ExpandCategoriesRecursively(node.Children);
+                }
             }
+
+            return expandedCount;
         }
 
         /// <summary>
@@ -856,6 +978,272 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Jumps the camera and cursor to the carrier pawn
+        /// </summary>
+        private static void JumpToCarrier(InventoryHelper.InventoryItem item)
+        {
+            Pawn carrier = item.CarrierPawn;
+            if (carrier == null || carrier.Destroyed || carrier.Dead)
+            {
+                TolkHelper.Speak("Carrier pawn no longer available.");
+                return;
+            }
+
+            // Jump camera to carrier's position
+            if (Find.CameraDriver != null)
+            {
+                Find.CameraDriver.JumpToCurrentMapLoc(carrier.Position);
+            }
+
+            // Update map cursor if initialized
+            if (MapNavigationState.IsInitialized)
+            {
+                MapNavigationState.CurrentCursorPosition = carrier.Position;
+            }
+
+            TolkHelper.Speak($"Jumped to {carrier.LabelShort} at {carrier.Position}.");
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            // Close the inventory menu after jumping
+            Close();
+        }
+
+        /// <summary>
+        /// Drops a carried item from its carrier pawn
+        /// </summary>
+        private static void DropCarriedItem(InventoryHelper.InventoryItem item)
+        {
+            if (item.Things.Count == 0)
+            {
+                TolkHelper.Speak("No item to drop.");
+                return;
+            }
+
+            Thing thingToDrop = item.Things[0];
+            Pawn carrier = item.CarrierPawn;
+
+            if (carrier == null || carrier.Destroyed || carrier.Dead)
+            {
+                TolkHelper.Speak("Carrier pawn no longer available.");
+                return;
+            }
+
+            if (carrier.inventory?.innerContainer == null)
+            {
+                TolkHelper.Speak("Cannot access carrier's inventory.");
+                return;
+            }
+
+            // Drop the item near the pawn
+            if (carrier.inventory.innerContainer.TryDrop(thingToDrop, carrier.Position, carrier.Map, ThingPlaceMode.Near, out Thing droppedThing))
+            {
+                string carrierName = carrier.LabelShort;
+                int totalQuantity = item.TotalQuantity;
+
+                // Refresh the inventory to show updated state (don't close)
+                RefreshInventory();
+
+                TolkHelper.Speak($"Dropped {item.Def.LabelCap} x{totalQuantity} from {carrierName}.");
+                SoundDefOf.Click.PlayOneShotOnCamera();
+            }
+            else
+            {
+                TolkHelper.Speak($"Failed to drop {thingToDrop.LabelCap}.");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+            }
+        }
+
+        /// <summary>
+        /// Drops a carried item from its carrier pawn. Does not close the menu.
+        /// Returns true if the drop succeeded.
+        /// </summary>
+        private static bool TryDropItem(InventoryHelper.InventoryItem item)
+        {
+            if (item == null || item.Things.Count == 0)
+            {
+                TolkHelper.Speak("No item to drop.");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return false;
+            }
+
+            Thing thingToDrop = item.Things[0];
+            Pawn carrier = item.CarrierPawn;
+
+            if (carrier == null || carrier.Destroyed || carrier.Dead)
+            {
+                TolkHelper.Speak("Carrier pawn no longer available.");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return false;
+            }
+
+            if (carrier.inventory?.innerContainer == null)
+            {
+                TolkHelper.Speak("Cannot access carrier's inventory.");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return false;
+            }
+
+            // Drop the item near the pawn
+            if (carrier.inventory.innerContainer.TryDrop(thingToDrop, carrier.Position, carrier.Map, ThingPlaceMode.Near, out Thing droppedThing))
+            {
+                string carrierName = carrier.LabelShort;
+                int totalQuantity = item.TotalQuantity;
+
+                // Refresh the inventory to show updated state
+                RefreshInventory();
+
+                TolkHelper.Speak($"Dropped {item.Def.LabelCap} x{totalQuantity} from {carrierName}.");
+                SoundDefOf.Click.PlayOneShotOnCamera();
+                return true;
+            }
+            else
+            {
+                TolkHelper.Speak($"Failed to drop {thingToDrop.LabelCap}.");
+                SoundDefOf.ClickReject.PlayOneShotOnCamera();
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets a unique key for a node to track expansion state across refreshes.
+        /// </summary>
+        private static string GetNodeKey(TreeNode node)
+        {
+            // For categories, use the category def name (stable across refreshes)
+            if (node.Type == TreeNode.NodeType.Category && node.CategoryData != null)
+            {
+                // When CategoryDef is null, return a fixed key for "Uncategorized" category
+                if (node.CategoryData.CategoryDef == null)
+                    return "cat:uncategorized";
+                return "cat:" + node.CategoryData.CategoryDef.defName;
+            }
+            // For items, use the item def name, stuff, quality, and carrier info
+            if (node.Type == TreeNode.NodeType.Item && node.ItemData != null)
+            {
+                string key = "item:" + node.ItemData.Def.defName;
+                // Include stuff (material) in key
+                if (node.ItemData.Stuff != null)
+                {
+                    key += ":" + node.ItemData.Stuff.defName;
+                }
+                // Include quality in key
+                if (node.ItemData.Quality.HasValue)
+                {
+                    key += ":" + node.ItemData.Quality.Value.ToString();
+                }
+                // Include carrier for carried items
+                if (node.ItemData.IsCarried && node.ItemData.CarrierPawn != null)
+                {
+                    key += ":carried:" + node.ItemData.CarrierPawn.ThingID;
+                }
+                return key;
+            }
+            // Fallback to label
+            return node.Label;
+        }
+
+        /// <summary>
+        /// Saves the expansion state of all nodes in the tree.
+        /// </summary>
+        private static void SaveExpansionState(List<TreeNode> nodes, Dictionary<string, bool> state)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                string key = GetNodeKey(node);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    state[key] = node.IsExpanded;
+                }
+                if (node.Children.Count > 0)
+                {
+                    SaveExpansionState(node.Children, state);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Restores the expansion state of nodes from a previously saved state.
+        /// </summary>
+        private static void RestoreExpansionState(List<TreeNode> nodes, Dictionary<string, bool> state)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                string key = GetNodeKey(node);
+                if (!string.IsNullOrEmpty(key) && state.TryGetValue(key, out bool wasExpanded))
+                {
+                    node.IsExpanded = wasExpanded;
+                }
+                if (node.Children.Count > 0)
+                {
+                    RestoreExpansionState(node.Children, state);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tries to restore cursor position to the old label, or clamps to valid range.
+        /// </summary>
+        private static void RestoreCursorPosition(string oldLabel)
+        {
+            if (string.IsNullOrEmpty(oldLabel) || flattenedVisibleNodes.Count == 0)
+            {
+                selectedIndex = 0;
+                return;
+            }
+
+            // Try to find exact match
+            for (int i = 0; i < flattenedVisibleNodes.Count; i++)
+            {
+                if (flattenedVisibleNodes[i].Label == oldLabel)
+                {
+                    selectedIndex = i;
+                    return;
+                }
+            }
+
+            // If not found (item was dropped), stay at current index or clamp
+            if (selectedIndex >= flattenedVisibleNodes.Count)
+            {
+                selectedIndex = Math.Max(0, flattenedVisibleNodes.Count - 1);
+            }
+        }
+
+        /// <summary>
+        /// Refreshes the inventory menu without closing it.
+        /// Preserves expansion state and selection position.
+        /// </summary>
+        private static void RefreshInventory()
+        {
+            // Save current expansion state by category/item key
+            Dictionary<string, bool> expansionState = new Dictionary<string, bool>();
+            SaveExpansionState(rootNodes, expansionState);
+
+            // Save current selection label for repositioning
+            string oldLabel = (selectedIndex < flattenedVisibleNodes.Count)
+                ? flattenedVisibleNodes[selectedIndex].Label : null;
+
+            // Recollect all items
+            List<Thing> allStoredItems = InventoryHelper.GetAllStoredItems();
+            Dictionary<Thing, Pawn> pawnCarriedThings = InventoryHelper.GetAllPawnCarriedItems();
+            List<InventoryHelper.InventoryItem> pawnCarriedItems = InventoryHelper.AggregatePawnCarriedItems(pawnCarriedThings);
+
+            // Aggregate and rebuild tree (groups by ThingDef + Stuff + Quality)
+            List<InventoryHelper.InventoryItem> aggregatedStorageItems = InventoryHelper.AggregateStacks(allStoredItems);
+            List<InventoryHelper.CategoryNode> categoryTree = InventoryHelper.BuildCategoryTree(aggregatedStorageItems, pawnCarriedItems);
+            rootNodes = BuildTreeNodes(categoryTree);
+
+            // Restore expansion state before flattening
+            RestoreExpansionState(rootNodes, expansionState);
+            RebuildFlattenedList();
+
+            // Clear typeahead since nodes changed (fixes lockup bug)
+            typeahead.ClearSearch();
+
+            // Restore cursor position to old selection or clamp
+            RestoreCursorPosition(oldLabel);
+        }
+
+        /// <summary>
         /// Views detailed information about an item
         /// </summary>
         private static void ViewItemDetails(InventoryHelper.InventoryItem item)
@@ -883,7 +1271,15 @@ namespace RimWorldAccess
                 details.Add($"Mass: {def.statBases.GetStatValueFromList(StatDefOf.Mass, 0):F2} kg");
             }
 
-            details.Add($"Storage locations: {item.StorageLocations.Count}");
+            // Show carrier info or storage location info
+            if (item.IsCarried && item.CarrierPawn != null)
+            {
+                details.Add($"Carried by: {item.CarrierPawn.LabelShort}");
+            }
+            else
+            {
+                details.Add($"Storage locations: {item.StorageLocations.Count}");
+            }
 
             string announcement = string.Join(". ", details);
             TolkHelper.Speak(announcement);

@@ -1083,6 +1083,27 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Shows gear info for the selected pawn (Alt+G).
+        /// </summary>
+        private static void ShowPawnGear()
+        {
+            if (visibleNodes.Count == 0 || selectedIndex < 0 || selectedIndex >= visibleNodes.Count)
+                return;
+
+            var node = visibleNodes[selectedIndex];
+
+            if (node.Data is Pawn pawn)
+            {
+                string gearInfo = PawnInfoHelper.GetGearInfo(pawn);
+                TolkHelper.Speak(gearInfo);
+            }
+            else
+            {
+                TolkHelper.Speak("No gear info available for this item");
+            }
+        }
+
         #endregion
 
         #region Navigation
@@ -1626,6 +1647,13 @@ namespace RimWorldAccess
             if (key == KeyCode.H && alt && !shift && !ctrl)
             {
                 ShowPawnHealth();
+                return true;
+            }
+
+            // Alt+G: Gear
+            if (key == KeyCode.G && alt && !shift && !ctrl)
+            {
+                ShowPawnGear();
                 return true;
             }
 

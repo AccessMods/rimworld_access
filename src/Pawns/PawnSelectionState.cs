@@ -15,6 +15,12 @@ namespace RimWorldAccess
         private static int currentSelectedIndex = -1;
         private static Pawn lastSelectedPawn = null;
 
+        /// <summary>
+        /// Gets the last pawn selected via comma/period cycling.
+        /// Returns null if no pawn has been selected via cycling.
+        /// </summary>
+        public static Pawn LastSelectedPawn => lastSelectedPawn;
+
         // Track the last selected pawn per map (using map unique ID as key)
         private static Dictionary<int, Pawn> lastSelectedPawnPerMap = new Dictionary<int, Pawn>();
 

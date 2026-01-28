@@ -183,6 +183,14 @@ namespace RimWorldAccess
             {
                 button.Action?.Invoke();
 
+                // CRITICAL: Check if the action closed our state (e.g., opened another dialog
+                // like Dialog_NamePawn which closes NotificationMenuState in its Open())
+                if (!isActive)
+                {
+                    // State was closed by the action - don't do any post-action processing
+                    return;
+                }
+
                 // After executing action, refresh notifications (button may have removed the letter)
                 notifications = CollectNotifications();
 

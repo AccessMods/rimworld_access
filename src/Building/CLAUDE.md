@@ -1,30 +1,85 @@
 # Building Module
 
-## Purpose
-Construction, architect menu, zones, and areas management.
+Construction, zones, areas, and shape-based multi-cell placement.
 
-## Files
-**Patches:** ArchitectMenuPatch.cs, ArchitectPlacementPatch.cs, ZoneMenuPatch.cs, ZoneCreationPatch.cs, AreaPatch.cs, ForbidTogglePatch.cs
-**States:** ArchitectState.cs, ZoneCreationState.cs, ZoneRenameState.cs, ZoneSettingsMenuState.cs, AreaPaintingState.cs, WindowlessAreaState.cs, PlantSelectionMenuState.cs, (plus 8 component states)
-**Helpers:** ArchitectHelper.cs, BuildingComponentsHelper.cs
+## File Groups
 
-## Key Shortcuts
-- **A** - Open architect menu
-- **Arrow Keys** - Navigate menu, placement cursor
-- **Space** - Place building / Toggle zone cell
-- **Shift+Space** - Cancel blueprint
-- **R** - Rotate building
-- **Enter** - Confirm / Exit placement
+**Architect Menu** - `ArchitectState.cs`, `ArchitectTreeState.cs`, `ArchitectHelper.cs`, `ArchitectMenuPatch.cs`, `ArchitectPlacementPatch.cs`
+Category/tool selection with treeview navigation. ArchitectState tracks mode (Category/Tool/Material/Placement).
+
+**Shape Placement** - `ShapePlacementState.cs`, `ShapeHelper.cs`, `ShapePreviewHelper.cs`, `ShapeSelectionMenuState.cs`
+Two-point placement workflow (Line, Rectangle, Oval). ShapeHelper wraps RimWorld's DrawStyle classes.
+
+**Zones** - `ZoneCreationState.cs`, `ZoneCreationPatch.cs`, `ZoneUndoTracker.cs`, `ZoneRenameState.cs`
+Zone create/expand/shrink with undo. Uses ShapePreviewHelper for shape selection.
+
+**Areas** - `AreaPatch.cs`, `AreaPaintingState.cs`, `WindowlessAreaState.cs`
+Allowed areas and home zone management.
+
+**Analysis** - `ObstacleDetector.cs`, `EnclosureDetector.cs`
+Find obstacles blocking placement; detect rooms formed by blueprints.
+
+**Post-Placement** - `ViewingModeState.cs`, `SelectionPreviewPatch.cs`
+Review results, undo segments, navigate obstacles via ScannerState.
+
+**Building Controls** - `BuildingComponentsHelper.cs`, `*ComponentState.cs`, `*ControlState.cs`
+Toggle flickable/refuel/door/forbid settings on buildings.
+
+**Storage Linking** - `ShelfLinkingState.cs`, `ShelfLinkingPatch.cs`, `ShelfLinkingHelper.cs`, `ShelfLinkingConfirmDialog.cs`
+Link storage buildings (shelves, bookcases) together without mouse-based multi-select. Two gizmos: "Link all in room" and "Link storage manually".
+
+## Key Entry Point
+
+`DesignatorManagerPatch.Postfix` intercepts ALL designator selections and routes to ShapePlacementState.
+
+## Designator Type Checking
+
+Use ShapeHelper methods (not manual type checks):
+- `IsBuildDesignator()` - Designator_Build
+- `IsZoneDesignator()` - Zone hierarchy
+- `IsCellsDesignator()` - Mine, etc.
+- `IsDeleteDesignator()` - Zone shrink
+- `IsOrderDesignator()` - Hunt, Haul, Tame
+
+## Two-Point Selection Pattern
+
+```csharp
+var previewHelper = new ShapePreviewHelper();
+previewHelper.SetCurrentShape(ShapeType.FilledRectangle);
+previewHelper.SetFirstCorner(cell, "[Context]");
+previewHelper.UpdatePreview(cursor);  // plays sound on count change
+previewHelper.SetSecondCorner(cell, "[Context]");
+var cells = previewHelper.PreviewCells;
+```
+
+## Zone Undo Pattern
+
+```csharp
+ZoneUndoTracker.CaptureBeforeState(zone, map, isShrink);
+designator.DesignateMultiCell(cells);
+ZoneUndoTracker.CaptureAfterState(map);
+ZoneUndoTracker.AddSegment();
+```
+
+## Storage Linking
+
+Accessible gizmos for linking storage buildings without mouse-based multi-select.
+
+### Keyboard Shortcuts (Manual Selection Mode)
+- **Arrow Keys** - Navigate map cursor
+- **Space** - Toggle storage selection at cursor
+- **Enter** - Confirm and link all selected storage
+- **Escape** - Cancel selection mode
+
+### Gizmos Added to Building_Storage
+1. **Link all in room (X shelves, Y bookcases)** - Only on storage in enclosed rooms. Links all compatible storage in the room.
+2. **Link storage manually** - Always available. Enter selection mode to manually choose storage to link.
+
+### Confirmation Dialog
+When linking storage that's already in a different group, a confirmation dialog appears:
+- **Enter** - Confirm and move items to this group
 - **Escape** - Cancel
 
-## Architecture
-ArchitectState uses enum modes: CategorySelection → ToolSelection → MaterialSelection → PlacementMode. Zone creation integrates with map cursor.
-
-## Dependencies
-**Requires:** ScreenReader/, Input/, Map/ (cursor position)
-
-## Testing
-- [ ] Architect menu navigates correctly
-- [ ] Building placement works
-- [ ] Zone creation functional
-- [ ] Area management accessible
+### Priority in UnifiedKeyboardPatch
+- 0.26: ShelfLinkingConfirmDialog
+- 0.27: ShelfLinkingState

@@ -12,90 +12,14 @@ namespace RimWorldAccess
     public static class AreaPatch
     {
         /// <summary>
-        /// Prefix patch that intercepts keyboard events when area manager is active.
+        /// Prefix patch - input handling moved to UnifiedKeyboardPatch.
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPriority(Priority.First)]
         public static void Prefix()
         {
-            // Only process if area manager is active
-            if (!WindowlessAreaState.IsActive)
-                return;
-
-            // Only process keyboard events
-            if (Event.current.type != EventType.KeyDown)
-                return;
-
-            bool handled = false;
-            KeyCode key = Event.current.keyCode;
-
-            // Handle navigation based on current mode
-            var mode = WindowlessAreaState.CurrentMode;
-
-            if (mode == WindowlessAreaState.NavigationMode.AreaList)
-            {
-                // Area list mode
-                if (key == KeyCode.UpArrow)
-                {
-                    WindowlessAreaState.SelectPreviousArea();
-                    handled = true;
-                }
-                else if (key == KeyCode.DownArrow)
-                {
-                    WindowlessAreaState.SelectNextArea();
-                    handled = true;
-                }
-                else if (key == KeyCode.Tab && !Event.current.shift)
-                {
-                    WindowlessAreaState.EnterActionsMode();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    WindowlessAreaState.Close();
-                    handled = true;
-                }
-            }
-            else if (mode == WindowlessAreaState.NavigationMode.AreaActions)
-            {
-                // Actions menu mode
-                if (key == KeyCode.UpArrow)
-                {
-                    WindowlessAreaState.SelectPreviousAction();
-                    handled = true;
-                }
-                else if (key == KeyCode.DownArrow)
-                {
-                    WindowlessAreaState.SelectNextAction();
-                    handled = true;
-                }
-                else if (key == KeyCode.Tab && !Event.current.shift)
-                {
-                    WindowlessAreaState.SelectNextAction();
-                    handled = true;
-                }
-                else if (key == KeyCode.Tab && Event.current.shift)
-                {
-                    WindowlessAreaState.SelectPreviousAction();
-                    handled = true;
-                }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    WindowlessAreaState.ExecuteAction();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    WindowlessAreaState.ReturnToAreaList();
-                    handled = true;
-                }
-            }
-
-            // Consume the event if we handled it
-            if (handled)
-            {
-                Event.current.Use();
-            }
+            // Input handling moved to UnifiedKeyboardPatch (Priority 2.4)
+            // This prefix is kept as a no-op to maintain Harmony patch registration
         }
 
         /// <summary>

@@ -289,6 +289,46 @@ namespace RimWorldAccess
         {
             KeyCode key = Event.current.keyCode;
 
+            // Handle numeric input mode first
+            if (BillConfigState.IsNumericInputMode)
+            {
+                if (key == KeyCode.Escape)
+                {
+                    BillConfigState.CancelNumericInput();
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    BillConfigState.ConfirmNumericInput();
+                    Event.current.Use();
+                    return;
+                }
+                if (key == KeyCode.Backspace)
+                {
+                    BillConfigState.HandleNumericBackspace();
+                    Event.current.Use();
+                    return;
+                }
+                // Handle digit keys using keyCode (more reliable than character)
+                if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9)
+                {
+                    char c = (char)('0' + (key - KeyCode.Alpha0));
+                    BillConfigState.HandleNumericDigit(c);
+                    Event.current.Use();
+                    return;
+                }
+                if (key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9)
+                {
+                    char c = (char)('0' + (key - KeyCode.Keypad0));
+                    BillConfigState.HandleNumericDigit(c);
+                    Event.current.Use();
+                    return;
+                }
+                // Ignore other keys in numeric mode
+                return;
+            }
+
             // Handle Escape - clear search FIRST, then close
             if (key == KeyCode.Escape)
             {
@@ -325,6 +365,61 @@ namespace RimWorldAccess
                 {
                     TolkHelper.Speak($"No matches for '{BillConfigState.GetLastFailedSearch()}'");
                 }
+                Event.current.Use();
+                return;
+            }
+
+            bool shift = Event.current.shift;
+            bool ctrl = Event.current.control;
+
+            // Modifier key adjustments
+            if (key == KeyCode.UpArrow && shift && !ctrl)
+            {
+                BillConfigState.AdjustValue(1, 10);  // Shift+Up = +10
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.DownArrow && shift && !ctrl)
+            {
+                BillConfigState.AdjustValue(-1, 10); // Shift+Down = -10
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.UpArrow && ctrl && !shift)
+            {
+                BillConfigState.AdjustValue(1, 100); // Ctrl+Up = +100
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.DownArrow && ctrl && !shift)
+            {
+                BillConfigState.AdjustValue(-1, 100); // Ctrl+Down = -100
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.UpArrow && shift && ctrl)
+            {
+                BillConfigState.AdjustValue(1, 1000); // Shift+Ctrl+Up = +1000
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.DownArrow && shift && ctrl)
+            {
+                BillConfigState.AdjustValue(-1, 1000); // Shift+Ctrl+Down = -1000
+                Event.current.Use();
+                return;
+            }
+
+            // Min/Max jumps
+            if (key == KeyCode.Home && shift)
+            {
+                BillConfigState.JumpToMax();
+                Event.current.Use();
+                return;
+            }
+            if (key == KeyCode.End && shift)
+            {
+                BillConfigState.JumpToMin();
                 Event.current.Use();
                 return;
             }
@@ -383,7 +478,7 @@ namespace RimWorldAccess
 
                 case KeyCode.Return:
                 case KeyCode.KeypadEnter:
-                    BillConfigState.ExecuteSelected();
+                    BillConfigState.StartNumericInput();
                     Event.current.Use();
                     break;
             }

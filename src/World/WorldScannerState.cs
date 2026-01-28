@@ -16,14 +16,78 @@ namespace RimWorldAccess
     {
         public PlanetTile CenterTile { get; set; }
         public int TileCount { get; set; }
-        public string SizeDescription { get; set; } // e.g., "approximately 75 tiles"
+        public string SizeDescription { get; set; } // e.g., "approximately 75 tiles, 8 across"
         public float Distance { get; set; } // Distance from cursor to center
+        public float Span { get; set; } // Maximum distance across the region
 
         public BiomeRegion(PlanetTile centerTile, int tileCount)
         {
             CenterTile = centerTile;
             TileCount = tileCount;
             SizeDescription = $"approximately {tileCount} tiles";
+        }
+
+        /// <summary>
+        /// Constructor that calculates span from all region tiles.
+        /// </summary>
+        public BiomeRegion(PlanetTile centerTile, HashSet<int> regionTiles)
+        {
+            CenterTile = centerTile;
+            TileCount = regionTiles.Count;
+
+            // Calculate span (maximum distance between any two tiles)
+            Span = CalculateSpan(regionTiles);
+
+            // Build size description with span if meaningful
+            if (Span >= 3)
+            {
+                SizeDescription = $"approximately {TileCount} tiles, {Span:F0} across";
+            }
+            else
+            {
+                SizeDescription = $"approximately {TileCount} tiles";
+            }
+        }
+
+        /// <summary>
+        /// Calculates the maximum distance across the region (span).
+        /// Uses a sample of tiles for performance with large regions.
+        /// </summary>
+        private static float CalculateSpan(HashSet<int> regionTiles)
+        {
+            if (regionTiles.Count <= 1 || Find.WorldGrid == null)
+                return 0f;
+
+            // For small regions, check all pairs
+            // For large regions, sample boundary tiles
+            var tilesToCheck = regionTiles.ToList();
+            if (tilesToCheck.Count > 50)
+            {
+                // Sample: take first, last, and some distributed tiles
+                var sampled = new List<int>();
+                sampled.Add(tilesToCheck[0]);
+                sampled.Add(tilesToCheck[tilesToCheck.Count - 1]);
+                for (int i = 0; i < tilesToCheck.Count; i += tilesToCheck.Count / 10)
+                {
+                    sampled.Add(tilesToCheck[i]);
+                }
+                tilesToCheck = sampled.Distinct().ToList();
+            }
+
+            float maxDist = 0f;
+            for (int i = 0; i < tilesToCheck.Count; i++)
+            {
+                for (int j = i + 1; j < tilesToCheck.Count; j++)
+                {
+                    var tileA = new PlanetTile(tilesToCheck[i]);
+                    var tileB = new PlanetTile(tilesToCheck[j]);
+                    float dist = Find.WorldGrid.ApproxDistanceInTiles(tileA, tileB);
+                    if (dist > maxDist)
+                        maxDist = dist;
+                }
+            }
+
+            return maxDist;
         }
     }
 
@@ -35,11 +99,76 @@ namespace RimWorldAccess
         public PlanetTile CenterTile { get; set; }
         public int TileCount { get; set; }
         public float Distance { get; set; }
+        public float Length { get; set; } // Maximum extent of the road segment
+        public string SizeDescription { get; set; }
 
         public RoadSegment(PlanetTile centerTile, int tileCount)
         {
             CenterTile = centerTile;
             TileCount = tileCount;
+            SizeDescription = $"{tileCount} tiles";
+        }
+
+        /// <summary>
+        /// Constructor that calculates length from all segment tiles.
+        /// </summary>
+        public RoadSegment(PlanetTile centerTile, HashSet<int> segmentTiles)
+        {
+            CenterTile = centerTile;
+            TileCount = segmentTiles.Count;
+            Length = CalculateLength(segmentTiles);
+
+            // For roads, show length if meaningful
+            if (Length >= 3)
+            {
+                SizeDescription = $"{TileCount} tiles, {Length:F0} long";
+            }
+            else
+            {
+                SizeDescription = $"{TileCount} tiles";
+            }
+        }
+
+        /// <summary>
+        /// Calculates the maximum extent of the road segment (its length).
+        /// </summary>
+        private static float CalculateLength(HashSet<int> segmentTiles)
+        {
+            if (segmentTiles.Count <= 1 || Find.WorldGrid == null)
+                return 0f;
+
+            // For roads, find the endpoints (tiles with fewest neighbors in the segment)
+            // and calculate distance between them
+            var tilesList = segmentTiles.ToList();
+            float maxDist = 0f;
+
+            // Sample tiles for performance
+            var tilesToCheck = tilesList;
+            if (tilesList.Count > 30)
+            {
+                var sampled = new List<int>();
+                sampled.Add(tilesList[0]);
+                sampled.Add(tilesList[tilesList.Count - 1]);
+                for (int i = 0; i < tilesList.Count; i += tilesList.Count / 8)
+                {
+                    sampled.Add(tilesList[i]);
+                }
+                tilesToCheck = sampled.Distinct().ToList();
+            }
+
+            for (int i = 0; i < tilesToCheck.Count; i++)
+            {
+                for (int j = i + 1; j < tilesToCheck.Count; j++)
+                {
+                    var tileA = new PlanetTile(tilesToCheck[i]);
+                    var tileB = new PlanetTile(tilesToCheck[j]);
+                    float dist = Find.WorldGrid.ApproxDistanceInTiles(tileA, tileB);
+                    if (dist > maxDist)
+                        maxDist = dist;
+                }
+            }
+
+            return maxDist;
         }
     }
 
@@ -249,6 +378,15 @@ namespace RimWorldAccess
         private static Dictionary<string, List<RoadSegment>> cachedRoadSegments = null;
         private static PlanetTile lastCacheOrigin = PlanetTile.Invalid;
 
+        // Saved focus state for temporary category operations
+        private static int savedCategoryIndex = -1;
+        private static int savedSubcategoryIndex = -1;
+        private static int savedItemIndex = -1;
+        private static int savedInstanceIndex = -1;
+
+        // Temporary category tracking
+        private static WorldScannerCategory temporaryCategory = null;
+
         /// <summary>
         /// Toggles auto-jump mode on/off.
         /// </summary>
@@ -257,6 +395,91 @@ namespace RimWorldAccess
             autoJumpMode = !autoJumpMode;
             string status = autoJumpMode ? "enabled" : "disabled";
             TolkHelper.Speak($"Auto-jump mode {status}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Saves the current scanner focus state for later restoration.
+        /// Used when temporarily switching to a search category.
+        /// </summary>
+        public static void SaveFocus()
+        {
+            savedCategoryIndex = currentCategoryIndex;
+            savedSubcategoryIndex = currentSubcategoryIndex;
+            savedItemIndex = currentItemIndex;
+            savedInstanceIndex = currentInstanceIndex;
+        }
+
+        /// <summary>
+        /// Restores the previously saved scanner focus state.
+        /// Call this after removing a temporary category to return to the previous position.
+        /// </summary>
+        public static void RestoreFocus()
+        {
+            if (savedCategoryIndex >= 0)
+            {
+                currentCategoryIndex = savedCategoryIndex;
+                currentSubcategoryIndex = savedSubcategoryIndex;
+                currentItemIndex = savedItemIndex;
+                currentInstanceIndex = savedInstanceIndex;
+
+                // Reset saved state
+                savedCategoryIndex = -1;
+                savedSubcategoryIndex = -1;
+                savedItemIndex = -1;
+                savedInstanceIndex = -1;
+
+                // Validate indices in case the category list changed
+                ValidateIndices();
+            }
+        }
+
+        /// <summary>
+        /// Creates a temporary category with the given name and items, and selects it.
+        /// Only one temporary category can exist at a time.
+        /// </summary>
+        /// <param name="name">The name for the temporary category</param>
+        /// <param name="items">The items to include in the category</param>
+        public static void CreateTemporaryCategory(string name, List<WorldScannerItem> items)
+        {
+            // Remove any existing temporary category first
+            RemoveTemporaryCategory();
+
+            // Create the new temporary category with a single subcategory
+            temporaryCategory = new WorldScannerCategory(name);
+            var subcategory = new WorldScannerSubcategory($"{name}-All");
+            subcategory.Items.AddRange(items);
+            temporaryCategory.Subcategories.Add(subcategory);
+
+            // Add to the categories list
+            categories.Add(temporaryCategory);
+
+            // Select the temporary category
+            currentCategoryIndex = categories.Count - 1;
+            currentSubcategoryIndex = 0;
+            currentItemIndex = 0;
+            currentInstanceIndex = 0;
+        }
+
+        /// <summary>
+        /// Removes the temporary category if one exists.
+        /// Call RestoreFocus() after this to return to the previous scanner position.
+        /// </summary>
+        public static void RemoveTemporaryCategory()
+        {
+            if (temporaryCategory != null)
+            {
+                categories.Remove(temporaryCategory);
+                temporaryCategory = null;
+            }
+        }
+
+        /// <summary>
+        /// Checks if the scanner is currently focused on a temporary category.
+        /// </summary>
+        public static bool IsInTemporaryCategory()
+        {
+            return temporaryCategory != null && currentCategoryIndex >= 0 && currentCategoryIndex < categories.Count &&
+                   categories[currentCategoryIndex] == temporaryCategory;
         }
 
         /// <summary>
@@ -759,7 +982,8 @@ namespace RimWorldAccess
                     {
                         // Find center tile (closest to centroid)
                         PlanetTile centerTile = FindRegionCenter(regionTiles);
-                        var region = new BiomeRegion(centerTile, regionTiles.Count);
+                        // Use the constructor that calculates span
+                        var region = new BiomeRegion(centerTile, regionTiles);
                         regions.Add(region);
                     }
 
@@ -896,7 +1120,8 @@ namespace RimWorldAccess
                     if (segmentTiles.Count > 0)
                     {
                         PlanetTile centerTile = FindRegionCenter(segmentTiles);
-                        var segment = new RoadSegment(centerTile, segmentTiles.Count);
+                        // Use the constructor that calculates length
+                        var segment = new RoadSegment(centerTile, segmentTiles);
                         segments.Add(segment);
                     }
 
@@ -1450,7 +1675,7 @@ namespace RimWorldAccess
                 if (item.BiomeRegions != null)
                     parts.Add($"{item.BiomeRegions[0].SizeDescription}");
                 else if (item.RoadSegments != null)
-                    parts.Add($"{item.RoadSegments[0].TileCount} tiles");
+                    parts.Add($"{item.RoadSegments[0].SizeDescription}");
 
                 parts.Add($"{item.InstanceCount} regions");
             }
@@ -1519,7 +1744,7 @@ namespace RimWorldAccess
             else if (item.RoadSegments != null && currentInstanceIndex < item.RoadSegments.Count)
             {
                 var segment = item.RoadSegments[currentInstanceIndex];
-                parts.Add($"{segment.TileCount} tiles");
+                parts.Add(segment.SizeDescription);
             }
 
             if (!string.IsNullOrEmpty(direction) && distance > 0.1f)
@@ -1557,6 +1782,14 @@ namespace RimWorldAccess
             cachedBiomeRegions = null;
             cachedRoadSegments = null;
             lastCacheOrigin = PlanetTile.Invalid;
+            temporaryCategory = null;
+            savedCategoryIndex = -1;
+            savedSubcategoryIndex = -1;
+            savedItemIndex = -1;
+            savedInstanceIndex = -1;
+
+            // Clear any active search
+            ScannerSearchState.ClearSearchSilent();
         }
     }
 }

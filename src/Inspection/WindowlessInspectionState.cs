@@ -25,6 +25,7 @@ namespace RimWorldAccess
         private static IntVec3 inspectionPosition;
         private static object parentObject = null; // Track parent object for navigation back
         private static Dictionary<InspectionTreeItem, InspectionTreeItem> lastChildPerParent = new Dictionary<InspectionTreeItem, InspectionTreeItem>();
+        private static List<object> previousSelection = new List<object>();
 
         /// <summary>
         /// Opens the inspection menu for the specified position.
@@ -44,6 +45,10 @@ namespace RimWorldAccess
                     SoundDefOf.ClickReject.PlayOneShotOnCamera();
                     return;
                 }
+
+                // Save current selection to restore on close
+                previousSelection.Clear();
+                previousSelection.AddRange(Find.Selector.SelectedObjects.Cast<object>());
 
                 // Select the first object so that tab visibility checks work correctly
                 // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
@@ -128,6 +133,10 @@ namespace RimWorldAccess
 
                 // Store parent for navigation back
                 parentObject = parent;
+
+                // Save current selection to restore on close
+                previousSelection.Clear();
+                previousSelection.AddRange(Find.Selector.SelectedObjects.Cast<object>());
 
                 // Select the object so that tab visibility checks work correctly
                 // (tabs use Find.Selector.SingleSelectedThing for SelPawn/SelThing)
@@ -248,6 +257,20 @@ namespace RimWorldAccess
             selectedIndex = 0;
             parentObject = null;
             typeahead.ClearSearch();
+
+            // Restore previous selection
+            if (previousSelection.Count > 0)
+            {
+                Find.Selector.ClearSelection();
+                foreach (var obj in previousSelection)
+                {
+                    if (obj is Thing thing && thing.Spawned)
+                    {
+                        Find.Selector.Select(thing, playSound: false, forceDesignatorDeselect: false);
+                    }
+                }
+                previousSelection.Clear();
+            }
         }
 
         /// <summary>

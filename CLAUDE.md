@@ -184,6 +184,21 @@ Core/rimworld_access.cs (entry point)
 **By screen reader announcement:** Search for `TolkHelper.Speak()` calls
 **RimWorld's decompiled code**: A decompiled copy of RimWorld is located at `./decompiled`. Search this code before making changes that require integration with the game's methods.  
 
+## Building Menus and TreeViews
+
+**See [`src/docs/menu-treeview.md`](src/docs/menu-treeview.md) for complete templates and reference.**
+
+All menus and treeviews must use:
+- `MenuHelper` for navigation (respects WrapNavigation, AnnouncePosition settings)
+- `TypeaheadSearchHelper` for search functionality
+- Standard keyboard patterns (Up/Down/Home/End, Escape to clear search, etc.)
+
+**Quick Reference:**
+- **Flat Menu:** Up/Down, Home/End, typeahead search, position announcements
+- **TreeView:** Above + Left/Right for collapse/expand, Ctrl+Home/End for absolute navigation, level announcements
+
+**Examples:** `ScenarioNavigationState.cs`, `ArchitectTreeState.cs`
+
 ## Harmony Patching Notes
 
 - All patches auto-apply via `harmony.PatchAll()` in `Core/rimworld_access.cs`

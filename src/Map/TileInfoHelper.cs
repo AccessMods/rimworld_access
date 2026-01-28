@@ -100,35 +100,65 @@ namespace RimWorldAccess
             {
                 if (addedSomething) sb.Append(", ");
 
-                // Check if this is a smoothed stone wall and add "wall" suffix
-                string buildingLabel = building.LabelShort;
-                if (building.def.defName.StartsWith("Smoothed") && building.def.building != null && !building.def.building.isNaturalRock)
+                // Special handling for frames (construction in progress)
+                if (building is Frame frame)
                 {
-                    buildingLabel += " wall";
-                }
-                sb.Append(buildingLabel);
+                    sb.Append(frame.LabelEntityToBuild);
+                    sb.Append(", building");
 
-                // Add cell-specific suffix (e.g., "(head)" for bed, "(fuel port east)" for launcher)
-                string cellInfo = BuildingCellHelper.GetCellPrefix(building, position);
-                if (!string.IsNullOrEmpty(cellInfo))
-                {
-                    sb.Append($" ({cellInfo})");
-                }
+                    // Check if supplies are fully delivered
+                    if (frame.IsCompleted())
+                    {
+                        // All materials delivered - show work remaining
+                        sb.Append(", work left: ");
+                        sb.Append(frame.WorkLeft.ToStringWorkAmount());
+                    }
+                    else
+                    {
+                        // Still waiting for supplies to be hauled
+                        sb.Append(", awaiting supplies");
+                    }
 
-                // Add temperature control information if building is a cooler/heater
-                string tempControlInfo = GetTemperatureControlInfo(building);
-                if (!string.IsNullOrEmpty(tempControlInfo))
-                {
-                    sb.Append(", ");
-                    sb.Append(tempControlInfo);
+                    // Add cell-specific suffix for frames (e.g., "(head)" for bed frame)
+                    string frameCellInfo = BuildingCellHelper.GetCellPrefix(frame, position);
+                    if (!string.IsNullOrEmpty(frameCellInfo))
+                    {
+                        sb.Append($" ({frameCellInfo})");
+                    }
                 }
-
-                // Add transport pod connection info
-                string transportPodInfo = GetTransportPodInfo(building, map);
-                if (!string.IsNullOrEmpty(transportPodInfo))
+                else
                 {
-                    sb.Append(", ");
-                    sb.Append(transportPodInfo);
+                    // Normal building handling
+                    // Check if this is a smoothed stone wall and add "wall" suffix
+                    string buildingLabel = building.LabelShort;
+                    if (building.def.defName.StartsWith("Smoothed") && building.def.building != null && !building.def.building.isNaturalRock)
+                    {
+                        buildingLabel += " wall";
+                    }
+                    sb.Append(buildingLabel);
+
+                    // Add cell-specific suffix (e.g., "(head)" for bed, "(fuel port east)" for launcher)
+                    string cellInfo = BuildingCellHelper.GetCellPrefix(building, position);
+                    if (!string.IsNullOrEmpty(cellInfo))
+                    {
+                        sb.Append($" ({cellInfo})");
+                    }
+
+                    // Add temperature control information if building is a cooler/heater
+                    string tempControlInfo = GetTemperatureControlInfo(building);
+                    if (!string.IsNullOrEmpty(tempControlInfo))
+                    {
+                        sb.Append(", ");
+                        sb.Append(tempControlInfo);
+                    }
+
+                    // Add transport pod connection info
+                    string transportPodInfo = GetTransportPodInfo(building, map);
+                    if (!string.IsNullOrEmpty(transportPodInfo))
+                    {
+                        sb.Append(", ");
+                        sb.Append(transportPodInfo);
+                    }
                 }
 
                 addedSomething = true;
@@ -140,7 +170,8 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
-            // Add blueprints and frames with cell-specific info (e.g., "(head)" for bed blueprints)
+            // Add blueprints with cell-specific info (e.g., "(head)" for bed blueprints)
+            // Note: Frames extend Building, so they are handled in the buildings loop above
             foreach (var thing in blueprintsAndFrames.Take(2))
             {
                 if (addedSomething) sb.Append(", ");
@@ -152,6 +183,18 @@ namespace RimWorldAccess
                 if (!string.IsNullOrEmpty(cellInfo))
                 {
                     sb.Append($" ({cellInfo})");
+                }
+
+                // Add storage group name for storage blueprints
+                // Note: Blueprint_Storage uses explicit interface implementation, so we cast explicitly
+                if (thing is RimWorld.Blueprint_Storage blueprintStorage)
+                {
+                    var storageMember = (IStorageGroupMember)blueprintStorage;
+                    if (storageMember.Group != null)
+                    {
+                        sb.Append(", ");
+                        sb.Append(storageMember.Group.RenamableLabel);
+                    }
                 }
 
                 addedSomething = true;
@@ -226,6 +269,18 @@ namespace RimWorldAccess
                 if (addedSomething) sb.Append(", ");
                 sb.Append(zone.label);
                 addedSomething = true;
+            }
+
+            // Add storage group information for storage buildings
+            foreach (var building in buildings)
+            {
+                if (building is IStorageGroupMember storageMember && storageMember.Group != null)
+                {
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(storageMember.Group.RenamableLabel);
+                    addedSomething = true;
+                    break; // Only announce once per tile
+                }
             }
 
             // Add roofed status (only if roofed, not unroofed)
@@ -871,6 +926,55 @@ namespace RimWorldAccess
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets location context for a position (zone/named storage, or room).
+        /// Used by scanner announcements for mobile entities (pawns, animals).
+        /// </summary>
+        /// <param name="position">The position to check</param>
+        /// <param name="map">The map to check on</param>
+        /// <returns>Location context string like "(in Stockpile zone 1)" or null if no meaningful location</returns>
+        public static string GetLocationContext(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Priority 1: Check for zone OR named storage (mutually exclusive - can't have both)
+            // RimWorld enforces that ISlotGroupParent things (shelves) and zones cannot overlap
+            Zone zone = position.GetZone(map);
+            if (zone != null)
+            {
+                return $"(in {zone.label})";
+            }
+
+            // Check for named storage group (shelves, etc.) - only if no zone (mutually exclusive)
+            List<Thing> things = position.GetThingList(map);
+            foreach (var thing in things)
+            {
+                if (thing is IStorageGroupMember storage && storage.Group != null)
+                {
+                    string groupName = storage.Group.RenamableLabel;
+                    if (!string.IsNullOrEmpty(groupName))
+                    {
+                        return $"(at {groupName})";
+                    }
+                }
+            }
+
+            // Priority 2: Check for indoor room with a meaningful role
+            Room room = position.GetRoom(map);
+            if (room != null && room.ProperRoom && !room.PsychologicallyOutdoors)
+            {
+                string roomLabel = room.GetRoomRoleLabel();
+                if (!string.IsNullOrEmpty(roomLabel))
+                {
+                    return $"(in {roomLabel})";
+                }
+            }
+
+            // No meaningful location context
+            return null;
         }
 
         /// <summary>

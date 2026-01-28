@@ -83,6 +83,9 @@ namespace RimWorldAccess
             // Update map navigation cursor to match
             MapNavigationState.CurrentCursorPosition = pawnPosition;
 
+            // Switch to Cursor mode since user explicitly moved the cursor
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Cursor;
+
             // Announce
             string announcement = $"Jumped to {selectedPawn.LabelShort}";
             TolkHelper.Speak(announcement);
@@ -143,8 +146,7 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets the currently selected pawn, if any.
-        /// Returns null and announces appropriate message if no pawn is selected.
+        /// Gets the currently selected pawn from the game selector.
         /// </summary>
         private static Pawn GetSelectedPawn()
         {

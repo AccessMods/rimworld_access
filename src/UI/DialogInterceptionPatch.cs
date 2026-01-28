@@ -125,6 +125,10 @@ namespace RimWorldAccess
             if (typeName == "Dialog_GiveName")
                 return true;
 
+            // Intercept Dialog_NamePawn (baby naming, animal naming, mech naming)
+            if (typeName == "Dialog_NamePawn")
+                return true;
+
             // Don't intercept other windows by default
             return false;
         }

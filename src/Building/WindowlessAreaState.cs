@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -16,6 +17,7 @@ namespace RimWorldAccess
         private static int selectedAreaIndex = 0;
         private static List<Area> allAreas = new List<Area>();
         private static Map currentMap = null;
+        private static Action onCloseCallback = null;
 
         // Navigation state
         public enum NavigationMode
@@ -26,9 +28,10 @@ namespace RimWorldAccess
 
         private static NavigationMode currentMode = NavigationMode.AreaList;
         private static int selectedActionIndex = 0;
+        private static TypeaheadSearchHelper actionsTypeahead = new TypeaheadSearchHelper();
 
-        // Available actions
-        private static readonly string[] areaActions = new string[]
+        // Available actions - filtered based on whether an area is selected
+        private static readonly string[] actionsWithArea = new string[]
         {
             "New Area",
             "Rename Area",
@@ -40,6 +43,28 @@ namespace RimWorldAccess
             "Close"
         };
 
+        private static readonly string[] actionsWithoutArea = new string[]
+        {
+            "New Area",
+            "Close"
+        };
+
+        /// <summary>
+        /// Gets the available actions based on whether an area is selected.
+        /// </summary>
+        private static string[] GetAvailableActions()
+        {
+            return (selectedArea != null) ? actionsWithArea : actionsWithoutArea;
+        }
+
+        /// <summary>
+        /// Gets the action labels as a list for typeahead search.
+        /// </summary>
+        private static List<string> GetActionLabels()
+        {
+            return GetAvailableActions().ToList();
+        }
+
         public static bool IsActive => isActive;
         public static Area SelectedArea => selectedArea;
         public static NavigationMode CurrentMode => currentMode;
@@ -47,7 +72,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Opens the area management interface.
         /// </summary>
-        public static void Open(Map map)
+        public static void Open(Map map, Action onClose = null)
         {
             if (map == null)
                 return;
@@ -56,6 +81,7 @@ namespace RimWorldAccess
             currentMap = map;
             currentMode = NavigationMode.AreaList;
             selectedActionIndex = 0;
+            onCloseCallback = onClose;
 
             LoadAreas();
 
@@ -80,6 +106,11 @@ namespace RimWorldAccess
             allAreas.Clear();
             currentMap = null;
             currentMode = NavigationMode.AreaList;
+
+            // Invoke callback if set (returns to AreaSelectionMenuState)
+            var callback = onCloseCallback;
+            onCloseCallback = null;
+            callback?.Invoke();
 
             TolkHelper.Speak("Area manager closed");
         }
@@ -108,6 +139,7 @@ namespace RimWorldAccess
 
             selectedAreaIndex = MenuHelper.SelectNext(selectedAreaIndex, allAreas.Count);
             selectedArea = allAreas[selectedAreaIndex];
+            selectedArea?.MarkForDraw();
             UpdateClipboard();
         }
 
@@ -121,6 +153,7 @@ namespace RimWorldAccess
 
             selectedAreaIndex = MenuHelper.SelectPrevious(selectedAreaIndex, allAreas.Count);
             selectedArea = allAreas[selectedAreaIndex];
+            selectedArea?.MarkForDraw();
             UpdateClipboard();
         }
 
@@ -133,6 +166,7 @@ namespace RimWorldAccess
             {
                 currentMode = NavigationMode.AreaActions;
                 selectedActionIndex = 0;
+                actionsTypeahead.ClearSearch();
                 UpdateClipboard();
             }
         }
@@ -143,6 +177,7 @@ namespace RimWorldAccess
         public static void ReturnToAreaList()
         {
             currentMode = NavigationMode.AreaList;
+            actionsTypeahead.ClearSearch();
             LoadAreas(); // Reload in case areas changed
 
             // Reselect area if still valid
@@ -169,7 +204,8 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectNextAction()
         {
-            selectedActionIndex = MenuHelper.SelectNext(selectedActionIndex, areaActions.Length);
+            var actions = GetAvailableActions();
+            selectedActionIndex = MenuHelper.SelectNext(selectedActionIndex, actions.Length);
             UpdateClipboard();
         }
 
@@ -178,7 +214,8 @@ namespace RimWorldAccess
         /// </summary>
         public static void SelectPreviousAction()
         {
-            selectedActionIndex = MenuHelper.SelectPrevious(selectedActionIndex, areaActions.Length);
+            var actions = GetAvailableActions();
+            selectedActionIndex = MenuHelper.SelectPrevious(selectedActionIndex, actions.Length);
             UpdateClipboard();
         }
 
@@ -189,7 +226,8 @@ namespace RimWorldAccess
         {
             if (currentMode == NavigationMode.AreaActions)
             {
-                string action = areaActions[selectedActionIndex];
+                var actions = GetAvailableActions();
+                string action = actions[selectedActionIndex];
 
                 switch (action)
                 {
@@ -260,22 +298,22 @@ namespace RimWorldAccess
         /// </summary>
         private static void ExpandArea()
         {
-            Log.Message($"RimWorld Access: ExpandArea called, selectedArea = {selectedArea?.Label ?? "null"}");
+            if (selectedArea == null) return;
 
-            if (selectedArea != null)
-            {
-                // Save reference before Close() clears it
-                Area areaToExpand = selectedArea;
+            // Save reference before Close() clears it
+            Area areaToExpand = selectedArea;
 
-                Log.Message("RimWorld Access: Closing area manager");
-                Close();
-                Log.Message($"RimWorld Access: Calling EnterExpandMode with {areaToExpand.Label}");
-                AreaPaintingState.EnterExpandMode(areaToExpand);
-            }
-            else
-            {
-                Log.Message("RimWorld Access: selectedArea is null, cannot expand");
-            }
+            // Close the area manager UI
+            Close();
+
+            // Set the area BEFORE selecting the designator
+            // This tells DesignatorManagerPatch to skip the area selection menu
+            Designator_AreaAllowed.selectedArea = areaToExpand;
+
+            // Create and select the expand designator
+            // DesignatorManagerPatch will route this to ShapePlacementState
+            var designator = new Designator_AreaAllowedExpand();
+            Find.DesignatorManager.Select(designator);
         }
 
         /// <summary>
@@ -283,14 +321,20 @@ namespace RimWorldAccess
         /// </summary>
         private static void ShrinkArea()
         {
-            if (selectedArea != null)
-            {
-                // Save reference before Close() clears it
-                Area areaToShrink = selectedArea;
+            if (selectedArea == null) return;
 
-                Close();
-                AreaPaintingState.EnterShrinkMode(areaToShrink);
-            }
+            // Save reference before Close() clears it
+            Area areaToShrink = selectedArea;
+
+            // Close the area manager UI
+            Close();
+
+            // Set the area BEFORE selecting the designator
+            Designator_AreaAllowed.selectedArea = areaToShrink;
+
+            // Create and select the clear designator
+            var designator = new Designator_AreaAllowedClear();
+            Find.DesignatorManager.Select(designator);
         }
 
         /// <summary>
@@ -358,6 +402,154 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Selects the first action in the actions menu.
+        /// </summary>
+        public static void SelectFirstAction()
+        {
+            selectedActionIndex = 0;
+            actionsTypeahead.ClearSearch();
+            AnnounceCurrentAction();
+        }
+
+        /// <summary>
+        /// Selects the last action in the actions menu.
+        /// </summary>
+        public static void SelectLastAction()
+        {
+            var actions = GetAvailableActions();
+            selectedActionIndex = actions.Length - 1;
+            actionsTypeahead.ClearSearch();
+            AnnounceCurrentAction();
+        }
+
+        /// <summary>
+        /// Announces the current action.
+        /// </summary>
+        private static void AnnounceCurrentAction()
+        {
+            var actions = GetAvailableActions();
+            string action = actions[selectedActionIndex];
+            string position = MenuHelper.FormatPosition(selectedActionIndex, actions.Length);
+            string announcement = string.IsNullOrEmpty(position) ? action : $"{action}, {position}";
+            TolkHelper.Speak(announcement);
+        }
+
+        /// <summary>
+        /// Announces the current action with search match information.
+        /// </summary>
+        private static void AnnounceActionWithSearch()
+        {
+            var actions = GetAvailableActions();
+            if (selectedActionIndex >= 0 && selectedActionIndex < actions.Length)
+            {
+                string action = actions[selectedActionIndex];
+                TolkHelper.Speak($"{action}, {actionsTypeahead.CurrentMatchPosition} of {actionsTypeahead.MatchCount} matches for '{actionsTypeahead.SearchBuffer}'");
+            }
+        }
+
+        /// <summary>
+        /// Handles typeahead character input for actions menu.
+        /// </summary>
+        /// <param name="c">The character typed</param>
+        /// <returns>True if input was handled</returns>
+        public static bool HandleActionsTypeahead(char c)
+        {
+            var labels = GetActionLabels();
+            if (actionsTypeahead.ProcessCharacterInput(c, labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                {
+                    selectedActionIndex = newIndex;
+                    AnnounceActionWithSearch();
+                }
+                return true;
+            }
+            else
+            {
+                TolkHelper.Speak($"No matches for '{actionsTypeahead.LastFailedSearch}'");
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Handles backspace for actions typeahead search.
+        /// </summary>
+        /// <returns>True if backspace was handled</returns>
+        public static bool HandleActionsBackspace()
+        {
+            if (!actionsTypeahead.HasActiveSearch)
+                return false;
+
+            var labels = GetActionLabels();
+            if (actionsTypeahead.ProcessBackspace(labels, out int newIndex))
+            {
+                if (newIndex >= 0)
+                    selectedActionIndex = newIndex;
+                AnnounceActionWithSearch();
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Clears the actions typeahead search and announces "Search cleared".
+        /// </summary>
+        /// <returns>True if there was an active search to clear</returns>
+        public static bool ClearActionsSearch()
+        {
+            return actionsTypeahead.ClearSearchAndAnnounce();
+        }
+
+        /// <summary>
+        /// Gets whether there is an active typeahead search in actions mode.
+        /// </summary>
+        public static bool HasActiveActionsSearch => actionsTypeahead.HasActiveSearch;
+
+        /// <summary>
+        /// Gets whether there is an active search with no matches.
+        /// </summary>
+        public static bool HasNoActionsMatches => actionsTypeahead.HasNoMatches;
+
+        /// <summary>
+        /// Selects the next action that matches the current search.
+        /// </summary>
+        public static void SelectNextActionMatch()
+        {
+            if (actionsTypeahead.HasActiveSearch && !actionsTypeahead.HasNoMatches)
+            {
+                int nextIndex = actionsTypeahead.GetNextMatch(selectedActionIndex);
+                if (nextIndex >= 0)
+                {
+                    selectedActionIndex = nextIndex;
+                    AnnounceActionWithSearch();
+                }
+            }
+            else
+            {
+                SelectNextAction();
+            }
+        }
+
+        /// <summary>
+        /// Selects the previous action that matches the current search.
+        /// </summary>
+        public static void SelectPreviousActionMatch()
+        {
+            if (actionsTypeahead.HasActiveSearch && !actionsTypeahead.HasNoMatches)
+            {
+                int prevIndex = actionsTypeahead.GetPreviousMatch(selectedActionIndex);
+                if (prevIndex >= 0)
+                {
+                    selectedActionIndex = prevIndex;
+                    AnnounceActionWithSearch();
+                }
+            }
+            else
+            {
+                SelectPreviousAction();
+            }
+        }
+
+        /// <summary>
         /// Updates the clipboard with the current selection.
         /// </summary>
         private static void UpdateClipboard()
@@ -367,18 +559,21 @@ namespace RimWorldAccess
                 if (selectedArea != null)
                 {
                     int cellCount = selectedArea.TrueCount;
-                    TolkHelper.Speak($"Area {selectedAreaIndex + 1}/{allAreas.Count}: {selectedArea.Label} ({cellCount} cells). Press Tab for actions.");
+                    string position = MenuHelper.FormatPosition(selectedAreaIndex, allAreas.Count);
+                    string positionPart = string.IsNullOrEmpty(position) ? "" : $", {position}";
+                    TolkHelper.Speak($"{selectedArea.Label} ({cellCount} cells){positionPart}. Press right bracket for actions.");
                 }
                 else
                 {
-                    TolkHelper.Speak("No areas available. Press Tab to create one.");
+                    TolkHelper.Speak("No areas available. Press right bracket to create one.");
                 }
             }
             else if (currentMode == NavigationMode.AreaActions)
             {
-                string action = areaActions[selectedActionIndex];
-                TolkHelper.Speak($"Action {selectedActionIndex + 1}/{areaActions.Length}: {action}. Press Enter to execute, Tab/Shift+Tab or arrows to navigate, Escape to return to area list.");
+                AnnounceCurrentAction();
             }
+
+            selectedArea?.MarkForDraw();
         }
     }
 }

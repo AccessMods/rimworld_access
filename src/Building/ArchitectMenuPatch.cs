@@ -1,5 +1,6 @@
 using HarmonyLib;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using Verse;
 using RimWorld;
@@ -121,6 +122,10 @@ namespace RimWorldAccess
         /// </summary>
         private static void HandleArchitectTreeInput()
         {
+            // Don't handle input if a float menu (like right-click options) is open
+            if (WindowlessFloatMenuState.IsActive)
+                return;
+
             KeyCode key = Event.current.keyCode;
 
             // Handle Escape - clear search first, then close
@@ -232,6 +237,14 @@ namespace RimWorldAccess
                 return;
             }
 
+            // Handle Right Bracket - open right-click options for selected designator
+            if (key == KeyCode.RightBracket)
+            {
+                OpenDesignatorRightClickOptions();
+                Event.current.Use();
+                return;
+            }
+
             // Handle typeahead search characters (letters only)
             bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
             if (isLetter && !Event.current.alt && !Event.current.shift)
@@ -258,6 +271,34 @@ namespace RimWorldAccess
             ArchitectTreeState.Open(OnDesignatorSelected);
 
             Log.Message("Opened architect tree menu");
+        }
+
+        /// <summary>
+        /// Opens the right-click options for the currently selected designator.
+        /// </summary>
+        private static void OpenDesignatorRightClickOptions()
+        {
+            Designator designator = ArchitectTreeState.GetSelectedDesignator();
+            if (designator == null)
+            {
+                TolkHelper.Speak("No designator selected");
+                return;
+            }
+
+            // Get right-click options from the designator
+            List<FloatMenuOption> options = designator.RightClickFloatMenuOptions?.ToList();
+
+            if (options == null || options.Count == 0)
+            {
+                TolkHelper.Speak("No additional options");
+                return;
+            }
+
+            // Announce and open the options menu
+            TolkHelper.Speak($"Options for {designator.LabelCap}");
+            WindowlessFloatMenuState.Open(options, false);
+
+            Log.Message($"Opened right-click options for designator: {designator.LabelCap}");
         }
 
         /// <summary>
@@ -332,24 +373,11 @@ namespace RimWorldAccess
         /// <summary>
         /// Checks if a designator is a zone/area/cell-based designator.
         /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
-        /// Uses reflection to check the type hierarchy since we can't directly reference RimWorld types.
+        /// Delegates to ShapeHelper for the type hierarchy check.
         /// </summary>
         private static bool IsZoneDesignator(Designator designator)
         {
-            if (designator == null)
-                return false;
-
-            // Check if this designator's type hierarchy includes "Designator_Cells"
-            // This covers all multi-cell designators: zones, areas, roofs, etc.
-            System.Type type = designator.GetType();
-            while (type != null)
-            {
-                if (type.Name == "Designator_Cells")
-                    return true;
-                type = type.BaseType;
-            }
-
-            return false;
+            return ShapeHelper.IsCellsDesignator(designator) || ShapeHelper.IsZoneDesignator(designator);
         }
 
         /// <summary>

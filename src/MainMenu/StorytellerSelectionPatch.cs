@@ -13,6 +13,9 @@ namespace RimWorldAccess
         private static bool hasAnnouncedTitle = false;
         private enum NavigationMode { Storyteller, Difficulty, Permadeath }
         private static NavigationMode currentMode = NavigationMode.Storyteller;
+        private static bool announcedStorytellerHelp = false;
+        private static bool announcedDifficultyHelp = false;
+        private static bool announcedPermadeathHelp = false;
 
         // Prefix: Initialize state and handle keyboard input
         static void Prefix(Page_SelectStoryteller __instance, Rect rect)
@@ -43,10 +46,17 @@ namespace RimWorldAccess
                 {
                     KeyCode keyCode = Event.current.keyCode;
 
-                    if (keyCode == KeyCode.Tab)
+                    if (keyCode == KeyCode.Tab && !Event.current.shift)
                     {
-                        // Cycle through navigation modes
-                        CycleNavigationMode();
+                        // Forward cycle
+                        CycleNavigationModeForward();
+                        Event.current.Use();
+                        patchActive = true;
+                    }
+                    else if (keyCode == KeyCode.Tab && Event.current.shift)
+                    {
+                        // Backward cycle
+                        CycleNavigationModeBackward();
                         Event.current.Use();
                         patchActive = true;
                     }
@@ -62,14 +72,11 @@ namespace RimWorldAccess
                         Event.current.Use();
                         patchActive = true;
                     }
-                    else if (keyCode == KeyCode.Return || keyCode == KeyCode.KeypadEnter)
+                    else if (keyCode == KeyCode.Space && currentMode == NavigationMode.Permadeath)
                     {
-                        if (currentMode == NavigationMode.Permadeath)
-                        {
-                            StorytellerNavigationState.TogglePermadeath();
-                            Event.current.Use();
-                            patchActive = true;
-                        }
+                        StorytellerNavigationState.TogglePermadeath();
+                        Event.current.Use();
+                        patchActive = true;
                     }
                 }
             }
@@ -79,23 +86,86 @@ namespace RimWorldAccess
             }
         }
 
-        private static void CycleNavigationMode()
+        private static void CycleNavigationModeForward()
         {
             switch (currentMode)
             {
                 case NavigationMode.Storyteller:
                     currentMode = NavigationMode.Difficulty;
-                    TolkHelper.Speak("Navigation: Difficulty selection (Use Up/Down arrows)");
+                    AnnounceDifficultyMode();
                     break;
                 case NavigationMode.Difficulty:
                     currentMode = NavigationMode.Permadeath;
-                    TolkHelper.Speak("Navigation: Permadeath/Reload mode (Press Enter to toggle)");
+                    AnnouncePermadeathMode();
                     break;
                 case NavigationMode.Permadeath:
                     currentMode = NavigationMode.Storyteller;
-                    TolkHelper.Speak("Navigation: Storyteller selection (Use Up/Down arrows)");
+                    AnnounceStorytellerMode();
                     break;
             }
+        }
+
+        private static void CycleNavigationModeBackward()
+        {
+            switch (currentMode)
+            {
+                case NavigationMode.Storyteller:
+                    currentMode = NavigationMode.Permadeath;
+                    AnnouncePermadeathMode();
+                    break;
+                case NavigationMode.Difficulty:
+                    currentMode = NavigationMode.Storyteller;
+                    AnnounceStorytellerMode();
+                    break;
+                case NavigationMode.Permadeath:
+                    currentMode = NavigationMode.Difficulty;
+                    AnnounceDifficultyMode();
+                    break;
+            }
+        }
+
+        private static void AnnounceStorytellerMode()
+        {
+            string announcement = "Storyteller selection";
+            if (!announcedStorytellerHelp)
+            {
+                announcement += ". Use Up/Down arrows to choose storyteller";
+                announcedStorytellerHelp = true;
+            }
+            TolkHelper.Speak(announcement);
+        }
+
+        private static void AnnounceDifficultyMode()
+        {
+            string announcement = "Difficulty selection";
+            if (!announcedDifficultyHelp)
+            {
+                announcement += ". Use Up/Down arrows to choose difficulty";
+                announcedDifficultyHelp = true;
+            }
+            TolkHelper.Speak(announcement);
+        }
+
+        private static void AnnouncePermadeathMode()
+        {
+            // Ensure permadeathChosen is set so game can proceed without touching this
+            if (!Find.GameInitData.permadeathChosen)
+            {
+                Find.GameInitData.permadeathChosen = true;
+                Find.GameInitData.permadeath = false; // Default to Reload Anytime
+            }
+
+            string mode = Find.GameInitData.permadeath
+                ? "Commitment Mode (Permadeath)"
+                : "Reload Anytime Mode";
+
+            string announcement = $"Permadeath selection: {mode}";
+            if (!announcedPermadeathHelp)
+            {
+                announcement += ". Press Space to toggle";
+                announcedPermadeathHelp = true;
+            }
+            TolkHelper.Speak(announcement);
         }
 
         private static void HandleUpArrow(Page_SelectStoryteller instance)
@@ -111,7 +181,7 @@ namespace RimWorldAccess
                     UpdatePageDifficulty(instance);
                     break;
                 case NavigationMode.Permadeath:
-                    // No up/down for permadeath, just toggle with Enter
+                    // No up/down for permadeath, just toggle with Space
                     break;
             }
         }
@@ -129,7 +199,7 @@ namespace RimWorldAccess
                     UpdatePageDifficulty(instance);
                     break;
                 case NavigationMode.Permadeath:
-                    // No up/down for permadeath, just toggle with Enter
+                    // No up/down for permadeath, just toggle with Space
                     break;
             }
         }
@@ -202,6 +272,9 @@ namespace RimWorldAccess
         {
             hasAnnouncedTitle = false;
             currentMode = NavigationMode.Storyteller;
+            announcedStorytellerHelp = false;
+            announcedDifficultyHelp = false;
+            announcedPermadeathHelp = false;
         }
     }
 

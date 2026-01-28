@@ -60,6 +60,17 @@ namespace RimWorldAccess
                     }
                     return true;
 
+                case KeyCode.G:
+                    if (selectedPawn != null)
+                    {
+                        TolkHelper.Speak(PawnInfoHelper.GetGearInfo(selectedPawn));
+                    }
+                    else
+                    {
+                        TolkHelper.Speak("No pawn selected. Navigate to Pawns tab first.");
+                    }
+                    return true;
+
                 default:
                     return false;
             }
