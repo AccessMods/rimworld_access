@@ -306,8 +306,8 @@ namespace RimWorldAccess
             }
             MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
 
-            // NOTE: We do NOT set GizmoNavigationState.PawnJustSelected = true
-            // This ensures 'g' key always uses cursor position (not pawn selection)
+            // Set flag so G key shows this pawn's gizmos (until arrow keys move cursor)
+            GizmoNavigationState.PawnJustSelected = true;
 
             // Announce selection
             string currentTask = selectedPawn.GetJobReport();
@@ -359,8 +359,8 @@ namespace RimWorldAccess
             }
             MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
 
-            // NOTE: We do NOT set GizmoNavigationState.PawnJustSelected = true
-            // This ensures 'g' key always uses cursor position (not pawn selection)
+            // Set flag so G key shows this pawn's gizmos (until arrow keys move cursor)
+            GizmoNavigationState.PawnJustSelected = true;
 
             // Announce selection
             string currentTask = selectedPawn.GetJobReport();
