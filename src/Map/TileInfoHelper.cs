@@ -571,40 +571,71 @@ namespace RimWorldAccess
         /// <summary>
         /// Gets information about plants at a tile (key 3).
         /// Shows plant species, growth percentage, and harvestable status.
+        /// When a ground-penetrating scanner is active, also shows deep ore deposit info.
         /// </summary>
         public static string GetPlantsInfo(IntVec3 position, Map map)
         {
             if (map == null || !position.InBounds(map))
                 return "Out of bounds";
 
+            // Get plant info
             List<Thing> things = position.GetThingList(map);
             var plants = things.OfType<Plant>().ToList();
+            bool hasPlants = plants.Count > 0;
 
-            if (plants.Count == 0)
-                return "no plants";
+            // Get deep ore info if scanner is active
+            bool scannerActive = map.deepResourceGrid.AnyActiveDeepScannersOnMap();
+            string deepOreInfo = null;
+            if (scannerActive)
+            {
+                deepOreInfo = GetDeepOreInfo(position, map);
+            }
+            bool hasDeepOre = !string.IsNullOrEmpty(deepOreInfo);
+
+            // Build response based on what's present
+            if (!hasPlants && !hasDeepOre)
+            {
+                if (scannerActive)
+                    return "no plants or mineral deposits";
+                else
+                    return "no plants";
+            }
 
             var sb = new StringBuilder();
 
-            for (int i = 0; i < plants.Count; i++)
+            // Add plant info first (if present)
+            if (hasPlants)
             {
-                if (i > 0) sb.Append(", ");
+                for (int i = 0; i < plants.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
 
-                Plant plant = plants[i];
-                sb.Append(plant.LabelShortCap);
+                    Plant plant = plants[i];
+                    sb.Append(plant.LabelShortCap);
 
-                // Add growth percentage
-                float growthPercent = plant.Growth * 100f;
-                sb.Append($" ({growthPercent:F0}% grown)");
+                    // Add growth percentage
+                    float growthPercent = plant.Growth * 100f;
+                    sb.Append($" ({growthPercent:F0}% grown)");
 
-                // Check if harvestable
-                if (plant.HarvestableNow)
-                    sb.Append(", harvestable");
-                else
-                    sb.Append(", not harvestable");
+                    // Check if harvestable
+                    if (plant.HarvestableNow)
+                        sb.Append(", harvestable");
+                    else
+                        sb.Append(", not harvestable");
 
-                // Check if dying
-                if (plant.Dying)
-                    sb.Append(", dying");
+                    // Check if dying
+                    if (plant.Dying)
+                        sb.Append(", dying");
+                }
+            }
+
+            // Add deep ore info (if present)
+            if (hasDeepOre)
+            {
+                if (hasPlants)
+                    sb.Append(". ");
+                sb.Append("Deep: ");
+                sb.Append(deepOreInfo);
             }
 
             return sb.ToString();
@@ -1271,6 +1302,68 @@ namespace RimWorldAccess
 
             var mouseAttachment = mouseAttachmentField.GetValue(Find.Targeter) as UnityEngine.Texture2D;
             return mouseAttachment == CompLaunchable.TargeterMouseAttachment;
+        }
+
+        /// <summary>
+        /// Gets deep ore deposit info for a tile if conditions are met.
+        /// Returns info like "gold, 300 remaining" or null if no deep ore or conditions not met.
+        /// Matches sighted player visibility - only shows when a powered scanner exists.
+        /// </summary>
+        /// <param name="position">The tile position to check</param>
+        /// <param name="map">The map to check on</param>
+        /// <returns>Deep ore info string or null</returns>
+        public static string GetDeepOreInfo(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Check if there's an active (powered) deep scanner on the map
+            // This matches the visibility rules for sighted players
+            if (!map.deepResourceGrid.AnyActiveDeepScannersOnMap())
+                return null;
+
+            // Get the deep ore at this position
+            ThingDef oreDef = map.deepResourceGrid.ThingDefAt(position);
+            if (oreDef == null)
+                return null;
+
+            int count = map.deepResourceGrid.CountAt(position);
+            if (count <= 0)
+                return null;
+
+            return $"{oreDef.label}, {count} remaining";
+        }
+
+        /// <summary>
+        /// Checks if the current architect designator should show deep ore info.
+        /// Returns true if placing a building with PlaceWorker_ShowDeepResources (like deep drill).
+        /// </summary>
+        public static bool ShouldShowDeepOreForCurrentDesignator()
+        {
+            if (!ArchitectState.IsInPlacementMode)
+                return false;
+
+            Designator designator = ArchitectState.SelectedDesignator;
+            if (designator == null)
+                return false;
+
+            // Check if it's a build designator
+            if (!(designator is Designator_Build buildDesignator))
+                return false;
+
+            // Get the BuildableDef being placed
+            BuildableDef placingDef = buildDesignator.PlacingDef;
+            if (placingDef == null)
+                return false;
+
+            // Check if it's a ThingDef with CompDeepDrill component
+            // This matches RimWorld's DeepResourceGrid.DrawPlacingMouseAttachments() logic
+            if (placingDef is ThingDef thingDef && thingDef.CompDefFor<CompDeepDrill>() != null)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

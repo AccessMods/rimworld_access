@@ -228,6 +228,16 @@ namespace RimWorldAccess
             // Architect placement mode - shape preview or selected cells
             if (ArchitectState.IsInPlacementMode)
             {
+                // Check for deep ore info when placing a deep drill
+                if (TileInfoHelper.ShouldShowDeepOreForCurrentDesignator())
+                {
+                    string deepOreInfo = TileInfoHelper.GetDeepOreInfo(position, Find.CurrentMap);
+                    if (!string.IsNullOrEmpty(deepOreInfo))
+                    {
+                        tileInfo = deepOreInfo + ", " + tileInfo;
+                    }
+                }
+
                 if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells.Contains(position))
                 {
                     // Only label endpoints, not intermediate tiles

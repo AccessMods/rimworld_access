@@ -888,24 +888,42 @@ namespace RimWorldAccess
                 var distance = (region.CenterPosition - cursorPos).LengthHorizontal;
                 var direction = GetDirectionFromCursor(region.CenterPosition);
 
-                string announcement;
-                if (direction != null)
+                // Build size description - include quantity for deep ore deposits
+                string sizeAndQuantity;
+                if (region.TotalQuantity.HasValue && item.DeepOreDef != null)
                 {
-                    announcement = $"{item.Label}: {region.SizeDescription}, {distance:F1} tiles {direction}";
+                    sizeAndQuantity = $"{region.TileCount} tiles ({region.TotalQuantity.Value} {item.DeepOreDef.label})";
                 }
                 else
                 {
-                    announcement = $"{item.Label}: {region.SizeDescription}, here";
+                    sizeAndQuantity = region.SizeDescription;
+                }
+
+                string announcement;
+                if (direction != null)
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, {distance:F1} tiles {direction}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, here";
                 }
 
                 if (item.RegionCount > 1)
                 {
                     int position = currentBulkIndex + 1;
                     announcement += $", region {position} of {item.RegionCount}";
-                }
 
-                // Show total tile count across all regions
-                announcement += $", {item.TotalTileCount} tiles total";
+                    // Show total across all regions only when there are multiple regions
+                    if (item.HasQuantityInfo && item.DeepOreDef != null)
+                    {
+                        announcement += $", {item.TotalTileCount} tiles total ({item.TotalQuantityAcrossRegions} {item.DeepOreDef.label})";
+                    }
+                    else
+                    {
+                        announcement += $", {item.TotalTileCount} tiles total";
+                    }
+                }
 
                 TolkHelper.Speak(announcement, SpeechPriority.Normal);
                 return;
@@ -968,14 +986,25 @@ namespace RimWorldAccess
                 var regionDirection = GetDirectionFromCursor(region.CenterPosition);
                 int regionPosition = currentBulkIndex + 1;
 
-                string announcement;
-                if (regionDirection != null)
+                // Build size description - include quantity for deep ore deposits
+                string sizeAndQuantity;
+                if (region.TotalQuantity.HasValue && item.DeepOreDef != null)
                 {
-                    announcement = $"{item.Label}: {region.SizeDescription}, {regionDistance:F1} tiles {regionDirection}, region {regionPosition} of {item.RegionCount}";
+                    sizeAndQuantity = $"{region.TileCount} tiles ({region.TotalQuantity.Value} {item.DeepOreDef.label})";
                 }
                 else
                 {
-                    announcement = $"{item.Label}: {region.SizeDescription}, here, region {regionPosition} of {item.RegionCount}";
+                    sizeAndQuantity = region.SizeDescription;
+                }
+
+                string announcement;
+                if (regionDirection != null)
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, {regionDistance:F1} tiles {regionDirection}, region {regionPosition} of {item.RegionCount}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, here, region {regionPosition} of {item.RegionCount}";
                 }
                 TolkHelper.Speak(announcement, SpeechPriority.Normal);
                 return;

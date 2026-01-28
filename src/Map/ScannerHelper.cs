@@ -17,6 +17,7 @@ namespace RimWorldAccess
         public string Dimensions { get; set; } // "4x3" for rectangular shapes, null otherwise
         public List<IntVec3> AllPositions { get; set; }
         public float Distance { get; set; }
+        public int? TotalQuantity { get; set; }  // For deep ore deposits
 
         /// <summary>
         /// Gets a human-readable size description ("4x3" or "12 tiles").
@@ -33,6 +34,19 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Constructor for deep ore regions that tracks quantity per cell.
+        /// </summary>
+        public TerrainRegion(List<(IntVec3 position, int count)> positionsWithCounts, IntVec3 cursorPosition)
+        {
+            AllPositions = positionsWithCounts.Select(p => p.position).ToList();
+            TileCount = AllPositions.Count;
+            TotalQuantity = positionsWithCounts.Sum(p => p.count);
+            CenterPosition = CalculateCenter(AllPositions);
+            Dimensions = CalculateDimensions(AllPositions);
+            Distance = (CenterPosition - cursorPosition).LengthHorizontal;
+        }
+
+        /// <summary>
         /// Calculates the center of a region, preferring a position that's actually in the region.
         /// </summary>
         private static IntVec3 CalculateCenter(List<IntVec3> positions)
@@ -40,15 +54,16 @@ namespace RimWorldAccess
             if (positions.Count == 0)
                 return IntVec3.Invalid;
 
-            // Calculate centroid
+            // Calculate centroid with proper rounding (not truncation)
             int sumX = 0, sumZ = 0;
             foreach (var pos in positions)
             {
                 sumX += pos.x;
                 sumZ += pos.z;
             }
-            int avgX = sumX / positions.Count;
-            int avgZ = sumZ / positions.Count;
+            // Use Math.Round to avoid systematic bias from integer truncation
+            int avgX = (int)Math.Round((double)sumX / positions.Count);
+            int avgZ = (int)Math.Round((double)sumZ / positions.Count);
             var centroid = new IntVec3(avgX, 0, avgZ);
 
             // If centroid is in region, use it
@@ -132,6 +147,13 @@ namespace RimWorldAccess
                                    (BulkTerrainPositions != null && BulkTerrainPositions.Count > 1) ||
                                    (BulkDesignations != null && BulkDesignations.Count > 1) ||
                                    (TerrainRegions != null && TerrainRegions.Count > 1);
+
+        // Deep ore deposit properties
+        public ThingDef DeepOreDef { get; set; }
+        public int TotalQuantityAcrossRegions => TerrainRegions?
+            .Where(r => r.TotalQuantity.HasValue)
+            .Sum(r => r.TotalQuantity.Value) ?? 0;
+        public bool HasQuantityInfo => TerrainRegions?.Any(r => r.TotalQuantity.HasValue) ?? false;
 
         public ScannerItem(Thing thing, IntVec3 cursorPosition)
         {
@@ -242,6 +264,21 @@ namespace RimWorldAccess
             Distance = regions[0].Distance;
             Label = label;
             IsTerrain = false; // Mineables are Things, not terrain
+        }
+
+        // Constructor for deep ore deposit regions with quantity tracking
+        public ScannerItem(List<TerrainRegion> regions, ThingDef oreDef, IntVec3 cursorPosition)
+        {
+            if (regions == null || regions.Count == 0)
+                throw new ArgumentException("Deep ore regions list must contain at least one region");
+
+            Thing = null;
+            DeepOreDef = oreDef;
+            TerrainRegions = regions;
+            Position = regions[0].CenterPosition;
+            Distance = regions[0].Distance;
+            Label = $"{oreDef.label} deposit";
+            IsTerrain = true; // Treat as terrain-like for navigation
         }
 
         // Constructor for designation items
@@ -528,14 +565,16 @@ namespace RimWorldAccess
             terrainCategory.Subcategories.Add(terrainNaturalSubcat);
             terrainCategory.Subcategories.Add(terrainConstructedSubcat);
 
-            // Mineable category with Rare/Stone/Chunks subcategories
+            // Mineable category with Rare/Stone/Chunks/Scanned Ore subcategories
             var mineableCategory = new ScannerCategory("Mineable");
             var mineableRareSubcat = new ScannerSubcategory("Mineable-Rare");
             var mineableStoneSubcat = new ScannerSubcategory("Mineable-Stone");
             var mineableChunksSubcat = new ScannerSubcategory("Mineable-Chunks");
+            var mineableScannedSubcat = new ScannerSubcategory("Mineable-Scanned Ore");
             mineableCategory.Subcategories.Add(mineableRareSubcat);
             mineableCategory.Subcategories.Add(mineableStoneSubcat);
             mineableCategory.Subcategories.Add(mineableChunksSubcat);
+            mineableCategory.Subcategories.Add(mineableScannedSubcat);
 
             // Orders category with subcategories for each designation type
             var ordersCategory = new ScannerCategory("Orders");
@@ -894,6 +933,47 @@ namespace RimWorldAccess
                 // Create item with regions (like terrain does)
                 var item = new ScannerItem(regions, label, cursorPosition, primaryThing);
                 mineableStoneSubcat.Items.Add(item);
+            }
+
+            // Collect deep ore deposits (only if active ground-penetrating scanner exists)
+            // NOTE: Deep ore is underground and NOT filtered by fog of war.
+            // When a powered scanner exists, deep resources are visible on the entire map,
+            // just like sighted players see the overlay everywhere including unexplored areas.
+            if (map.deepResourceGrid.AnyActiveDeepScannersOnMap())
+            {
+                // Collect deep ore cells by def type with quantities
+                var deepOreByDef = new Dictionary<string, List<(IntVec3 position, int count, ThingDef oreDef)>>();
+
+                foreach (var cell in allCells)
+                {
+                    // Deep ore is underground - no fog check needed (matches RimWorld's behavior)
+                    var oreDef = map.deepResourceGrid.ThingDefAt(cell);
+                    if (oreDef != null)
+                    {
+                        int count = map.deepResourceGrid.CountAt(cell);
+                        if (count > 0)
+                        {
+                            string defKey = oreDef.defName;
+                            if (!deepOreByDef.ContainsKey(defKey))
+                                deepOreByDef[defKey] = new List<(IntVec3, int, ThingDef)>();
+                            deepOreByDef[defKey].Add((cell, count, oreDef));
+                        }
+                    }
+                }
+
+                // Group deep ore by adjacency and create scanner items
+                foreach (var kvp in deepOreByDef)
+                {
+                    var positionsWithCounts = kvp.Value.Select(x => (x.position, x.count)).ToList();
+                    var oreDef = kvp.Value[0].oreDef;
+                    var regions = GroupDeepOreByAdjacency(positionsWithCounts, cursorPosition);
+
+                    if (regions.Count > 0)
+                    {
+                        var item = new ScannerItem(regions, oreDef, cursorPosition);
+                        mineableScannedSubcat.Items.Add(item);
+                    }
+                }
             }
 
             // Collect all designations/orders
@@ -1255,6 +1335,46 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Groups deep ore positions by adjacency into separate regions, tracking quantity per region.
+        /// </summary>
+        /// <param name="positionsWithCounts">All positions with their ore counts</param>
+        /// <param name="cursorPosition">Current cursor position for distance calculation</param>
+        /// <returns>List of TerrainRegion objects with TotalQuantity populated, sorted by distance</returns>
+        private static List<TerrainRegion> GroupDeepOreByAdjacency(
+            List<(IntVec3 position, int count)> positionsWithCounts,
+            IntVec3 cursorPosition)
+        {
+            var regions = new List<TerrainRegion>();
+            var positionToCount = positionsWithCounts.ToDictionary(p => p.position, p => p.count);
+            var remaining = new HashSet<IntVec3>(positionsWithCounts.Select(p => p.position));
+
+            while (remaining.Count > 0)
+            {
+                // Start flood fill from the first remaining position
+                var startPos = remaining.First();
+                var regionPositions = FloodFillTerrainRegion(startPos, remaining);
+
+                if (regionPositions.Count > 0)
+                {
+                    // Build list with counts for this region
+                    var regionWithCounts = regionPositions
+                        .Select(pos => (pos, positionToCount[pos]))
+                        .ToList();
+
+                    var region = new TerrainRegion(regionWithCounts, cursorPosition);
+                    regions.Add(region);
+
+                    // Remove processed positions
+                    foreach (var pos in regionPositions)
+                        remaining.Remove(pos);
+                }
+            }
+
+            // Sort regions by distance from cursor
+            return regions.OrderBy(r => r.Distance).ToList();
+        }
+
+        /// <summary>
         /// Groups identical items together (same def, quality, stuff).
         /// Pawns are never grouped - they're unique individuals.
         /// Terrain tiles are grouped by adjacency into separate regions.
@@ -1269,6 +1389,14 @@ namespace RimWorldAccess
 
             foreach (var item in items)
             {
+                // Skip items that already have terrain regions (e.g., deep ore deposits, pre-grouped mineables)
+                // These were already grouped during collection and shouldn't be re-processed
+                if (item.HasTerrainRegions)
+                {
+                    grouped.Add(item);
+                    continue;
+                }
+
                 // Group terrain items by adjacency into regions
                 if (item.IsTerrain)
                 {
