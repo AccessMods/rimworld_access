@@ -86,7 +86,9 @@ namespace RimWorldAccess
         /// </summary>
         private static bool IsAnyMenuActive()
         {
-            return WorkMenuState.IsActive ||
+            return ScannerSearchState.IsActive ||
+                   GoToState.IsActive ||
+                   WorkMenuState.IsActive ||
                    BillConfigState.IsActive ||
                    BillsMenuState.IsActive ||
                    WindowlessFloatMenuState.IsActive ||

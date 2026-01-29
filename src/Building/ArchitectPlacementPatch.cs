@@ -91,15 +91,33 @@ namespace RimWorldAccess
                 // For other keys, let placement mode handle them normally
             }
 
-            // Don't let placement mode steal Enter/Escape from active scanner search
-            // Search should always have priority for these keys
+            // Don't let placement mode steal keys from active scanner search
+            // Scanner search needs Enter, Escape, Backspace, and letter keys
             if (ScannerSearchState.IsActive)
             {
-                if (Event.current.keyCode == KeyCode.Return ||
-                    Event.current.keyCode == KeyCode.KeypadEnter ||
-                    Event.current.keyCode == KeyCode.Escape)
+                KeyCode k = Event.current.keyCode;
+                if (k == KeyCode.Return || k == KeyCode.KeypadEnter || k == KeyCode.Escape ||
+                    k == KeyCode.Backspace || (k >= KeyCode.A && k <= KeyCode.Z) ||
+                    (k >= KeyCode.Alpha0 && k <= KeyCode.Alpha9))
                 {
                     // Don't consume - let UnifiedKeyboardPatch route to search
+                    return;
+                }
+            }
+
+            // Don't let placement mode steal keys from active Go To coordinate input
+            // Go To needs Enter, Escape, Backspace, numbers, +/-, comma, space
+            if (GoToState.IsActive)
+            {
+                KeyCode k = Event.current.keyCode;
+                if (k == KeyCode.Return || k == KeyCode.KeypadEnter || k == KeyCode.Escape ||
+                    k == KeyCode.Backspace || k == KeyCode.Space || k == KeyCode.Comma ||
+                    k == KeyCode.Equals || k == KeyCode.Minus ||
+                    k == KeyCode.KeypadPlus || k == KeyCode.KeypadMinus ||
+                    (k >= KeyCode.Alpha0 && k <= KeyCode.Alpha9) ||
+                    (k >= KeyCode.Keypad0 && k <= KeyCode.Keypad9))
+                {
+                    // Don't consume - let UnifiedKeyboardPatch route to goto
                     return;
                 }
             }

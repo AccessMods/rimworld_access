@@ -156,13 +156,6 @@ namespace RimWorldAccess
                 AreaPaintingState.UpdatePreview(newPosition);
             }
 
-            // Update shape preview if in architect placement mode
-            // (previously handled separately in ArchitectPlacementAnnouncementPatch)
-            if (ShapePlacementState.ShouldUpdatePreviewOnMove())
-            {
-                ShapePlacementState.UpdatePreview(newPosition);
-            }
-
             // Move camera to center on new cursor position
             Find.CameraDriver.JumpToCurrentMapLoc(newPosition);
 
@@ -173,13 +166,30 @@ namespace RimWorldAccess
             TerrainDef terrain = newPosition.GetTerrain(Find.CurrentMap);
             TerrainAudioHelper.PlayTerrainAudio(terrain, 0.5f);
 
-            // Get tile information and announce it
-            string tileInfo = TileInfoHelper.GetTileSummary(newPosition, Find.CurrentMap);
+            // Announce the position with all contextual info
+            AnnouncePosition(newPosition, Find.CurrentMap);
+        }
+
+        /// <summary>
+        /// Announces the tile at the given position with all contextual prefixes.
+        /// Used by both arrow key movement and Go To coordinate input.
+        /// This includes deep ore info, "in area", shape dimensions, etc.
+        /// </summary>
+        public static void AnnouncePosition(IntVec3 position, Map map)
+        {
+            // Update shape preview if in shape placement mode
+            if (ShapePlacementState.ShouldUpdatePreviewOnMove())
+            {
+                ShapePlacementState.UpdatePreview(position);
+            }
+
+            // Get base tile info
+            string tileInfo = TileInfoHelper.GetTileSummary(position, map);
 
             // Add context prefixes based on current mode
-            tileInfo = AddContextPrefix(tileInfo, newPosition);
+            tileInfo = AddContextPrefix(tileInfo, position);
 
-            // Only announce if different from last announcement (avoids spam when hitting map edge)
+            // Only announce if different from last announcement (avoids spam)
             if (tileInfo != MapNavigationState.LastAnnouncedInfo)
             {
                 TolkHelper.Speak(tileInfo);

@@ -212,6 +212,83 @@ namespace RimWorldAccess
                 // Space is needed for placing designators while search is active
             }
 
+            // ===== PRIORITY -0.2: GoTo coordinate text input =====
+            // Must run before all other handlers to capture number keys
+            if (GoToState.IsActive)
+            {
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Enter: confirm and move cursor (only if no overlay menu is on top of us)
+                if (!GoToState.ShouldYieldToOverlayMenu() &&
+                    (key == KeyCode.Return || key == KeyCode.KeypadEnter))
+                {
+                    GoToState.ConfirmGoTo();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Escape: cancel (only if no overlay menu is on top of us)
+                if (!GoToState.ShouldYieldToOverlayMenu() && key == KeyCode.Escape)
+                {
+                    GoToState.Cancel();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Backspace: delete last character
+                if (key == KeyCode.Backspace)
+                {
+                    GoToState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9) from main keyboard
+                if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Alpha0));
+                    GoToState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9) from numpad
+                if (key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Keypad0));
+                    GoToState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Plus key for relative positive offset (Equals, Shift+Equals, or KeypadPlus)
+                if ((key == KeyCode.KeypadPlus || key == KeyCode.Equals) && !ctrl && !alt)
+                {
+                    GoToState.HandleCharacter('+');
+                    Event.current.Use();
+                    return;
+                }
+
+                // Minus key for relative negative offset
+                if ((key == KeyCode.Minus || key == KeyCode.KeypadMinus) && !ctrl && !alt)
+                {
+                    GoToState.HandleCharacter('-');
+                    Event.current.Use();
+                    return;
+                }
+
+                // Comma or Space: switch to Z field
+                if ((key == KeyCode.Comma || key == KeyCode.Space) && !ctrl && !alt)
+                {
+                    GoToState.HandleFieldSeparator();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Arrow keys, Tab, etc.: intentionally NOT consumed - pass through
+            }
+
             // ===== PRIORITY -0.25: Handle Info Card dialog if active =====
             // Info Card is a modal dialog that should take precedence over most other handlers
             if (InfoCardState.IsActive)
@@ -2770,9 +2847,45 @@ namespace RimWorldAccess
                 {
                     // Z key activates search (no modifiers) when search is not active
                     // Text input when search IS active is handled by the early handler at priority -0.2
-                    if (key == KeyCode.Z && !shift && !ctrl && !alt && !ScannerSearchState.IsActive)
+                    // Also check GoToState.IsActive for mutual exclusion
+                    if (key == KeyCode.Z && !shift && !ctrl && !alt && !ScannerSearchState.IsActive && !GoToState.IsActive)
                     {
                         ScannerSearchState.Activate(onWorldMap);
+                        // Block RimWorld's keybinding system from seeing this key
+                        Event.current.keyCode = KeyCode.None;
+                        Event.current.Use();
+                        return;
+                    }
+                }
+            }
+
+            // ===== PRIORITY 4.746: Ctrl+G to activate Go To coordinate input =====
+            // Only works on local map (not world map)
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                bool onWorldMap = WorldNavigationState.IsActive;
+                bool onMap = MapNavigationState.IsInitialized && !onWorldMap;
+                bool ctrl = Event.current.control;
+                bool shift = Event.current.shift;
+                bool alt = Event.current.alt;
+
+                // Check placement mode (Go To should work during placement like scanner search)
+                bool inPlacementMode = ArchitectState.IsInPlacementMode ||
+                    ViewingModeState.IsActive ||
+                    ShapePlacementState.IsActive ||
+                    (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null);
+
+                // Determine if Go To should be allowed
+                bool menuBlocksGoTo = KeyboardHelper.IsAnyAccessibilityMenuActive() && !inPlacementMode;
+
+                if (onMap && !onWorldMap && key == KeyCode.G && ctrl && !shift && !alt)
+                {
+                    // Don't activate if scanner search is active (mutual exclusion)
+                    // Don't activate if Go To is already active
+                    if (!ScannerSearchState.IsActive && !GoToState.IsActive && !menuBlocksGoTo &&
+                        (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
+                    {
+                        GoToState.Activate();
                         // Block RimWorld's keybinding system from seeing this key
                         Event.current.keyCode = KeyCode.None;
                         Event.current.Use();

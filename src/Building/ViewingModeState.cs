@@ -1257,12 +1257,18 @@ namespace RimWorldAccess
                 case KeyCode.Equals:
                 case KeyCode.Plus:
                 case KeyCode.KeypadPlus:
+                    // Don't handle if Go To is active - let Go To process + for coordinates
+                    if (GoToState.IsActive)
+                        return false;
                     // = key - add another shape, keep existing blueprints
                     AddAnotherShape();
                     return true;
 
                 case KeyCode.Minus:
                 case KeyCode.KeypadMinus:
+                    // Don't handle if Go To is active - let Go To process - for coordinates
+                    if (GoToState.IsActive)
+                        return false;
                     // - key - remove last segment only, stay in viewing mode
                     RemoveLastSegment();
                     return true;
