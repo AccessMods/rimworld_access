@@ -423,27 +423,45 @@ namespace RimWorldAccess
                 // 1. Designator (like Reinstall, Copy) - enters placement mode
                 if (selectedGizmo is Designator designator)
                 {
+                    // Check if this is a Designator_Build that needs material selection
+                    if (designator is Designator_Build buildDesignator)
+                    {
+                        BuildableDef buildable = buildDesignator.PlacingDef;
+                        if (ArchitectHelper.RequiresMaterialSelection(buildable))
+                        {
+                            // Handle material selection explicitly
+                            HandleBuildDesignatorMaterialSelection(buildDesignator, buildable);
+                            return;
+                        }
+                    }
+
                     // Check for zone expand/shrink designators - use accessible expansion mode
                     string designatorTypeName = designator.GetType().Name;
 
                     // Zone expand designators (Designator_ZoneAdd*_Expand)
+                    // Route through normal designator flow for viewing mode support
                     if (designatorTypeName.Contains("_Expand")
-                        && designatorTypeName.Contains("ZoneAdd")
-                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable expandOwner)
-                        && expandOwner is Zone expandZone)
+                        && designatorTypeName.Contains("ZoneAdd"))
                     {
                         Close();
-                        ZoneCreationState.EnterExpansionMode(expandZone);
+                        // Select the designator - DesignatorManagerPatch will route it to ShapePlacementState
+                        Find.DesignatorManager.Select(designator);
                         return;
                     }
 
-                    // Zone shrink designator - enter shrink mode (selected cells will be removed)
-                    if (designatorTypeName == "Designator_ZoneDelete_Shrink"
-                        && gizmoOwners.TryGetValue(selectedGizmo, out ISelectable shrinkOwner)
-                        && shrinkOwner is Zone shrinkZone)
+                    // Zone shrink designator - route through normal designator flow
+                    if (designatorTypeName == "Designator_ZoneDelete_Shrink")
                     {
+                        // Select the zone owner so GetSelectedZone() works in ShapePlacementState
+                        if (gizmoOwners.ContainsKey(selectedGizmo))
+                        {
+                            ISelectable owner = gizmoOwners[selectedGizmo];
+                            Find.Selector.ClearSelection();
+                            Find.Selector.Select(owner, playSound: false, forceDesignatorDeselect: false);
+                        }
                         Close();
-                        ZoneCreationState.EnterShrinkMode(shrinkZone);
+                        // Select the designator - DesignatorManagerPatch will route it to ShapePlacementState
+                        Find.DesignatorManager.Select(designator);
                         return;
                     }
 
@@ -1001,7 +1019,8 @@ namespace RimWorldAccess
                     label = cmd.defaultLabel;
                 if (string.IsNullOrEmpty(label))
                     label = "Unknown Command";
-                return label;
+                // Strip color tags (e.g., <color=#...>text</color>) from gizmo labels
+                return label.StripTags();
             }
 
             // Handle non-Command gizmos (status displays, bars, etc.)
@@ -1549,7 +1568,8 @@ namespace RimWorldAccess
                 string desc = cmd.Desc;
                 if (string.IsNullOrEmpty(desc))
                     desc = cmd.defaultDesc;
-                return desc ?? "";
+                // Strip color tags from descriptions
+                return (desc ?? "").StripTags();
             }
             return "";
         }
@@ -1675,6 +1695,57 @@ namespace RimWorldAccess
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Handles material selection for a Designator_Build gizmo.
+        /// Opens a windowless float menu with material options.
+        /// </summary>
+        private static void HandleBuildDesignatorMaterialSelection(Designator_Build buildDesignator, BuildableDef buildable)
+        {
+            // Create material options using the existing helper
+            List<FloatMenuOption> options = ArchitectHelper.CreateMaterialOptions(
+                buildable,
+                (material) => OnGizmoMaterialSelected(buildDesignator, buildable, material)
+            );
+
+            if (options.Count == 0)
+            {
+                TolkHelper.Speak($"No materials available for {buildable.label}");
+                return;
+            }
+
+            // Announce and open material selection menu
+            TolkHelper.Speak($"Select material for {buildable.label}");
+            WindowlessFloatMenuState.Open(options, false);
+
+            // Close gizmo navigation - material selection will handle the rest
+            Close();
+        }
+
+        /// <summary>
+        /// Callback when a material is selected for a gizmo's Designator_Build.
+        /// Sets the material on the designator and selects it directly.
+        /// DesignatorManagerPatch will automatically route to accessible placement.
+        /// </summary>
+        private static void OnGizmoMaterialSelected(Designator_Build designator, BuildableDef buildable, ThingDef material)
+        {
+            try
+            {
+                // Set the material on the designator
+                designator.SetStuffDef(material);
+
+                // Select the designator directly (like vanilla's FloatMenu callback does)
+                // DesignatorManagerPatch will automatically route to accessible placement
+                Find.DesignatorManager.Select(designator);
+
+                TolkHelper.Speak($"{material.LabelCap} selected");
+            }
+            catch (System.Exception ex)
+            {
+                ModLogger.Error($"Exception in gizmo material selection: {ex.Message}");
+                TolkHelper.Speak($"Error: {ex.Message}", SpeechPriority.High);
+            }
         }
     }
 }

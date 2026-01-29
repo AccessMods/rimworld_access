@@ -308,12 +308,16 @@ namespace RimWorldAccess
             if (includeItemName)
             {
                 string itemLabel = getItemLabel(item);
-                // Avoid duplication if item label equals column value (e.g., Name column)
-                if (itemLabel == columnValue)
+                // Avoid duplication if column value equals or starts with item label (e.g., Name column)
+                if (itemLabel == columnValue || columnValue.StartsWith(itemLabel))
                 {
-                    return $"{itemLabel}. {position}";
+                    // Just announce the column value (which may include activity)
+                    string sep = columnValue.EndsWith(".") ? " " : ". ";
+                    return $"{columnValue}{sep}{position}";
                 }
-                return $"{itemLabel} - {columnName}: {columnValue}. {position}";
+                // Don't add period if value already ends with one
+                string separator = columnValue.EndsWith(".") ? " " : ". ";
+                return $"{itemLabel} - {columnName}: {columnValue}{separator}{position}";
             }
             else
             {
@@ -334,10 +338,20 @@ namespace RimWorldAccess
             string itemLabel = getItemLabel(item);
             string position = MenuHelper.FormatPosition(currentRowIndex, itemCount);
 
-            // Avoid duplication if item label equals column value (e.g., Name column)
-            string announcement = itemLabel == columnValue
-                ? $"{itemLabel}. {position}"
-                : $"{itemLabel} - {columnName}: {columnValue}. {position}";
+            // Avoid duplication if column value equals or starts with item label (e.g., Name column)
+            string announcement;
+            if (itemLabel == columnValue || columnValue.StartsWith(itemLabel))
+            {
+                // Just announce the column value (which may include activity)
+                string sep = columnValue.EndsWith(".") ? " " : ". ";
+                announcement = $"{columnValue}{sep}{position}";
+            }
+            else
+            {
+                // Don't add period if value already ends with one
+                string separator = columnValue.EndsWith(".") ? " " : ". ";
+                announcement = $"{itemLabel} - {columnName}: {columnValue}{separator}{position}";
+            }
 
             if (typeahead.HasActiveSearch)
             {

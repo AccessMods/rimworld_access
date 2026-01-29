@@ -6,6 +6,122 @@ using Verse;
 
 namespace RimWorldAccess
 {
+    /// <summary>
+    /// Represents a contiguous region of terrain tiles (e.g., a patch of rich soil).
+    /// Used for adjacency-based grouping in the scanner.
+    /// </summary>
+    public class TerrainRegion
+    {
+        public IntVec3 CenterPosition { get; set; }
+        public int TileCount { get; set; }
+        public string Dimensions { get; set; } // "4x3" for rectangular shapes, null otherwise
+        public List<IntVec3> AllPositions { get; set; }
+        public float Distance { get; set; }
+        public int? TotalQuantity { get; set; }  // For deep ore deposits
+
+        /// <summary>
+        /// Gets a human-readable size description ("4x3" or "12 tiles").
+        /// </summary>
+        public string SizeDescription => Dimensions ?? $"{TileCount} tiles";
+
+        public TerrainRegion(List<IntVec3> positions, IntVec3 cursorPosition)
+        {
+            AllPositions = positions;
+            TileCount = positions.Count;
+            CenterPosition = CalculateCenter(positions);
+            Dimensions = CalculateDimensions(positions);
+            Distance = (CenterPosition - cursorPosition).LengthHorizontal;
+        }
+
+        /// <summary>
+        /// Constructor for deep ore regions that tracks quantity per cell.
+        /// </summary>
+        public TerrainRegion(List<(IntVec3 position, int count)> positionsWithCounts, IntVec3 cursorPosition)
+        {
+            AllPositions = positionsWithCounts.Select(p => p.position).ToList();
+            TileCount = AllPositions.Count;
+            TotalQuantity = positionsWithCounts.Sum(p => p.count);
+            CenterPosition = CalculateCenter(AllPositions);
+            Dimensions = CalculateDimensions(AllPositions);
+            Distance = (CenterPosition - cursorPosition).LengthHorizontal;
+        }
+
+        /// <summary>
+        /// Calculates the center of a region, preferring a position that's actually in the region.
+        /// </summary>
+        private static IntVec3 CalculateCenter(List<IntVec3> positions)
+        {
+            if (positions.Count == 0)
+                return IntVec3.Invalid;
+
+            // Calculate centroid with proper rounding (not truncation)
+            int sumX = 0, sumZ = 0;
+            foreach (var pos in positions)
+            {
+                sumX += pos.x;
+                sumZ += pos.z;
+            }
+            // Use Math.Round to avoid systematic bias from integer truncation
+            int avgX = (int)Math.Round((double)sumX / positions.Count);
+            int avgZ = (int)Math.Round((double)sumZ / positions.Count);
+            var centroid = new IntVec3(avgX, 0, avgZ);
+
+            // If centroid is in region, use it
+            if (positions.Contains(centroid))
+                return centroid;
+
+            // Otherwise find the closest position to the centroid
+            IntVec3 closest = positions[0];
+            float closestDist = float.MaxValue;
+            foreach (var pos in positions)
+            {
+                float dist = (pos - centroid).LengthHorizontal;
+                if (dist < closestDist)
+                {
+                    closestDist = dist;
+                    closest = pos;
+                }
+            }
+            return closest;
+        }
+
+        /// <summary>
+        /// Calculates dimensions if the region is rectangular ("4x3"), otherwise returns null.
+        /// </summary>
+        private static string CalculateDimensions(List<IntVec3> positions)
+        {
+            if (positions.Count == 0)
+                return null;
+
+            // Calculate bounding box
+            int minX = int.MaxValue, maxX = int.MinValue;
+            int minZ = int.MaxValue, maxZ = int.MinValue;
+
+            foreach (var pos in positions)
+            {
+                if (pos.x < minX) minX = pos.x;
+                if (pos.x > maxX) maxX = pos.x;
+                if (pos.z < minZ) minZ = pos.z;
+                if (pos.z > maxZ) maxZ = pos.z;
+            }
+
+            int width = maxX - minX + 1;
+            int height = maxZ - minZ + 1;
+
+            // If tile count equals area, it's rectangular
+            if (positions.Count == width * height)
+            {
+                // Return dimensions with larger dimension first for consistency
+                if (width >= height)
+                    return $"{width}x{height}";
+                else
+                    return $"{height}x{width}";
+            }
+
+            return null; // Irregular shape
+        }
+    }
+
     public class ScannerItem
     {
         public Thing Thing { get; set; }
@@ -13,6 +129,7 @@ namespace RimWorldAccess
         public List<IntVec3> BulkTerrainPositions { get; set; } // For grouped terrain tiles
         public Designation Designation { get; set; } // For designation items
         public List<Designation> BulkDesignations { get; set; } // For grouped designations of the same type
+        public List<TerrainRegion> TerrainRegions { get; set; } // For adjacency-grouped terrain regions
         public float Distance { get; set; }
         public string Label { get; set; }
         public IntVec3 Position { get; set; }
@@ -22,10 +139,21 @@ namespace RimWorldAccess
         public bool IsZone => Zone != null; // True if this represents a zone
         public Room Room { get; set; } // For room items
         public bool IsRoom => Room != null; // True if this represents a room
-        public int BulkCount => BulkThings?.Count ?? (BulkTerrainPositions?.Count ?? (BulkDesignations?.Count ?? 1));
+        public bool HasTerrainRegions => TerrainRegions != null && TerrainRegions.Count > 0;
+        public int RegionCount => TerrainRegions?.Count ?? 0;
+        public int TotalTileCount => TerrainRegions?.Sum(r => r.TileCount) ?? BulkTerrainPositions?.Count ?? 1;
+        public int BulkCount => BulkThings?.Count ?? (BulkTerrainPositions?.Count ?? (BulkDesignations?.Count ?? (TerrainRegions?.Count ?? 1)));
         public bool IsBulkGroup => (BulkThings != null && BulkThings.Count > 1) ||
                                    (BulkTerrainPositions != null && BulkTerrainPositions.Count > 1) ||
-                                   (BulkDesignations != null && BulkDesignations.Count > 1);
+                                   (BulkDesignations != null && BulkDesignations.Count > 1) ||
+                                   (TerrainRegions != null && TerrainRegions.Count > 1);
+
+        // Deep ore deposit properties
+        public ThingDef DeepOreDef { get; set; }
+        public int TotalQuantityAcrossRegions => TerrainRegions?
+            .Where(r => r.TotalQuantity.HasValue)
+            .Sum(r => r.TotalQuantity.Value) ?? 0;
+        public bool HasQuantityInfo => TerrainRegions?.Any(r => r.TotalQuantity.HasValue) ?? false;
 
         public ScannerItem(Thing thing, IntVec3 cursorPosition)
         {
@@ -41,7 +169,15 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = thing.LabelShort ?? thing.def.label ?? "Unknown";
+                try
+                {
+                    Label = thing.LabelNoParenthesis ?? thing.def.label ?? "Unknown";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = thing.def?.label ?? "Corrupted object";
+                }
             }
         }
 
@@ -64,7 +200,15 @@ namespace RimWorldAccess
             }
             else
             {
-                Label = Thing.LabelShort ?? Thing.def.label ?? "Unknown";
+                try
+                {
+                    Label = Thing.LabelNoParenthesis ?? Thing.def.label ?? "Unknown";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = Thing.def?.label ?? "Corrupted object";
+                }
             }
         }
 
@@ -78,7 +222,7 @@ namespace RimWorldAccess
             IsTerrain = true;
         }
 
-        // Constructor for grouped terrain tiles
+        // Constructor for grouped terrain tiles (legacy - non-adjacent grouping)
         public ScannerItem(List<IntVec3> positions, string label, IntVec3 cursorPosition)
         {
             if (positions == null || positions.Count == 0)
@@ -90,6 +234,51 @@ namespace RimWorldAccess
             Distance = (positions[0] - cursorPosition).LengthHorizontal;
             Label = label;
             IsTerrain = true;
+        }
+
+        // Constructor for adjacency-grouped terrain regions (e.g., separate patches of rich soil)
+        public ScannerItem(List<TerrainRegion> regions, string label, IntVec3 cursorPosition)
+        {
+            if (regions == null || regions.Count == 0)
+                throw new ArgumentException("Terrain regions list must contain at least one region");
+
+            Thing = null;
+            TerrainRegions = regions;
+            // Position is the center of the closest region
+            Position = regions[0].CenterPosition;
+            Distance = regions[0].Distance;
+            Label = label;
+            IsTerrain = true;
+        }
+
+        // Constructor for adjacency-grouped mineable regions (ore/rock with Thing reference)
+        public ScannerItem(List<TerrainRegion> regions, string label, IntVec3 cursorPosition, Thing primaryThing)
+        {
+            if (regions == null || regions.Count == 0)
+                throw new ArgumentException("Mineable regions list must contain at least one region");
+
+            Thing = primaryThing; // Keep reference for def info
+            TerrainRegions = regions;
+            // Position is the center of the closest region
+            Position = regions[0].CenterPosition;
+            Distance = regions[0].Distance;
+            Label = label;
+            IsTerrain = false; // Mineables are Things, not terrain
+        }
+
+        // Constructor for deep ore deposit regions with quantity tracking
+        public ScannerItem(List<TerrainRegion> regions, ThingDef oreDef, IntVec3 cursorPosition)
+        {
+            if (regions == null || regions.Count == 0)
+                throw new ArgumentException("Deep ore regions list must contain at least one region");
+
+            Thing = null;
+            DeepOreDef = oreDef;
+            TerrainRegions = regions;
+            Position = regions[0].CenterPosition;
+            Distance = regions[0].Distance;
+            Label = $"{oreDef.label} deposit";
+            IsTerrain = true; // Treat as terrain-like for navigation
         }
 
         // Constructor for designation items
@@ -106,7 +295,15 @@ namespace RimWorldAccess
 
             if (designation.target.HasThing && designation.target.Thing != null)
             {
-                Label = $"{designation.target.Thing.LabelShort} ({defLabel})";
+                try
+                {
+                    Label = $"{designation.target.Thing.LabelNoParenthesis} ({defLabel})";
+                }
+                catch (Exception)
+                {
+                    // Handle corrupted things (e.g., Blueprint_Install with missing minified item)
+                    Label = $"{designation.target.Thing.def?.label ?? "Corrupted object"} ({defLabel})";
+                }
             }
             else
             {
@@ -117,7 +314,15 @@ namespace RimWorldAccess
                     var edifice = Position.GetEdifice(map);
                     if (edifice != null)
                     {
-                        Label = $"{edifice.LabelShort} ({defLabel})";
+                        try
+                        {
+                            Label = $"{edifice.LabelNoParenthesis} ({defLabel})";
+                        }
+                        catch (Exception)
+                        {
+                            // Handle corrupted edifices
+                            Label = $"{edifice.def?.label ?? "Corrupted object"} ({defLabel})";
+                        }
                     }
                     else
                     {
@@ -270,6 +475,9 @@ namespace RimWorldAccess
         {
             var categories = new List<ScannerCategory>();
 
+            // Track all things that get categorized
+            var categorizedThings = new HashSet<Thing>();
+
             // Initialize all categories with dash-formatted names
 
             // Pawns category (renamed from Colonists)
@@ -357,14 +565,16 @@ namespace RimWorldAccess
             terrainCategory.Subcategories.Add(terrainNaturalSubcat);
             terrainCategory.Subcategories.Add(terrainConstructedSubcat);
 
-            // Mineable category with Rare/Stone/Chunks subcategories
+            // Mineable category with Rare/Stone/Chunks/Scanned Ore subcategories
             var mineableCategory = new ScannerCategory("Mineable");
             var mineableRareSubcat = new ScannerSubcategory("Mineable-Rare");
             var mineableStoneSubcat = new ScannerSubcategory("Mineable-Stone");
             var mineableChunksSubcat = new ScannerSubcategory("Mineable-Chunks");
+            var mineableScannedSubcat = new ScannerSubcategory("Mineable-Scanned Ore");
             mineableCategory.Subcategories.Add(mineableRareSubcat);
             mineableCategory.Subcategories.Add(mineableStoneSubcat);
             mineableCategory.Subcategories.Add(mineableChunksSubcat);
+            mineableCategory.Subcategories.Add(mineableScannedSubcat);
 
             // Orders category with subcategories for each designation type
             var ordersCategory = new ScannerCategory("Orders");
@@ -432,6 +642,7 @@ namespace RimWorldAccess
                     {
                         // Mechanoids subcategory (all mechanoids regardless of faction)
                         pawnsMechanoidsSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (pawn.RaceProps.Humanlike)
                     {
@@ -439,10 +650,12 @@ namespace RimWorldAccess
                         if (pawn.Faction == playerFaction)
                         {
                             pawnsPlayerSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             pawnsNPCSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                     else if (pawn.RaceProps.Animal)
@@ -454,10 +667,12 @@ namespace RimWorldAccess
                             if (pawn.Roamer)
                             {
                                 tamePenSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                             else
                             {
                                 tameNonPenSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                         }
                         else
@@ -466,10 +681,12 @@ namespace RimWorldAccess
                             if (pawn.HostileTo(playerFaction))
                             {
                                 wildHostileSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                             else
                             {
                                 wildPassiveSubcat.Items.Add(item);
+                                categorizedThings.Add(thing);
                             }
                         }
                     }
@@ -478,6 +695,7 @@ namespace RimWorldAccess
                 {
                     // Fire hazard
                     fireSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (thing is Plant plant)
                 {
@@ -493,10 +711,12 @@ namespace RimWorldAccess
                         if (plant.def.plant.harvestYield > 0)
                         {
                             harvestableTreesSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             nonHarvestableTreesSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                     else
@@ -505,11 +725,13 @@ namespace RimWorldAccess
                         if (plant.HarvestableNow || plant.def.plant.harvestYield > 0)
                         {
                             harvestablePlantsSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             // Debris (grass, etc.)
                             debrisSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                 }
@@ -517,6 +739,7 @@ namespace RimWorldAccess
                 {
                     // Blueprints and frames (construction projects) go to Orders-Construction
                     ordersConstructionSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (thing is Building building)
                 {
@@ -528,6 +751,7 @@ namespace RimWorldAccess
                     if (IsTravelingBuilding(building))
                     {
                         travelingSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else
                     {
@@ -569,11 +793,13 @@ namespace RimWorldAccess
                                     structureSubcat.Items.Add(item);
                                     break;
                             }
+                            categorizedThings.Add(thing);
                         }
                         else
                         {
                             // No designation category - default to structure
                             structureSubcat.Items.Add(item);
+                            categorizedThings.Add(thing);
                         }
                     }
                 }
@@ -581,6 +807,7 @@ namespace RimWorldAccess
                 {
                     // Stone chunks go to mineable chunks subcategory
                     mineableChunksSubcat.Items.Add(item);
+                    categorizedThings.Add(thing);
                 }
                 else if (!IsDebrisItem(thing))
                 {
@@ -588,27 +815,36 @@ namespace RimWorldAccess
                     if (thing.IsForbidden(Faction.OfPlayer))
                     {
                         itemsForbiddenSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (IsUninstalledFurniture(thing))
                     {
                         // Uninstalled furniture
                         itemsFurnitureSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else if (IsInStorage(thing, map))
                     {
                         // Items in stockpiles/shelves
                         itemsStoredSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                     else
                     {
                         // Scattered items not in storage
                         itemsScatteredSubcat.Items.Add(item);
+                        categorizedThings.Add(thing);
                     }
                 }
             }
 
             // Collect mineable tiles and terrain
             var allCells = map.AllCells;
+
+            // Collect mineables by def type for later adjacency grouping
+            var mineableRareByDef = new Dictionary<string, List<(IntVec3 position, Thing thing)>>();
+            var mineableStoneByDef = new Dictionary<string, List<(IntVec3 position, Thing thing)>>();
+
             foreach (var cell in allCells)
             {
                 // Skip fogged cells
@@ -621,18 +857,24 @@ namespace RimWorldAccess
                 var edifice = cell.GetEdifice(map);
                 if (edifice != null && edifice.def.building != null && edifice.def.building.isNaturalRock)
                 {
-                    var item = new ScannerItem(edifice, cursorPosition);
+                    string defKey = edifice.def.defName;
 
                     // Separate rare minerals (ore) from plain stone
                     if (edifice.def.building.isResourceRock && edifice.def.building.mineableYield > 0)
                     {
                         // Rare minerals (steel, gold, plasteel, uranium, etc.)
-                        mineableRareSubcat.Items.Add(item);
+                        if (!mineableRareByDef.ContainsKey(defKey))
+                            mineableRareByDef[defKey] = new List<(IntVec3, Thing)>();
+                        mineableRareByDef[defKey].Add((cell, edifice));
+                        categorizedThings.Add(edifice);
                     }
                     else
                     {
                         // Plain stone (granite, marble, slate, limestone, sandstone)
-                        mineableStoneSubcat.Items.Add(item);
+                        if (!mineableStoneByDef.ContainsKey(defKey))
+                            mineableStoneByDef[defKey] = new List<(IntVec3, Thing)>();
+                        mineableStoneByDef[defKey].Add((cell, edifice));
+                        categorizedThings.Add(edifice);
                     }
                 }
 
@@ -663,6 +905,73 @@ namespace RimWorldAccess
                             var terrainItem = new ScannerItem(cell, terrain.label, cursorPosition);
                             terrainConstructedSubcat.Items.Add(terrainItem);
                         }
+                    }
+                }
+            }
+
+            // Group rare mineables (ore) by adjacency
+            foreach (var kvp in mineableRareByDef)
+            {
+                var positions = kvp.Value.Select(x => x.position).ToList();
+                var regions = GroupTerrainByAdjacency(positions, cursorPosition);
+                var primaryThing = kvp.Value[0].thing;
+                string label = primaryThing.def.label ?? "Unknown";
+
+                // Create item with regions (like terrain does)
+                var item = new ScannerItem(regions, label, cursorPosition, primaryThing);
+                mineableRareSubcat.Items.Add(item);
+            }
+
+            // Group stone mineables by adjacency
+            foreach (var kvp in mineableStoneByDef)
+            {
+                var positions = kvp.Value.Select(x => x.position).ToList();
+                var regions = GroupTerrainByAdjacency(positions, cursorPosition);
+                var primaryThing = kvp.Value[0].thing;
+                string label = primaryThing.def.label ?? "Unknown";
+
+                // Create item with regions (like terrain does)
+                var item = new ScannerItem(regions, label, cursorPosition, primaryThing);
+                mineableStoneSubcat.Items.Add(item);
+            }
+
+            // Collect deep ore deposits (only if active ground-penetrating scanner exists)
+            // NOTE: Deep ore is underground and NOT filtered by fog of war.
+            // When a powered scanner exists, deep resources are visible on the entire map,
+            // just like sighted players see the overlay everywhere including unexplored areas.
+            if (map.deepResourceGrid.AnyActiveDeepScannersOnMap())
+            {
+                // Collect deep ore cells by def type with quantities
+                var deepOreByDef = new Dictionary<string, List<(IntVec3 position, int count, ThingDef oreDef)>>();
+
+                foreach (var cell in allCells)
+                {
+                    // Deep ore is underground - no fog check needed (matches RimWorld's behavior)
+                    var oreDef = map.deepResourceGrid.ThingDefAt(cell);
+                    if (oreDef != null)
+                    {
+                        int count = map.deepResourceGrid.CountAt(cell);
+                        if (count > 0)
+                        {
+                            string defKey = oreDef.defName;
+                            if (!deepOreByDef.ContainsKey(defKey))
+                                deepOreByDef[defKey] = new List<(IntVec3, int, ThingDef)>();
+                            deepOreByDef[defKey].Add((cell, count, oreDef));
+                        }
+                    }
+                }
+
+                // Group deep ore by adjacency and create scanner items
+                foreach (var kvp in deepOreByDef)
+                {
+                    var positionsWithCounts = kvp.Value.Select(x => (x.position, x.count)).ToList();
+                    var oreDef = kvp.Value[0].oreDef;
+                    var regions = GroupDeepOreByAdjacency(positionsWithCounts, cursorPosition);
+
+                    if (regions.Count > 0)
+                    {
+                        var item = new ScannerItem(regions, oreDef, cursorPosition);
+                        mineableScannedSubcat.Items.Add(item);
                     }
                 }
             }
@@ -769,11 +1078,35 @@ namespace RimWorldAccess
             roomsAllSubcat.Items.AddRange(
                 visibleIndoorRooms.Select(room => new ScannerItem(room, cursorPosition)));
 
+            // Collect all map things not yet categorized
+            var uncategorizedCategory = new ScannerCategory("Uncategorized");
+            var uncategorizedByDef = new Dictionary<string, ScannerSubcategory>();
+
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (!categorizedThings.Contains(thing) &&
+                    thing.Spawned &&
+                    thing.Position.IsValid &&
+                    thing.def.selectable &&
+                    !thing.Position.Fogged(map))
+                {
+                    // Group by def label as subcategory
+                    string subcat = thing.def.label ?? thing.def.defName;
+                    if (!uncategorizedByDef.ContainsKey(subcat))
+                    {
+                        var newSubcat = new ScannerSubcategory($"Uncategorized-{subcat}");
+                        uncategorizedByDef[subcat] = newSubcat;
+                        uncategorizedCategory.Subcategories.Add(newSubcat);
+                    }
+                    uncategorizedByDef[subcat].Items.Add(new ScannerItem(thing, cursorPosition));
+                }
+            }
+
             // Group identical items and sort all subcategories by distance
             foreach (var category in new[] { pawnsCategory, tameAnimalsCategory, wildAnimalsCategory,
                                              hazardsCategory, buildingsCategory, treesCategory, plantsCategory,
                                              itemsCategory, terrainCategory, mineableCategory, ordersCategory,
-                                             zonesCategory, roomsCategory })
+                                             zonesCategory, roomsCategory, uncategorizedCategory })
             {
                 foreach (var subcat in category.Subcategories)
                 {
@@ -799,6 +1132,7 @@ namespace RimWorldAccess
             categories.Add(ordersCategory);
             categories.Add(zonesCategory);
             categories.Add(roomsCategory);
+            categories.Add(uncategorizedCategory);
 
             // Remove empty categories
             categories.RemoveAll(c => c.IsEmpty);
@@ -926,9 +1260,124 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Performs a flood fill to find all contiguous positions starting from a given position.
+        /// Uses 8-way adjacency (cardinal + diagonal).
+        /// </summary>
+        /// <param name="startPos">The starting position for the flood fill</param>
+        /// <param name="validPositions">Set of all valid positions to consider (must be of same terrain type)</param>
+        /// <returns>Set of all contiguous positions found</returns>
+        private static HashSet<IntVec3> FloodFillTerrainRegion(IntVec3 startPos, HashSet<IntVec3> validPositions)
+        {
+            var region = new HashSet<IntVec3>();
+            var queue = new Queue<IntVec3>();
+            queue.Enqueue(startPos);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+
+                if (!validPositions.Contains(current) || region.Contains(current))
+                    continue;
+
+                region.Add(current);
+
+                // Check all 8 neighbors (cardinal + diagonal)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        if (dx == 0 && dz == 0) continue;
+
+                        var neighbor = new IntVec3(current.x + dx, 0, current.z + dz);
+                        if (validPositions.Contains(neighbor) && !region.Contains(neighbor))
+                        {
+                            queue.Enqueue(neighbor);
+                        }
+                    }
+                }
+            }
+
+            return region;
+        }
+
+        /// <summary>
+        /// Groups terrain positions by adjacency into separate regions.
+        /// </summary>
+        /// <param name="positions">All positions with the same terrain label</param>
+        /// <param name="cursorPosition">Current cursor position for distance calculation</param>
+        /// <returns>List of TerrainRegion objects sorted by distance from cursor</returns>
+        private static List<TerrainRegion> GroupTerrainByAdjacency(List<IntVec3> positions, IntVec3 cursorPosition)
+        {
+            var regions = new List<TerrainRegion>();
+            var remaining = new HashSet<IntVec3>(positions);
+
+            while (remaining.Count > 0)
+            {
+                // Start flood fill from the first remaining position
+                var startPos = remaining.First();
+                var regionPositions = FloodFillTerrainRegion(startPos, remaining);
+
+                if (regionPositions.Count > 0)
+                {
+                    var region = new TerrainRegion(regionPositions.ToList(), cursorPosition);
+                    regions.Add(region);
+
+                    // Remove processed positions
+                    foreach (var pos in regionPositions)
+                        remaining.Remove(pos);
+                }
+            }
+
+            // Sort regions by distance from cursor
+            regions = regions.OrderBy(r => r.Distance).ToList();
+
+            return regions;
+        }
+
+        /// <summary>
+        /// Groups deep ore positions by adjacency into separate regions, tracking quantity per region.
+        /// </summary>
+        /// <param name="positionsWithCounts">All positions with their ore counts</param>
+        /// <param name="cursorPosition">Current cursor position for distance calculation</param>
+        /// <returns>List of TerrainRegion objects with TotalQuantity populated, sorted by distance</returns>
+        private static List<TerrainRegion> GroupDeepOreByAdjacency(
+            List<(IntVec3 position, int count)> positionsWithCounts,
+            IntVec3 cursorPosition)
+        {
+            var regions = new List<TerrainRegion>();
+            var positionToCount = positionsWithCounts.ToDictionary(p => p.position, p => p.count);
+            var remaining = new HashSet<IntVec3>(positionsWithCounts.Select(p => p.position));
+
+            while (remaining.Count > 0)
+            {
+                // Start flood fill from the first remaining position
+                var startPos = remaining.First();
+                var regionPositions = FloodFillTerrainRegion(startPos, remaining);
+
+                if (regionPositions.Count > 0)
+                {
+                    // Build list with counts for this region
+                    var regionWithCounts = regionPositions
+                        .Select(pos => (pos, positionToCount[pos]))
+                        .ToList();
+
+                    var region = new TerrainRegion(regionWithCounts, cursorPosition);
+                    regions.Add(region);
+
+                    // Remove processed positions
+                    foreach (var pos in regionPositions)
+                        remaining.Remove(pos);
+                }
+            }
+
+            // Sort regions by distance from cursor
+            return regions.OrderBy(r => r.Distance).ToList();
+        }
+
+        /// <summary>
         /// Groups identical items together (same def, quality, stuff).
         /// Pawns are never grouped - they're unique individuals.
-        /// Terrain tiles are grouped by label (e.g., all "granite flagstone" tiles together).
+        /// Terrain tiles are grouped by adjacency into separate regions.
         /// Designations are grouped by designation type.
         /// </summary>
         private static List<ScannerItem> GroupIdenticalItems(List<ScannerItem> items, IntVec3 cursorPosition)
@@ -940,7 +1389,15 @@ namespace RimWorldAccess
 
             foreach (var item in items)
             {
-                // Group terrain items by label
+                // Skip items that already have terrain regions (e.g., deep ore deposits, pre-grouped mineables)
+                // These were already grouped during collection and shouldn't be re-processed
+                if (item.HasTerrainRegions)
+                {
+                    grouped.Add(item);
+                    continue;
+                }
+
+                // Group terrain items by adjacency into regions
                 if (item.IsTerrain)
                 {
                     // Skip if we already processed this position
@@ -948,7 +1405,7 @@ namespace RimWorldAccess
                         continue;
 
                     // Find all terrain tiles with the same label
-                    var identicalPositions = new List<IntVec3> { item.Position };
+                    var allPositionsWithLabel = new List<IntVec3> { item.Position };
                     processedPositions.Add(item.Position);
 
                     foreach (var otherItem in items)
@@ -958,20 +1415,22 @@ namespace RimWorldAccess
 
                         if (otherItem.Label == item.Label)
                         {
-                            identicalPositions.Add(otherItem.Position);
+                            allPositionsWithLabel.Add(otherItem.Position);
                             processedPositions.Add(otherItem.Position);
                         }
                     }
 
-                    // Create grouped terrain item if multiple found, otherwise add single item
-                    if (identicalPositions.Count > 1)
+                    // Group positions by adjacency into separate regions
+                    var regions = GroupTerrainByAdjacency(allPositionsWithLabel, cursorPosition);
+
+                    if (regions.Count > 0)
                     {
-                        // Sort by distance for the bulk group
-                        identicalPositions = identicalPositions.OrderBy(p => (p - cursorPosition).LengthHorizontal).ToList();
-                        grouped.Add(new ScannerItem(identicalPositions, item.Label, cursorPosition));
+                        // Create a terrain item with regions
+                        grouped.Add(new ScannerItem(regions, item.Label, cursorPosition));
                     }
-                    else
+                    else if (allPositionsWithLabel.Count == 1)
                     {
+                        // Single tile, just add the original item
                         grouped.Add(item);
                     }
                     continue;

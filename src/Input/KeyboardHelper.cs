@@ -44,12 +44,14 @@ namespace RimWorldAccess
                 // input via UnifiedKeyboardPatch priorities
                 || CaravanInspectState.IsActive
                 || (CaravanFormationState.IsActive && !CaravanFormationState.IsChoosingDestination)
+                || RitualState.IsActive
                 || QuestMenuState.IsActive
                 || NotificationMenuState.IsActive
                 || AssignMenuState.IsActive
                 || WorkMenuState.IsActive
                 || StorageSettingsMenuState.IsActive
                 || ZoneRenameState.IsActive
+                || StorageRenameState.IsActive
                 || PlantSelectionMenuState.IsActive
                 || GizmoNavigationState.IsActive
                 || TradeNavigationState.IsActive
@@ -86,10 +88,14 @@ namespace RimWorldAccess
                 || SplitCaravanState.IsActive
                 || GearEquipMenuState.IsActive
                 || QuantityMenuState.IsActive
+                || AreaSelectionMenuState.IsActive
                 // History tab
                 || HistoryState.IsActive
                 || HistoryStatisticsState.IsActive
-                || HistoryMessagesState.IsActive;
+                || HistoryMessagesState.IsActive
+                // Building placement modes
+                || ViewingModeState.IsActive
+                || ShapePlacementState.IsActive;
         }
     }
 }

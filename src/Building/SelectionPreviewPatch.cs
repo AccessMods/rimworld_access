@@ -71,26 +71,69 @@ namespace RimWorldAccess
                 }
             }
 
-            // Render architect mode zone placement preview
-            if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
+            // Render architect mode placement preview (for cells that were toggled via Space in single-cell mode)
+            if (ArchitectState.IsInPlacementMode)
             {
-                // Draw preview cells using native green highlight material
-                if (ArchitectState.PreviewCells.Count > 0)
-                {
-                    RenderCells(ArchitectState.PreviewCells.ToList(), DesignatorUtility.DragHighlightCellMat);
-                }
-
-                // Draw already-selected cells
+                // Draw already-selected cells (from single-cell toggle mode)
                 if (ArchitectState.SelectedCells.Count > 0)
                 {
                     RenderCells(ArchitectState.SelectedCells, DesignatorUtility.DragHighlightCellMat);
                 }
+            }
 
-                // Draw rectangle outline if in preview mode
-                if (ArchitectState.IsInPreviewMode)
+            // Render shape placement preview (two-point placement)
+            if (ShapePlacementState.IsActive && ShapePlacementState.PreviewCells != null && ShapePlacementState.PreviewCells.Count > 0)
+            {
+                // Draw preview cells using native green highlight material
+                RenderCells(ShapePlacementState.PreviewCells, DesignatorUtility.DragHighlightCellMat);
+
+                // Draw rectangle outline connecting first point to current cursor
+                if (ShapePlacementState.FirstPoint.HasValue)
                 {
-                    RenderRectangleOutline(ArchitectState.RectangleStart.Value,
-                                           ArchitectState.RectangleEnd.Value);
+                    IntVec3 firstPoint = ShapePlacementState.FirstPoint.Value;
+                    IntVec3 secondPoint = ShapePlacementState.SecondPoint ?? MapNavigationState.CurrentCursorPosition;
+                    RenderRectangleOutline(firstPoint, secondPoint);
+                }
+            }
+
+            // Render viewing mode highlights (after shape placement)
+            if (ViewingModeState.IsActive)
+            {
+                // Capture reference once to avoid state changes during render
+                var obstacleCells = ViewingModeState.ObstacleCells;
+
+                // Highlight all obstacle cells in red
+                if (obstacleCells != null && obstacleCells.Count > 0)
+                {
+                    GenDraw.DrawFieldEdges(obstacleCells, Color.red);
+
+                    // Highlight current obstacle more prominently with yellow/bright color
+                    // The current obstacle is tracked by ScannerState's temporary category
+                    if (ScannerState.IsInTemporaryCategory())
+                    {
+                        IntVec3 currentObstacle = ScannerState.GetCurrentItemPosition();
+                        if (currentObstacle.IsValid && obstacleCells.Contains(currentObstacle))
+                        {
+                            GenDraw.DrawFieldEdges(new List<IntVec3> { currentObstacle }, Color.yellow);
+                        }
+                    }
+                }
+
+                // Highlight placed blueprints with green edges for visibility
+                if (ViewingModeState.PlacedBlueprints != null && ViewingModeState.PlacedBlueprints.Count > 0)
+                {
+                    List<IntVec3> blueprintCells = new List<IntVec3>();
+                    foreach (Thing blueprint in ViewingModeState.PlacedBlueprints)
+                    {
+                        if (blueprint != null && !blueprint.Destroyed)
+                        {
+                            blueprintCells.Add(blueprint.Position);
+                        }
+                    }
+                    if (blueprintCells.Count > 0)
+                    {
+                        GenDraw.DrawFieldEdges(blueprintCells, Color.green);
+                    }
                 }
             }
         }
@@ -98,7 +141,7 @@ namespace RimWorldAccess
         /// <summary>
         /// Renders cell highlights using native RimWorld materials.
         /// </summary>
-        private static void RenderCells(List<IntVec3> cells, Material material)
+        private static void RenderCells(IEnumerable<IntVec3> cells, Material material)
         {
             foreach (var cell in cells)
             {

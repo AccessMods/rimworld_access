@@ -45,9 +45,6 @@ namespace RimWorldAccess
         private static Rot4 currentRotation = Rot4.North;
         private static ArchitectSelectionMode selectionMode = ArchitectSelectionMode.BoxSelection; // Default to box selection
 
-        // Rectangle selection helper (shared logic for rectangle-based selection)
-        private static readonly RectangleSelectionHelper rectangleHelper = new RectangleSelectionHelper();
-
         // Reflection field info for accessing protected placingRot field
         private static FieldInfo placingRotField = AccessTools.Field(typeof(Designator_Place), "placingRot");
 
@@ -78,8 +75,18 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Gets the list of selected cells for placement.
+        /// Returns a read-only view to prevent external mutation.
         /// </summary>
-        public static List<IntVec3> SelectedCells => selectedCells;
+        public static IReadOnlyList<IntVec3> SelectedCells => selectedCells.AsReadOnly();
+
+        /// <summary>
+        /// Clears the internal selected cells list.
+        /// Used after placing a build designator at a single cell.
+        /// </summary>
+        public static void ClearSelectedCells()
+        {
+            selectedCells.Clear();
+        }
 
         /// <summary>
         /// Gets or sets the current rotation for building placement.
@@ -97,33 +104,12 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Whether we're currently in placement mode on the map.
+        /// Defensive check: also verifies a designator is actually selected in the game.
+        /// This prevents stale state if the designator was deselected externally.
         /// </summary>
-        public static bool IsInPlacementMode => currentMode == ArchitectMode.PlacementMode;
-
-        /// <summary>
-        /// Whether a rectangle start corner has been set.
-        /// </summary>
-        public static bool HasRectangleStart => rectangleHelper.HasRectangleStart;
-
-        /// <summary>
-        /// Whether we are actively previewing a rectangle (start and end set).
-        /// </summary>
-        public static bool IsInPreviewMode => rectangleHelper.IsInPreviewMode;
-
-        /// <summary>
-        /// The start corner of the rectangle being selected.
-        /// </summary>
-        public static IntVec3? RectangleStart => rectangleHelper.RectangleStart;
-
-        /// <summary>
-        /// The end corner of the rectangle being selected.
-        /// </summary>
-        public static IntVec3? RectangleEnd => rectangleHelper.RectangleEnd;
-
-        /// <summary>
-        /// Cells in the current rectangle preview.
-        /// </summary>
-        public static IReadOnlyList<IntVec3> PreviewCells => rectangleHelper.PreviewCells;
+        public static bool IsInPlacementMode =>
+            currentMode == ArchitectMode.PlacementMode &&
+            Find.DesignatorManager?.SelectedDesignator != null;
 
         /// <summary>
         /// Gets the current selection mode (BoxSelection or SingleTile).
@@ -202,9 +188,14 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Enters placement mode with the selected designator.
+        /// This method sets up ArchitectState and calls DesignatorManager.Select().
+        /// The DesignatorManagerPatch will handle entering ShapePlacementState or announcing manual mode.
         /// </summary>
         public static void EnterPlacementMode(Designator designator, ThingDef material = null)
         {
+            // Close gizmo navigation when entering placement mode
+            GizmoNavigationState.Close();
+
             currentMode = ArchitectMode.PlacementMode;
             selectedDesignator = designator;
             selectedMaterial = material;
@@ -216,12 +207,6 @@ namespace RimWorldAccess
             // Reset selection mode to box selection
             selectionMode = ArchitectSelectionMode.BoxSelection;
 
-            // Set the designator as selected in the game's DesignatorManager
-            if (Find.DesignatorManager != null)
-            {
-                Find.DesignatorManager.Select(designator);
-            }
-
             // If this is a place designator (build or install), set its rotation via reflection
             if (designator is Designator_Place placeDesignator)
             {
@@ -232,9 +217,21 @@ namespace RimWorldAccess
             }
 
             string toolName = designator.Label;
-            string announcement = GetPlacementAnnouncement(designator);
-            TolkHelper.Speak(announcement);
             Log.Message($"Entered placement mode with designator: {toolName}");
+
+            // Set the designator as selected in the game's DesignatorManager
+            // The DesignatorManagerPatch.Postfix will handle entering accessible placement mode
+            if (Find.DesignatorManager != null)
+            {
+                Find.DesignatorManager.Select(designator);
+
+                // Sync our tracked rotation with the designator's actual rotation
+                // (RimWorld's Selected() sets placingRot to PlacingDef.defaultPlacingRot)
+                if (designator is Designator_Place placeDesignatorForSync && placingRotField != null)
+                {
+                    currentRotation = (Rot4)placingRotField.GetValue(placeDesignatorForSync);
+                }
+            }
         }
 
         /// <summary>
@@ -259,46 +256,6 @@ namespace RimWorldAccess
             string announcement = GetRotationAnnouncementForDef(placeDesignator.PlacingDef, currentRotation);
             TolkHelper.Speak(announcement);
             Log.Message($"Rotated building to: {currentRotation}");
-        }
-
-        /// <summary>
-        /// Gets the initial placement announcement including size and rotation info.
-        /// Works with both Designator_Build (new construction) and Designator_Install (reinstall/install).
-        /// </summary>
-        private static string GetPlacementAnnouncement(Designator designator)
-        {
-            // Handle Designator_Place (parent of both Designator_Build and Designator_Install)
-            if (!(designator is Designator_Place placeDesignator))
-            {
-                return $"{designator.Label} selected. Press Space to designate tiles, Enter to confirm, Escape to cancel";
-            }
-
-            BuildableDef entDef = placeDesignator.PlacingDef;
-            if (entDef == null)
-            {
-                return $"{designator.Label} selected. Press Space to place, R to rotate, Escape to cancel";
-            }
-
-            IntVec2 size = entDef.Size;
-
-            string sizeInfo = GetSizeDescription(size, currentRotation);
-            string specialRequirements = GetSpecialSpatialRequirements(entDef, currentRotation);
-            string controlInfo = "Press Space to place, R to rotate, Escape to cancel";
-
-            if (!string.IsNullOrEmpty(specialRequirements))
-            {
-                return $"{designator.Label} selected. {sizeInfo}. {specialRequirements}. {controlInfo}";
-            }
-
-            return $"{designator.Label} selected. {sizeInfo}. {controlInfo}";
-        }
-
-        /// <summary>
-        /// Gets rotation announcement including size and spatial requirements.
-        /// </summary>
-        private static string GetRotationAnnouncement(Designator_Build buildDesignator)
-        {
-            return GetRotationAnnouncementForDef(buildDesignator.PlacingDef, currentRotation);
         }
 
         /// <summary>
@@ -362,31 +319,29 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets spatial requirements for wind turbines.
+        /// Wind turbine clear space requirements by rotation.
         /// Verified against WindTurbineUtility.CalculateWindCells() in game code:
         /// - North/East facing: 9 tiles front, 5 tiles back
         /// - South/West facing: 5 tiles front, 9 tiles back
         /// </summary>
+        private static readonly Dictionary<Rot4, (string front, string back)> WindTurbineDirections = new Dictionary<Rot4, (string, string)>
+        {
+            { Rot4.North, ("9 tiles north", "5 tiles south") },
+            { Rot4.East, ("9 tiles east", "5 tiles west") },
+            { Rot4.South, ("5 tiles north", "9 tiles south") },
+            { Rot4.West, ("5 tiles east", "9 tiles west") }
+        };
+
+        /// <summary>
+        /// Gets spatial requirements for wind turbines.
+        /// </summary>
         private static string GetWindTurbineRequirements(Rot4 rotation)
         {
-            // Wind turbines need clear space in front and behind
-            // The exact distances vary based on rotation
-            if (rotation == Rot4.North)
+            if (WindTurbineDirections.TryGetValue(rotation, out var directions))
             {
-                return "Requires clear space: 9 tiles north, 5 tiles south";
+                return $"Requires clear space: {directions.front}, {directions.back}";
             }
-            else if (rotation == Rot4.East)
-            {
-                return "Requires clear space: 9 tiles east, 5 tiles west";
-            }
-            else if (rotation == Rot4.South)
-            {
-                return "Requires clear space: 5 tiles north, 9 tiles south";
-            }
-            else // West
-            {
-                return "Requires clear space: 5 tiles east, 9 tiles west";
-            }
+            return "Requires clear space in front and behind";
         }
 
         // NOTE: Cooler handling moved to BuildingCellHelper.GetCoolerDirectionInfo()
@@ -466,6 +421,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Adds a cell to the selection if valid for the current designator.
+        /// For zone designators, enforces adjacency requirements.
         /// </summary>
         public static void ToggleCell(IntVec3 cell)
         {
@@ -474,16 +430,43 @@ namespace RimWorldAccess
 
             // Check if this designator can designate this cell
             AcceptanceReport report = selectedDesignator.CanDesignateCell(cell);
+            bool isZone = ShapeHelper.IsZoneDesignator(selectedDesignator);
 
             if (selectedCells.Contains(cell))
             {
-                // Remove cell
+                // Removing - check if it would disconnect the selection (for zones)
+                if (isZone && selectedCells.Count > 1 && WouldDisconnectSelection(cell))
+                {
+                    TolkHelper.Speak("Cannot remove, would disconnect selection");
+                    return;
+                }
                 selectedCells.Remove(cell);
                 TolkHelper.Speak($"Deselected, {cell.x}, {cell.z}");
             }
             else if (report.Accepted)
             {
-                // Add cell
+                // For zone designators, additional validation
+                if (isZone)
+                {
+                    Map map = Find.CurrentMap;
+                    if (map != null)
+                    {
+                        // Check if cell is already in ANY zone (RimWorld's CanDesignateCell allows same-type zones)
+                        Zone existingZone = map.zoneManager.ZoneAt(cell);
+                        if (existingZone != null)
+                        {
+                            TolkHelper.Speak($"Cell is already in {existingZone.label}");
+                            return;
+                        }
+                    }
+
+                    // Enforce adjacency (except first cell)
+                    if (selectedCells.Count > 0 && !IsAdjacentToSelection(cell))
+                    {
+                        TolkHelper.Speak("Cell must be adjacent to selection");
+                        return;
+                    }
+                }
                 selectedCells.Add(cell);
                 TolkHelper.Speak($"Selected, {cell.x}, {cell.z}");
             }
@@ -496,40 +479,54 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Sets the start corner for rectangle selection.
+        /// Checks if a cell is adjacent to any cell in the current selection.
         /// </summary>
-        public static void SetRectangleStart(IntVec3 cell)
+        private static bool IsAdjacentToSelection(IntVec3 cell)
         {
-            rectangleHelper.SetStart(cell);
-        }
-
-        /// <summary>
-        /// Updates the rectangle preview as the cursor moves.
-        /// Plays native sound feedback when cell count changes.
-        /// </summary>
-        public static void UpdatePreview(IntVec3 endCell)
-        {
-            rectangleHelper.UpdatePreview(endCell);
-        }
-
-        /// <summary>
-        /// Confirms the current rectangle preview, adding all cells to selection.
-        /// </summary>
-        public static void ConfirmRectangle()
-        {
-            rectangleHelper.ConfirmRectangle(selectedCells, out var newCells);
-            foreach (var cell in newCells)
+            for (int i = 0; i < 4; i++)
             {
-                selectedCells.Add(cell);
+                IntVec3 neighbor = cell + GenAdj.CardinalDirections[i];
+                if (selectedCells.Contains(neighbor))
+                    return true;
             }
+            return false;
         }
 
         /// <summary>
-        /// Cancels the current rectangle selection without adding cells.
+        /// Checks if removing a cell would disconnect the remaining selection.
+        /// Uses flood-fill algorithm.
         /// </summary>
-        public static void CancelRectangle()
+        private static bool WouldDisconnectSelection(IntVec3 cellToRemove)
         {
-            rectangleHelper.Cancel();
+            var remaining = new HashSet<IntVec3>(selectedCells);
+            remaining.Remove(cellToRemove);
+
+            if (remaining.Count == 0)
+                return false;
+
+            // Flood-fill from first remaining cell
+            var visited = new HashSet<IntVec3>();
+            var queue = new Queue<IntVec3>();
+            var startCell = remaining.First();
+
+            queue.Enqueue(startCell);
+            visited.Add(startCell);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                for (int i = 0; i < 4; i++)
+                {
+                    var neighbor = current + GenAdj.CardinalDirections[i];
+                    if (remaining.Contains(neighbor) && !visited.Contains(neighbor))
+                    {
+                        visited.Add(neighbor);
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+
+            return visited.Count < remaining.Count;
         }
 
         /// <summary>
@@ -539,7 +536,7 @@ namespace RimWorldAccess
         {
             if (selectedDesignator == null || selectedCells.Count == 0)
             {
-                TolkHelper.Speak("No tiles selected");
+                TolkHelper.Speak("No cells selected");
                 Cancel();
                 return;
             }
@@ -550,8 +547,8 @@ namespace RimWorldAccess
                 selectedDesignator.DesignateMultiCell(selectedCells);
 
                 string toolName = selectedDesignator.Label;
-                TolkHelper.Speak($"{toolName} placed on {selectedCells.Count} tiles");
-                Log.Message($"Executed placement: {toolName} on {selectedCells.Count} tiles");
+                TolkHelper.Speak($"{toolName} placed on {selectedCells.Count} cells");
+                Log.Message($"Executed placement: {toolName} on {selectedCells.Count} cells");
             }
             catch (System.Exception ex)
             {
@@ -578,30 +575,27 @@ namespace RimWorldAccess
         /// <summary>
         /// Checks if the current designator is a zone/area/cell-based designator.
         /// This includes zones (stockpiles, growing zones), areas (home, roof), and other multi-cell designators.
+        /// Delegates to ShapeHelper for the type hierarchy check.
         /// </summary>
         public static bool IsZoneDesignator()
         {
-            if (selectedDesignator == null)
-                return false;
-
-            // Check if this designator's type hierarchy includes "Designator_Cells"
-            // This covers all multi-cell designators: zones, areas, roofs, etc.
-            System.Type type = selectedDesignator.GetType();
-            while (type != null)
-            {
-                if (type.Name == "Designator_Cells")
-                    return true;
-                type = type.BaseType;
-            }
-
-            return false;
+            return ShapeHelper.IsCellsDesignator(selectedDesignator) || ShapeHelper.IsZoneDesignator(selectedDesignator);
         }
 
         /// <summary>
         /// Resets the architect state completely.
+        /// Idempotent: safe to call multiple times, early exits if already inactive.
         /// </summary>
         public static void Reset()
         {
+            // Early exit if already inactive - prevents redundant work and logging
+            if (currentMode == ArchitectMode.Inactive)
+            {
+                return;
+            }
+
+            // Set mode to Inactive FIRST before calling Deselect()
+            // This prevents infinite loops with DesignatorManagerDeselectPatch
             currentMode = ArchitectMode.Inactive;
             selectedCategory = null;
             selectedDesignator = null;
@@ -610,9 +604,6 @@ namespace RimWorldAccess
             selectedCells.Clear();
             currentRotation = Rot4.North;
             selectionMode = ArchitectSelectionMode.BoxSelection; // Reset to default mode
-
-            // Clear rectangle selection state
-            rectangleHelper.Reset();
 
             // Deselect any active designator in the game
             if (Find.DesignatorManager != null)

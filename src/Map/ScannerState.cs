@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using RimWorld;
 using UnityEngine;
@@ -14,6 +15,15 @@ namespace RimWorldAccess
         private static int currentBulkIndex = 0; // Index within a bulk group
         private static bool autoJumpMode = false; // Auto-jump to items when navigating
 
+        // Saved focus state for temporary category operations
+        private static int savedCategoryIndex = -1;
+        private static int savedSubcategoryIndex = -1;
+        private static int savedItemIndex = -1;
+        private static int savedBulkIndex = -1;
+
+        // Temporary category tracking
+        private static ScannerCategory temporaryCategory = null;
+
         /// <summary>
         /// Toggles auto-jump mode on/off (Alt+Home).
         /// When enabled, cursor automatically jumps to items as you navigate.
@@ -23,6 +33,86 @@ namespace RimWorldAccess
             autoJumpMode = !autoJumpMode;
             string status = autoJumpMode ? "enabled" : "disabled";
             TolkHelper.Speak($"Auto-jump mode {status}", SpeechPriority.High);
+        }
+
+        /// <summary>
+        /// Saves the current scanner focus state for later restoration.
+        /// Used when temporarily switching to a different category (e.g., viewing obstacles).
+        /// </summary>
+        public static void SaveFocus()
+        {
+            savedCategoryIndex = currentCategoryIndex;
+            savedSubcategoryIndex = currentSubcategoryIndex;
+            savedItemIndex = currentItemIndex;
+            savedBulkIndex = currentBulkIndex;
+        }
+
+        /// <summary>
+        /// Restores the previously saved scanner focus state.
+        /// Call this after removing a temporary category to return to the previous position.
+        /// </summary>
+        public static void RestoreFocus()
+        {
+            if (savedCategoryIndex >= 0)
+            {
+                currentCategoryIndex = savedCategoryIndex;
+                currentSubcategoryIndex = savedSubcategoryIndex;
+                currentItemIndex = savedItemIndex;
+                currentBulkIndex = savedBulkIndex;
+
+                // Reset saved state
+                savedCategoryIndex = -1;
+                savedSubcategoryIndex = -1;
+                savedItemIndex = -1;
+                savedBulkIndex = -1;
+
+                // Validate indices in case the category list changed
+                ValidateIndices();
+            }
+        }
+
+        /// <summary>
+        /// Creates a temporary category with the given name and items, and selects it.
+        /// Only one temporary category can exist at a time.
+        /// The temporary category is a proper scanner category that:
+        /// - Appears in the category cycle (Ctrl+PageUp/Down)
+        /// - Is preserved across RefreshItems() calls
+        /// - Is cleared when Invalidate() is called (e.g., map switch)
+        /// </summary>
+        /// <param name="name">The name for the temporary category</param>
+        /// <param name="items">The items to include in the category</param>
+        public static void CreateTemporaryCategory(string name, List<ScannerItem> items)
+        {
+            // Remove any existing temporary category first
+            RemoveTemporaryCategory();
+
+            // Create the new temporary category with a single subcategory
+            temporaryCategory = new ScannerCategory(name);
+            var subcategory = new ScannerSubcategory($"{name}-All");
+            subcategory.Items.AddRange(items);
+            temporaryCategory.Subcategories.Add(subcategory);
+
+            // Add to the categories list
+            categories.Add(temporaryCategory);
+
+            // Select the temporary category
+            currentCategoryIndex = categories.Count - 1;
+            currentSubcategoryIndex = 0;
+            currentItemIndex = 0;
+            currentBulkIndex = 0;
+        }
+
+        /// <summary>
+        /// Removes the temporary category if one exists.
+        /// Call RestoreFocus() after this to return to the previous scanner position.
+        /// </summary>
+        public static void RemoveTemporaryCategory()
+        {
+            if (temporaryCategory != null)
+            {
+                categories.Remove(temporaryCategory);
+                temporaryCategory = null;
+            }
         }
 
         /// <summary>
@@ -59,19 +149,31 @@ namespace RimWorldAccess
         /// <summary>
         /// Invalidates the scanner cache, forcing a refresh on next access.
         /// Call this when switching maps or when map contents have significantly changed.
+        /// Also clears any temporary category since it's no longer valid.
         /// </summary>
         public static void Invalidate()
         {
             categories.Clear();
+            temporaryCategory = null;
             currentCategoryIndex = 0;
             currentSubcategoryIndex = 0;
             currentItemIndex = 0;
             currentBulkIndex = 0;
+
+            // Also clear saved focus since it's no longer valid
+            savedCategoryIndex = -1;
+            savedSubcategoryIndex = -1;
+            savedItemIndex = -1;
+            savedBulkIndex = -1;
+
+            // Clear any active search
+            ScannerSearchState.ClearSearchSilent();
         }
 
         /// <summary>
         /// Refreshes the scanner item list based on current cursor position.
         /// Called automatically by navigation methods.
+        /// If there's an active search filter, updates the filter with fresh items.
         /// </summary>
         private static void RefreshItems()
         {
@@ -88,9 +190,77 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Collect items
             var cursorPos = MapNavigationState.CurrentCursorPosition;
+
+            // Check if there's an active search filter that needs refreshing
+            if (ScannerSearchState.HasActiveFilter)
+            {
+                // Remember if user was in the filter category before refresh
+                bool wasInFilterCategory = IsInTemporaryCategory();
+                int previousItemIndex = currentItemIndex;
+
+                // Get fresh filtered items
+                var filteredItems = ScannerSearchState.RefreshMapFilter(map, cursorPos);
+                if (filteredItems != null)
+                {
+                    // Collect regular items first
+                    categories = ScannerHelper.CollectMapItems(map, cursorPos);
+
+                    // Update the temporary category with fresh filtered items
+                    if (filteredItems.Count > 0)
+                    {
+                        temporaryCategory = new ScannerCategory(ScannerSearchState.GetFilterCategoryName());
+                        var subcategory = new ScannerSubcategory($"{ScannerSearchState.GetFilterCategoryName()}-All");
+                        subcategory.Items.AddRange(filteredItems);
+                        temporaryCategory.Subcategories.Add(subcategory);
+                        categories.Add(temporaryCategory);
+
+                        // If user was in filter category, keep them there
+                        if (wasInFilterCategory)
+                        {
+                            currentCategoryIndex = categories.Count - 1; // Temp category is at end
+                            currentSubcategoryIndex = 0;
+                            // Try to preserve item index, clamping to valid range
+                            currentItemIndex = Math.Min(previousItemIndex, filteredItems.Count - 1);
+                            currentBulkIndex = 0;
+                        }
+                    }
+                    else
+                    {
+                        // No matches - remove temporary category
+                        temporaryCategory = null;
+
+                        // If user was in filter category, restore their previous focus
+                        if (wasInFilterCategory)
+                        {
+                            RestoreFocus();
+                        }
+                    }
+
+                    if (categories.Count == 0)
+                    {
+                        TolkHelper.Speak("No items found on map", SpeechPriority.High);
+                        return;
+                    }
+
+                    ValidateIndices();
+                    return;
+                }
+            }
+
+            // No active filter - standard refresh
+            // Save temporary category before refresh (for non-filter temporary categories)
+            var savedTemporaryCategory = temporaryCategory;
+
+            // Collect items
             categories = ScannerHelper.CollectMapItems(map, cursorPos);
+
+            // Re-add temporary category if it existed
+            if (savedTemporaryCategory != null)
+            {
+                temporaryCategory = savedTemporaryCategory;
+                categories.Add(temporaryCategory);
+            }
 
             if (categories.Count == 0)
             {
@@ -381,8 +551,13 @@ namespace RimWorldAccess
 
             if (currentItem.IsTerrain)
             {
-                // For terrain, check if we're navigating bulk terrain positions
-                if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
+                // For terrain regions, jump to the region center
+                if (currentItem.HasTerrainRegions && currentBulkIndex < currentItem.TerrainRegions.Count)
+                {
+                    targetPosition = currentItem.TerrainRegions[currentBulkIndex].CenterPosition;
+                }
+                // Legacy: bulk terrain positions
+                else if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
                 {
                     targetPosition = currentItem.BulkTerrainPositions[currentBulkIndex];
                 }
@@ -417,9 +592,14 @@ namespace RimWorldAccess
             {
                 // Get the actual thing to jump to (considering bulk index)
                 Thing targetThing = currentItem.Thing;
-                if (currentItem.IsBulkGroup && currentBulkIndex < currentItem.BulkCount)
+                if (currentItem.IsBulkGroup && currentItem.BulkThings != null && currentBulkIndex < currentItem.BulkThings.Count)
                 {
                     targetThing = currentItem.BulkThings[currentBulkIndex];
+                }
+                if (targetThing == null)
+                {
+                    TolkHelper.Speak("Item no longer exists", SpeechPriority.High);
+                    return;
                 }
                 targetPosition = targetThing.Position;
             }
@@ -450,6 +630,28 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Gets the position of the currently selected item in the scanner.
+        /// Used by visual preview patches to highlight the current item.
+        /// Returns IntVec3.Invalid if no item is selected.
+        /// </summary>
+        public static IntVec3 GetCurrentItemPosition()
+        {
+            var currentItem = GetCurrentItem();
+            if (currentItem == null)
+                return IntVec3.Invalid;
+
+            return currentItem.Position;
+        }
+
+        /// <summary>
+        /// Checks if the scanner is currently focused on a temporary category.
+        /// </summary>
+        public static bool IsInTemporaryCategory()
+        {
+            return temporaryCategory != null && GetCurrentCategory() == temporaryCategory;
+        }
+
         public static void ReadDistanceAndDirection()
         {
             if (WorldNavigationState.IsActive) return;
@@ -476,8 +678,13 @@ namespace RimWorldAccess
 
             if (currentItem.IsTerrain)
             {
-                // For terrain, check if we're navigating bulk terrain positions
-                if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
+                // For terrain regions, use region center
+                if (currentItem.HasTerrainRegions && currentBulkIndex < currentItem.TerrainRegions.Count)
+                {
+                    targetPos = currentItem.TerrainRegions[currentBulkIndex].CenterPosition;
+                }
+                // Legacy: bulk terrain positions
+                else if (currentItem.BulkTerrainPositions != null && currentBulkIndex < currentItem.BulkTerrainPositions.Count)
                 {
                     targetPos = currentItem.BulkTerrainPositions[currentBulkIndex];
                 }
@@ -488,20 +695,39 @@ namespace RimWorldAccess
             }
             else
             {
-                // Get the actual thing (considering bulk index)
-                targetPos = currentItem.Position;
+                // Get the actual thing's LIVE position (considering bulk index)
                 if (currentItem.IsBulkGroup && currentBulkIndex < currentItem.BulkCount)
                 {
-                    Thing targetThing = currentItem.BulkThings[currentBulkIndex];
-                    targetPos = targetThing.Position;
+                    if (currentItem.BulkThings != null && currentBulkIndex < currentItem.BulkThings.Count)
+                    {
+                        Thing targetThing = currentItem.BulkThings[currentBulkIndex];
+                        targetPos = targetThing.Position;
+                    }
+                    else
+                    {
+                        targetPos = currentItem.Thing?.Position ?? currentItem.Position;
+                    }
+                }
+                else
+                {
+                    // Use live position from Thing if available (for moving targets like pawns)
+                    targetPos = currentItem.Thing?.Position ?? currentItem.Position;
                 }
             }
 
             var cursorPos = MapNavigationState.CurrentCursorPosition;
             var distance = (targetPos - cursorPos).LengthHorizontal;
-            var direction = currentItem.GetDirectionFrom(cursorPos);
+            // Use our calculated targetPos for direction, not item.Position which may be stale
+            var direction = GetDirectionFromCursor(targetPos);
 
-            TolkHelper.Speak($"{distance:F1} tiles, {direction}", SpeechPriority.Normal);
+            if (direction != null)
+            {
+                TolkHelper.Speak($"{distance:F1} tiles {direction}", SpeechPriority.Normal);
+            }
+            else
+            {
+                TolkHelper.Speak("here", SpeechPriority.Normal);
+            }
         }
 
         private static ScannerCategory GetCurrentCategory()
@@ -604,6 +830,31 @@ namespace RimWorldAccess
             }
         }
 
+        /// <summary>
+        /// Calculates the compass direction from the cursor to a target position.
+        /// Returns null if the cursor is at or very close to the target.
+        /// </summary>
+        private static string GetDirectionFromCursor(IntVec3 targetPosition)
+        {
+            var cursorPos = MapNavigationState.CurrentCursorPosition;
+            IntVec3 offset = targetPosition - cursorPos;
+
+            if (offset.LengthHorizontal < 0.5f)
+                return null; // Same position
+
+            double angle = System.Math.Atan2(offset.x, offset.z) * (180.0 / System.Math.PI);
+            if (angle < 0) angle += 360;
+
+            if (angle >= 337.5 || angle < 22.5) return "North";
+            if (angle >= 22.5 && angle < 67.5) return "Northeast";
+            if (angle >= 67.5 && angle < 112.5) return "East";
+            if (angle >= 112.5 && angle < 157.5) return "Southeast";
+            if (angle >= 157.5 && angle < 202.5) return "South";
+            if (angle >= 202.5 && angle < 247.5) return "Southwest";
+            if (angle >= 247.5 && angle < 292.5) return "West";
+            return "Northwest";
+        }
+
         private static void AnnounceCurrentCategory()
         {
             var category = GetCurrentCategory();
@@ -629,17 +880,90 @@ namespace RimWorldAccess
                 return;
             }
 
-            // Build announcement without position info
-            string announcement = $"{item.Label} - {item.Distance:F1} tiles";
+            // Special handling for terrain with regions
+            if (item.HasTerrainRegions)
+            {
+                var region = item.TerrainRegions[currentBulkIndex];
+                var cursorPos = MapNavigationState.CurrentCursorPosition;
+                var distance = (region.CenterPosition - cursorPos).LengthHorizontal;
+                var direction = GetDirectionFromCursor(region.CenterPosition);
+
+                // Build size description - include quantity for deep ore deposits
+                string sizeAndQuantity;
+                if (region.TotalQuantity.HasValue && item.DeepOreDef != null)
+                {
+                    sizeAndQuantity = $"{region.TileCount} tiles ({region.TotalQuantity.Value} {item.DeepOreDef.label})";
+                }
+                else
+                {
+                    sizeAndQuantity = region.SizeDescription;
+                }
+
+                string announcement;
+                if (direction != null)
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, {distance:F1} tiles {direction}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, here";
+                }
+
+                if (item.RegionCount > 1)
+                {
+                    int position = currentBulkIndex + 1;
+                    announcement += $", region {position} of {item.RegionCount}";
+
+                    // Show total across all regions only when there are multiple regions
+                    if (item.HasQuantityInfo && item.DeepOreDef != null)
+                    {
+                        announcement += $", {item.TotalTileCount} tiles total ({item.TotalQuantityAcrossRegions} {item.DeepOreDef.label})";
+                    }
+                    else
+                    {
+                        announcement += $", {item.TotalTileCount} tiles total";
+                    }
+                }
+
+                TolkHelper.Speak(announcement, SpeechPriority.Normal);
+                return;
+            }
+
+            // Get target position (use live position for things that might be moving)
+            IntVec3 targetPos = item.Thing != null ? item.Thing.Position : item.Position;
+            var currentCursorPos = MapNavigationState.CurrentCursorPosition;
+            var freshDistance = (targetPos - currentCursorPos).LengthHorizontal;  // Calculate fresh distance
+            var itemDirection = GetDirectionFromCursor(targetPos);
+
+            // Build announcement with direction (use comma instead of hyphen to avoid "minus" reading)
+            string basicAnnouncement;
+            if (itemDirection != null)
+            {
+                basicAnnouncement = $"{item.Label}, {freshDistance:F1} tiles {itemDirection}";
+            }
+            else
+            {
+                basicAnnouncement = $"{item.Label}, here";
+            }
+
+            // Add location context for pawns (colonists, NPCs, animals)
+            if (item.Thing is Pawn)
+            {
+                string locationContext = TileInfoHelper.GetLocationContext(targetPos, Find.CurrentMap);
+                if (!string.IsNullOrEmpty(locationContext))
+                {
+                    basicAnnouncement += $" {locationContext}";
+                }
+            }
 
             // Add bulk count if this is a grouped item
             if (item.IsBulkGroup)
             {
                 int position = currentBulkIndex + 1;
-                announcement += $", {position} of {item.BulkCount}";
+                basicAnnouncement += $", {position} of {item.BulkCount}";
             }
 
-            TolkHelper.Speak(announcement, SpeechPriority.Normal);
+            TolkHelper.Speak(basicAnnouncement, SpeechPriority.Normal);
         }
 
         private static void AnnounceCurrentBulkItem()
@@ -651,8 +975,43 @@ namespace RimWorldAccess
             if (currentBulkIndex < 0 || currentBulkIndex >= item.BulkCount)
                 return;
 
-            // For terrain bulk groups, we don't have individual things
-            if (item.IsTerrain)
+            // For terrain regions (adjacency-grouped)
+            if (item.HasTerrainRegions)
+            {
+                if (currentBulkIndex >= item.TerrainRegions.Count)
+                    return;
+
+                var region = item.TerrainRegions[currentBulkIndex];
+                var regionDistance = (region.CenterPosition - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+                var regionDirection = GetDirectionFromCursor(region.CenterPosition);
+                int regionPosition = currentBulkIndex + 1;
+
+                // Build size description - include quantity for deep ore deposits
+                string sizeAndQuantity;
+                if (region.TotalQuantity.HasValue && item.DeepOreDef != null)
+                {
+                    sizeAndQuantity = $"{region.TileCount} tiles ({region.TotalQuantity.Value} {item.DeepOreDef.label})";
+                }
+                else
+                {
+                    sizeAndQuantity = region.SizeDescription;
+                }
+
+                string announcement;
+                if (regionDirection != null)
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, {regionDistance:F1} tiles {regionDirection}, region {regionPosition} of {item.RegionCount}";
+                }
+                else
+                {
+                    announcement = $"{item.Label}: {sizeAndQuantity}, here, region {regionPosition} of {item.RegionCount}";
+                }
+                TolkHelper.Speak(announcement, SpeechPriority.Normal);
+                return;
+            }
+
+            // For legacy terrain bulk groups (non-adjacent grouping)
+            if (item.IsTerrain && item.BulkTerrainPositions != null)
             {
                 var terrainPosition = currentBulkIndex + 1;
                 TolkHelper.Speak($"{item.Label} - {terrainPosition} of {item.BulkCount}", SpeechPriority.Normal);
@@ -666,8 +1025,9 @@ namespace RimWorldAccess
                     return;
 
                 var targetDesignation = item.BulkDesignations[currentBulkIndex];
-                var desCursorPos = MapNavigationState.CurrentCursorPosition;
-                var desDistance = (targetDesignation.target.Cell - desCursorPos).LengthHorizontal;
+                var desTargetPos = targetDesignation.target.Cell;
+                var desDistance = (desTargetPos - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+                var desDirection = GetDirectionFromCursor(desTargetPos);
                 var desPosition = currentBulkIndex + 1;
 
                 // Build label from the specific designation target
@@ -682,7 +1042,14 @@ namespace RimWorldAccess
                     designationLabel = item.Label;
                 }
 
-                TolkHelper.Speak($"{designationLabel} - {desDistance:F1} tiles, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                if (desDirection != null)
+                {
+                    TolkHelper.Speak($"{designationLabel}, {desDistance:F1} tiles {desDirection}, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                }
+                else
+                {
+                    TolkHelper.Speak($"{designationLabel}, here, {desPosition} of {item.BulkCount}", SpeechPriority.Normal);
+                }
                 return;
             }
 
@@ -694,14 +1061,22 @@ namespace RimWorldAccess
             if (targetThing == null)
                 return;
 
-            var cursorPos = MapNavigationState.CurrentCursorPosition;
-            var distance = (targetThing.Position - cursorPos).LengthHorizontal;
+            var thingTargetPos = targetThing.Position;
+            var distance = (thingTargetPos - MapNavigationState.CurrentCursorPosition).LengthHorizontal;
+            var thingDirection = GetDirectionFromCursor(thingTargetPos);
             var position = currentBulkIndex + 1;
 
             // Build label from this specific thing, not the group label
             string thingLabel = targetThing.LabelShort ?? targetThing.def?.label ?? item.Label;
 
-            TolkHelper.Speak($"{thingLabel} - {distance:F1} tiles, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            if (thingDirection != null)
+            {
+                TolkHelper.Speak($"{thingLabel}, {distance:F1} tiles {thingDirection}, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            }
+            else
+            {
+                TolkHelper.Speak($"{thingLabel}, here, {position} of {item.BulkCount}", SpeechPriority.Normal);
+            }
         }
 
         /// <summary>

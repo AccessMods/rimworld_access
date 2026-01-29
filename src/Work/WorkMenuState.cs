@@ -342,7 +342,7 @@ namespace RimWorldAccess
             }
             else
             {
-                TolkHelper.Speak("At highest priority");
+                AnnounceCurrentPosition(false);
             }
         }
 
@@ -367,7 +367,7 @@ namespace RimWorldAccess
             }
             else
             {
-                TolkHelper.Speak("At disabled column");
+                AnnounceCurrentPosition(false);
             }
         }
 
@@ -387,7 +387,7 @@ namespace RimWorldAccess
 
                 if (currentRow == 0)
                 {
-                    TolkHelper.Speak("Already at leftmost task");
+                    AnnounceCurrentPosition(false);
                     return;
                 }
 
@@ -400,7 +400,7 @@ namespace RimWorldAccess
 
                 if (basicModeIndex == 0)
                 {
-                    TolkHelper.Speak("Already at leftmost task");
+                    AnnounceCurrentPosition(false);
                     return;
                 }
 
@@ -425,7 +425,7 @@ namespace RimWorldAccess
 
                 if (currentRow == col.Count - 1)
                 {
-                    TolkHelper.Speak("Already at rightmost task");
+                    AnnounceCurrentPosition(false);
                     return;
                 }
 
@@ -438,7 +438,7 @@ namespace RimWorldAccess
 
                 if (basicModeIndex == allEntries.Count - 1)
                 {
-                    TolkHelper.Speak("Already at rightmost task");
+                    AnnounceCurrentPosition(false);
                     return;
                 }
 
@@ -469,7 +469,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak("At leftmost task");
+                    AnnounceCurrentPosition(false);
                 }
             }
             else
@@ -484,7 +484,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak("At leftmost task");
+                    AnnounceCurrentPosition(false);
                 }
             }
         }
@@ -511,7 +511,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak("At rightmost task");
+                    AnnounceCurrentPosition(false);
                 }
             }
             else
@@ -526,7 +526,7 @@ namespace RimWorldAccess
                 }
                 else
                 {
-                    TolkHelper.Speak("At rightmost task");
+                    AnnounceCurrentPosition(false);
                 }
             }
         }

@@ -72,27 +72,16 @@ namespace RimWorldAccess
 
             bool addedSomething = false;
 
-            // Add individual pawns (most important)
-            foreach (var pawn in pawns.Take(3))
+            // Add pawns with optional activity grouping
+            if (pawns.Count > 0)
             {
-                if (addedSomething) sb.Append(", ");
-
-                sb.Append(pawn.LabelShort);
-
-                // Add suffix for hostile or trader pawns
-                string suffix = GetPawnSuffix(pawn);
-                if (!string.IsNullOrEmpty(suffix))
+                string pawnsText = FormatPawnsForTileSummary(pawns);
+                if (!string.IsNullOrEmpty(pawnsText))
                 {
-                    sb.Append(suffix);
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(pawnsText);
+                    addedSomething = true;
                 }
-
-                addedSomething = true;
-            }
-            if (pawns.Count > 3)
-            {
-                if (addedSomething) sb.Append(", ");
-                sb.Append($"and {pawns.Count - 3} more pawns");
-                addedSomething = true;
             }
 
             // Add buildings with cell-specific info, temperature info and transport pod info
@@ -100,35 +89,65 @@ namespace RimWorldAccess
             {
                 if (addedSomething) sb.Append(", ");
 
-                // Check if this is a smoothed stone wall and add "wall" suffix
-                string buildingLabel = building.LabelShort;
-                if (building.def.defName.StartsWith("Smoothed") && building.def.building != null && !building.def.building.isNaturalRock)
+                // Special handling for frames (construction in progress)
+                if (building is Frame frame)
                 {
-                    buildingLabel += " wall";
-                }
-                sb.Append(buildingLabel);
+                    sb.Append(frame.LabelEntityToBuild);
+                    sb.Append(", building");
 
-                // Add cell-specific suffix (e.g., "(head)" for bed, "(fuel port east)" for launcher)
-                string cellInfo = BuildingCellHelper.GetCellPrefix(building, position);
-                if (!string.IsNullOrEmpty(cellInfo))
-                {
-                    sb.Append($" ({cellInfo})");
-                }
+                    // Check if supplies are fully delivered
+                    if (frame.IsCompleted())
+                    {
+                        // All materials delivered - show work remaining
+                        sb.Append(", work left: ");
+                        sb.Append(frame.WorkLeft.ToStringWorkAmount());
+                    }
+                    else
+                    {
+                        // Still waiting for supplies to be hauled
+                        sb.Append(", awaiting supplies");
+                    }
 
-                // Add temperature control information if building is a cooler/heater
-                string tempControlInfo = GetTemperatureControlInfo(building);
-                if (!string.IsNullOrEmpty(tempControlInfo))
-                {
-                    sb.Append(", ");
-                    sb.Append(tempControlInfo);
+                    // Add cell-specific suffix for frames (e.g., "(head)" for bed frame)
+                    string frameCellInfo = BuildingCellHelper.GetCellPrefix(frame, position);
+                    if (!string.IsNullOrEmpty(frameCellInfo))
+                    {
+                        sb.Append($" ({frameCellInfo})");
+                    }
                 }
-
-                // Add transport pod connection info
-                string transportPodInfo = GetTransportPodInfo(building, map);
-                if (!string.IsNullOrEmpty(transportPodInfo))
+                else
                 {
-                    sb.Append(", ");
-                    sb.Append(transportPodInfo);
+                    // Normal building handling
+                    // Check if this is a smoothed stone wall and add "wall" suffix
+                    string buildingLabel = building.LabelShort;
+                    if (building.def.defName.StartsWith("Smoothed") && building.def.building != null && !building.def.building.isNaturalRock)
+                    {
+                        buildingLabel += " wall";
+                    }
+                    sb.Append(buildingLabel);
+
+                    // Add cell-specific suffix (e.g., "(head)" for bed, "(fuel port east)" for launcher)
+                    string cellInfo = BuildingCellHelper.GetCellPrefix(building, position);
+                    if (!string.IsNullOrEmpty(cellInfo))
+                    {
+                        sb.Append($" ({cellInfo})");
+                    }
+
+                    // Add temperature control information if building is a cooler/heater
+                    string tempControlInfo = GetTemperatureControlInfo(building);
+                    if (!string.IsNullOrEmpty(tempControlInfo))
+                    {
+                        sb.Append(", ");
+                        sb.Append(tempControlInfo);
+                    }
+
+                    // Add transport pod connection info
+                    string transportPodInfo = GetTransportPodInfo(building, map);
+                    if (!string.IsNullOrEmpty(transportPodInfo))
+                    {
+                        sb.Append(", ");
+                        sb.Append(transportPodInfo);
+                    }
                 }
 
                 addedSomething = true;
@@ -140,7 +159,8 @@ namespace RimWorldAccess
                 addedSomething = true;
             }
 
-            // Add blueprints and frames with cell-specific info (e.g., "(head)" for bed blueprints)
+            // Add blueprints with cell-specific info (e.g., "(head)" for bed blueprints)
+            // Note: Frames extend Building, so they are handled in the buildings loop above
             foreach (var thing in blueprintsAndFrames.Take(2))
             {
                 if (addedSomething) sb.Append(", ");
@@ -152,6 +172,18 @@ namespace RimWorldAccess
                 if (!string.IsNullOrEmpty(cellInfo))
                 {
                     sb.Append($" ({cellInfo})");
+                }
+
+                // Add storage group name for storage blueprints
+                // Note: Blueprint_Storage uses explicit interface implementation, so we cast explicitly
+                if (thing is RimWorld.Blueprint_Storage blueprintStorage)
+                {
+                    var storageMember = (IStorageGroupMember)blueprintStorage;
+                    if (storageMember.Group != null)
+                    {
+                        sb.Append(", ");
+                        sb.Append(storageMember.Group.RenamableLabel);
+                    }
                 }
 
                 addedSomething = true;
@@ -226,6 +258,18 @@ namespace RimWorldAccess
                 if (addedSomething) sb.Append(", ");
                 sb.Append(zone.label);
                 addedSomething = true;
+            }
+
+            // Add storage group information for storage buildings
+            foreach (var building in buildings)
+            {
+                if (building is IStorageGroupMember storageMember && storageMember.Group != null)
+                {
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(storageMember.Group.RenamableLabel);
+                    addedSomething = true;
+                    break; // Only announce once per tile
+                }
             }
 
             // Add roofed status (only if roofed, not unroofed)
@@ -516,40 +560,71 @@ namespace RimWorldAccess
         /// <summary>
         /// Gets information about plants at a tile (key 3).
         /// Shows plant species, growth percentage, and harvestable status.
+        /// When a ground-penetrating scanner is active, also shows deep ore deposit info.
         /// </summary>
         public static string GetPlantsInfo(IntVec3 position, Map map)
         {
             if (map == null || !position.InBounds(map))
                 return "Out of bounds";
 
+            // Get plant info
             List<Thing> things = position.GetThingList(map);
             var plants = things.OfType<Plant>().ToList();
+            bool hasPlants = plants.Count > 0;
 
-            if (plants.Count == 0)
-                return "no plants";
+            // Get deep ore info if scanner is active
+            bool scannerActive = map.deepResourceGrid.AnyActiveDeepScannersOnMap();
+            string deepOreInfo = null;
+            if (scannerActive)
+            {
+                deepOreInfo = GetDeepOreInfo(position, map);
+            }
+            bool hasDeepOre = !string.IsNullOrEmpty(deepOreInfo);
+
+            // Build response based on what's present
+            if (!hasPlants && !hasDeepOre)
+            {
+                if (scannerActive)
+                    return "no plants or mineral deposits";
+                else
+                    return "no plants";
+            }
 
             var sb = new StringBuilder();
 
-            for (int i = 0; i < plants.Count; i++)
+            // Add plant info first (if present)
+            if (hasPlants)
             {
-                if (i > 0) sb.Append(", ");
+                for (int i = 0; i < plants.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
 
-                Plant plant = plants[i];
-                sb.Append(plant.LabelShortCap);
+                    Plant plant = plants[i];
+                    sb.Append(plant.LabelShortCap);
 
-                // Add growth percentage
-                float growthPercent = plant.Growth * 100f;
-                sb.Append($" ({growthPercent:F0}% grown)");
+                    // Add growth percentage
+                    float growthPercent = plant.Growth * 100f;
+                    sb.Append($" ({growthPercent:F0}% grown)");
 
-                // Check if harvestable
-                if (plant.HarvestableNow)
-                    sb.Append(", harvestable");
-                else
-                    sb.Append(", not harvestable");
+                    // Check if harvestable
+                    if (plant.HarvestableNow)
+                        sb.Append(", harvestable");
+                    else
+                        sb.Append(", not harvestable");
 
-                // Check if dying
-                if (plant.Dying)
-                    sb.Append(", dying");
+                    // Check if dying
+                    if (plant.Dying)
+                        sb.Append(", dying");
+                }
+            }
+
+            // Add deep ore info (if present)
+            if (hasDeepOre)
+            {
+                if (hasPlants)
+                    sb.Append(". ");
+                sb.Append("Deep: ");
+                sb.Append(deepOreInfo);
             }
 
             return sb.ToString();
@@ -838,6 +913,130 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Formats a list of pawns for tile summary, optionally grouping by activity.
+        /// </summary>
+        private static string FormatPawnsForTileSummary(List<Pawn> pawns)
+        {
+            if (pawns == null || pawns.Count == 0)
+                return null;
+
+            bool showActivity = RimWorldAccessMod_Settings.Settings?.ShowPawnActivityOnMap ?? true;
+
+            if (!showActivity)
+            {
+                // Simple format without activity
+                return FormatPawnsSimple(pawns);
+            }
+
+            // Group pawns by activity for smarter display
+            return FormatPawnsWithActivityGrouping(pawns);
+        }
+
+        /// <summary>
+        /// Simple pawn formatting without activity (original behavior).
+        /// </summary>
+        private static string FormatPawnsSimple(List<Pawn> pawns)
+        {
+            var sb = new StringBuilder();
+            int limit = 3;
+
+            for (int i = 0; i < pawns.Count && i < limit; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(pawns[i].LabelShort);
+
+                string suffix = GetPawnSuffix(pawns[i]);
+                if (!string.IsNullOrEmpty(suffix))
+                    sb.Append(suffix);
+            }
+
+            if (pawns.Count > limit)
+            {
+                sb.Append($", and {pawns.Count - limit} more pawns");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formats pawns with activity grouping.
+        /// Pawns doing the same activity are grouped: "A and B (sleeping)"
+        /// </summary>
+        private static string FormatPawnsWithActivityGrouping(List<Pawn> pawns)
+        {
+            int limit = 5; // Allow more when showing activity since we're grouping
+            var pawnsToShow = pawns.Take(limit).ToList();
+
+            // Group pawns by activity (and special suffix like hostile/trader)
+            var groups = new List<(List<Pawn> pawns, string activity, string suffix)>();
+
+            foreach (var pawn in pawnsToShow)
+            {
+                string activity = PawnHelper.GetPawnActivity(pawn);
+                string suffix = GetPawnSuffix(pawn);
+
+                // Find existing group with same activity and suffix
+                var existingGroup = groups.FirstOrDefault(g => g.activity == activity && g.suffix == suffix);
+                if (existingGroup.pawns != null)
+                {
+                    existingGroup.pawns.Add(pawn);
+                }
+                else
+                {
+                    groups.Add((new List<Pawn> { pawn }, activity, suffix));
+                }
+            }
+
+            // Format each group
+            var parts = new List<string>();
+            foreach (var group in groups)
+            {
+                string names = FormatPawnNames(group.pawns);
+
+                // Build the display string
+                var groupText = new StringBuilder(names);
+
+                // Add suffix (hostile/trader) if present
+                if (!string.IsNullOrEmpty(group.suffix))
+                    groupText.Append(group.suffix);
+
+                // Add activity if present
+                if (!string.IsNullOrEmpty(group.activity))
+                    groupText.Append($" ({group.activity})");
+
+                parts.Add(groupText.ToString());
+            }
+
+            string result = string.Join(", ", parts);
+
+            if (pawns.Count > limit)
+            {
+                result += $", and {pawns.Count - limit} more pawns";
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Formats a list of pawn names with proper grammar.
+        /// 1 pawn: "Name"
+        /// 2 pawns: "Name1 and Name2"
+        /// 3+ pawns: "Name1, Name2, and Name3"
+        /// </summary>
+        private static string FormatPawnNames(List<Pawn> pawns)
+        {
+            if (pawns.Count == 1)
+                return pawns[0].LabelShort;
+
+            if (pawns.Count == 2)
+                return $"{pawns[0].LabelShort} and {pawns[1].LabelShort}";
+
+            // 3+: "A, B, and C"
+            var names = pawns.Select(p => p.LabelShort).ToList();
+            return string.Join(", ", names.Take(names.Count - 1)) + ", and " + names.Last();
+        }
+
+        /// <summary>
         /// Gets information about areas at a tile (key 7).
         /// Shows which allowed areas and special areas (home area) the tile is part of.
         /// </summary>
@@ -871,6 +1070,55 @@ namespace RimWorldAccess
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gets location context for a position (zone/named storage, or room).
+        /// Used by scanner announcements for mobile entities (pawns, animals).
+        /// </summary>
+        /// <param name="position">The position to check</param>
+        /// <param name="map">The map to check on</param>
+        /// <returns>Location context string like "(in Stockpile zone 1)" or null if no meaningful location</returns>
+        public static string GetLocationContext(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Priority 1: Check for zone OR named storage (mutually exclusive - can't have both)
+            // RimWorld enforces that ISlotGroupParent things (shelves) and zones cannot overlap
+            Zone zone = position.GetZone(map);
+            if (zone != null)
+            {
+                return $"(in {zone.label})";
+            }
+
+            // Check for named storage group (shelves, etc.) - only if no zone (mutually exclusive)
+            List<Thing> things = position.GetThingList(map);
+            foreach (var thing in things)
+            {
+                if (thing is IStorageGroupMember storage && storage.Group != null)
+                {
+                    string groupName = storage.Group.RenamableLabel;
+                    if (!string.IsNullOrEmpty(groupName))
+                    {
+                        return $"(at {groupName})";
+                    }
+                }
+            }
+
+            // Priority 2: Check for indoor room with a meaningful role
+            Room room = position.GetRoom(map);
+            if (room != null && room.ProperRoom && !room.PsychologicallyOutdoors)
+            {
+                string roomLabel = room.GetRoomRoleLabel();
+                if (!string.IsNullOrEmpty(roomLabel))
+                {
+                    return $"(in {roomLabel})";
+                }
+            }
+
+            // No meaningful location context
+            return null;
         }
 
         /// <summary>
@@ -1167,6 +1415,68 @@ namespace RimWorldAccess
 
             var mouseAttachment = mouseAttachmentField.GetValue(Find.Targeter) as UnityEngine.Texture2D;
             return mouseAttachment == CompLaunchable.TargeterMouseAttachment;
+        }
+
+        /// <summary>
+        /// Gets deep ore deposit info for a tile if conditions are met.
+        /// Returns info like "gold, 300 remaining" or null if no deep ore or conditions not met.
+        /// Matches sighted player visibility - only shows when a powered scanner exists.
+        /// </summary>
+        /// <param name="position">The tile position to check</param>
+        /// <param name="map">The map to check on</param>
+        /// <returns>Deep ore info string or null</returns>
+        public static string GetDeepOreInfo(IntVec3 position, Map map)
+        {
+            if (map == null || !position.InBounds(map))
+                return null;
+
+            // Check if there's an active (powered) deep scanner on the map
+            // This matches the visibility rules for sighted players
+            if (!map.deepResourceGrid.AnyActiveDeepScannersOnMap())
+                return null;
+
+            // Get the deep ore at this position
+            ThingDef oreDef = map.deepResourceGrid.ThingDefAt(position);
+            if (oreDef == null)
+                return null;
+
+            int count = map.deepResourceGrid.CountAt(position);
+            if (count <= 0)
+                return null;
+
+            return $"{oreDef.label}, {count} remaining";
+        }
+
+        /// <summary>
+        /// Checks if the current architect designator should show deep ore info.
+        /// Returns true if placing a building with PlaceWorker_ShowDeepResources (like deep drill).
+        /// </summary>
+        public static bool ShouldShowDeepOreForCurrentDesignator()
+        {
+            if (!ArchitectState.IsInPlacementMode)
+                return false;
+
+            Designator designator = ArchitectState.SelectedDesignator;
+            if (designator == null)
+                return false;
+
+            // Check if it's a build designator
+            if (!(designator is Designator_Build buildDesignator))
+                return false;
+
+            // Get the BuildableDef being placed
+            BuildableDef placingDef = buildDesignator.PlacingDef;
+            if (placingDef == null)
+                return false;
+
+            // Check if it's a ThingDef with CompDeepDrill component
+            // This matches RimWorld's DeepResourceGrid.DrawPlacingMouseAttachments() logic
+            if (placingDef is ThingDef thingDef && thingDef.CompDefFor<CompDeepDrill>() != null)
+            {
+                return true;
+            }
+
+            return false;
         }
     }
 }

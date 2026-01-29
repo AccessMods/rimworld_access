@@ -40,7 +40,6 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
             bool handled = false;
-            bool shiftHeld = Event.current.shift;
             IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
             // Tab key - toggle between box selection and single tile selection modes
@@ -55,30 +54,10 @@ namespace RimWorldAccess
                 ZoneCreationState.ToggleSelectionMode();
                 handled = true;
             }
-            // Shift+Arrow keys - auto-select to wall (adds cells directly)
-            if (shiftHeld && (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
-                             key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
-            {
-                Map map = Find.CurrentMap;
-                Rot4 direction = Rot4.Invalid;
-
-                if (key == KeyCode.UpArrow)
-                    direction = Rot4.North;
-                else if (key == KeyCode.DownArrow)
-                    direction = Rot4.South;
-                else if (key == KeyCode.LeftArrow)
-                    direction = Rot4.West;
-                else if (key == KeyCode.RightArrow)
-                    direction = Rot4.East;
-
-                if (direction != Rot4.Invalid)
-                {
-                    ZoneCreationState.AutoSelectToWall(currentPosition, direction, map);
-                    handled = true;
-                }
-            }
-            // Arrow keys (no shift) - update rectangle preview if we have a start corner
-            else if (!shiftHeld && ZoneCreationState.HasRectangleStart &&
+            // Arrow keys - update rectangle preview if we have a start corner
+            // Note: Shift+Arrow keys are NOT handled here; they pass through to
+            // MapNavigationState for jump mode adjustment
+            else if (ZoneCreationState.HasRectangleStart &&
                      (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
                       key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
             {

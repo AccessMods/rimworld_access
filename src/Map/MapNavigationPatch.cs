@@ -24,12 +24,22 @@ namespace RimWorldAccess
         /// </summary>
         private static void UpdateSuppressionFlag()
         {
+            // Don't suppress if placement mode is active - it needs arrow key navigation
+            // even if Schedule/Animals menu is technically still "active" in the background
+            if (ShapePlacementState.IsActive || ViewingModeState.IsActive)
+            {
+                MapNavigationState.SuppressMapNavigation = false;
+                return;
+            }
+
             // Suppress map navigation if ANY menu that uses arrow keys is active
             // Note: Scanner is NOT included here because it doesn't suppress map navigation
             MapNavigationState.SuppressMapNavigation =
                 WorldNavigationState.IsActive ||
                 WindowlessDialogState.IsActive ||
                 WindowlessFloatMenuState.IsActive ||
+                ShapeSelectionMenuState.IsActive ||
+                // Note: ViewingModeState is NOT included - it allows arrow navigation for moving around
                 ArchitectTreeState.IsActive ||
                 CaravanFormationState.IsActive ||
                 WindowlessPauseMenuState.IsActive ||
@@ -138,6 +148,9 @@ namespace RimWorldAccess
 
             // Check for map switching (Shift+comma/period)
             // Regular comma/period pawn cycling is handled by ThingSelectionUtilityPatch
+            // NOTE: We use Input.GetKey/GetKeyDown here because CameraDriver.Update() is a
+            // Unity Update() method, not an OnGUI callback. IMGUI events (Event.current) are
+            // only valid during OnGUI calls and will be null/invalid in Update().
             bool shiftHeldForMapSwitch = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
             if (shiftHeldForMapSwitch && Input.GetKeyDown(KeyCode.Period))
@@ -154,212 +167,18 @@ namespace RimWorldAccess
             // which calls ThingSelectionUtility.SelectNext/PreviousColonist()
             // Our ThingSelectionUtilityPatch intercepts those to filter by current map
 
-            // Check for arrow key input
-            IntVec3 moveOffset = IntVec3.Zero;
-            bool keyPressed = false;
-            bool isJump = false;
-
-            // Check if Ctrl or Shift is held down
-            bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-            bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-
-            // Handle Shift+Up/Down for jump mode cycling
-            // (but not when zone creation is active - that uses Shift+Arrows for auto-select to wall)
-            bool blockJumpModeCycling = ZoneCreationState.IsInCreationMode;
-            if (shiftHeld && !blockJumpModeCycling)
-            {
-                if (Input.GetKeyDown(KeyCode.UpArrow))
-                {
-                    MapNavigationState.CycleJumpModeForward();
-                    hasAnnouncedThisFrame = true;
-                    return true;
-                }
-                else if (Input.GetKeyDown(KeyCode.DownArrow))
-                {
-                    MapNavigationState.CycleJumpModeBackward();
-                    hasAnnouncedThisFrame = true;
-                    return true;
-                }
-                // Shift+Left/Right adjusts preset distance (only in PresetDistance mode)
-                else if (MapNavigationState.CurrentJumpMode == JumpMode.PresetDistance)
-                {
-                    if (Input.GetKeyDown(KeyCode.LeftArrow))
-                    {
-                        MapNavigationState.DecreasePresetDistance();
-                        hasAnnouncedThisFrame = true;
-                        return true;
-                    }
-                    else if (Input.GetKeyDown(KeyCode.RightArrow))
-                    {
-                        MapNavigationState.IncreasePresetDistance();
-                        hasAnnouncedThisFrame = true;
-                        return true;
-                    }
-                }
-            }
-
-            // Check each arrow key direction
-            if (Input.GetKeyDown(KeyCode.UpArrow))
-            {
-                moveOffset = IntVec3.North; // North is positive Z
-                keyPressed = true;
-                isJump = ctrlHeld;
-            }
-            else if (Input.GetKeyDown(KeyCode.DownArrow))
-            {
-                moveOffset = IntVec3.South; // South is negative Z
-                keyPressed = true;
-                isJump = ctrlHeld;
-            }
-            else if (Input.GetKeyDown(KeyCode.LeftArrow))
-            {
-                moveOffset = IntVec3.West; // West is negative X
-                keyPressed = true;
-                isJump = ctrlHeld;
-            }
-            else if (Input.GetKeyDown(KeyCode.RightArrow))
-            {
-                moveOffset = IntVec3.East; // East is positive X
-                keyPressed = true;
-                isJump = ctrlHeld;
-            }
-
-            // If an arrow key was pressed, move the cursor and update camera
-            if (keyPressed)
-            {
-                // Move the cursor position - either jump or normal movement
-                bool positionChanged;
-                if (isJump)
-                {
-                    // Use appropriate jump method based on current jump mode
-                    switch (MapNavigationState.CurrentJumpMode)
-                    {
-                        case JumpMode.Terrain:
-                            positionChanged = MapNavigationState.JumpToNextTerrainType(moveOffset, Find.CurrentMap);
-                            break;
-                        case JumpMode.Buildings:
-                            positionChanged = MapNavigationState.JumpToNextBuilding(moveOffset, Find.CurrentMap);
-                            break;
-                        case JumpMode.Geysers:
-                            positionChanged = MapNavigationState.JumpToNextGeyser(moveOffset, Find.CurrentMap);
-                            break;
-                        case JumpMode.HarvestableTrees:
-                            positionChanged = MapNavigationState.JumpToNextHarvestableTrees(moveOffset, Find.CurrentMap);
-                            break;
-                        case JumpMode.MinableTiles:
-                            positionChanged = MapNavigationState.JumpToNextMinableTiles(moveOffset, Find.CurrentMap);
-                            break;
-                        case JumpMode.PresetDistance:
-                            positionChanged = MapNavigationState.JumpPresetDistance(moveOffset, Find.CurrentMap);
-                            break;
-                        default:
-                            positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
-                            break;
-                    }
-                }
-                else
-                {
-                    positionChanged = MapNavigationState.MoveCursor(moveOffset, Find.CurrentMap);
-                }
-
-                if (positionChanged)
-                {
-                    // Clear the "pawn just selected" flag since user is now navigating the map
-                    GizmoNavigationState.PawnJustSelected = false;
-
-                    // Get the new cursor position
-                    IntVec3 newPosition = MapNavigationState.CurrentCursorPosition;
-
-                    // Update rectangle preview if in zone creation mode with a start corner
-                    if (ZoneCreationState.IsInCreationMode && ZoneCreationState.HasRectangleStart)
-                    {
-                        ZoneCreationState.UpdatePreview(newPosition);
-                    }
-
-                    // Update rectangle preview if in area painting mode with a start corner
-                    if (AreaPaintingState.IsActive && AreaPaintingState.HasRectangleStart)
-                    {
-                        AreaPaintingState.UpdatePreview(newPosition);
-                    }
-
-                    // Update rectangle preview if in architect placement mode with a zone designator
-                    if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator() && ArchitectState.HasRectangleStart)
-                    {
-                        ArchitectState.UpdatePreview(newPosition);
-                    }
-
-                    // Move camera to center on new cursor position
-                    __instance.JumpToCurrentMapLoc(newPosition);
-
-                    // Play terrain audio feedback
-                    TerrainDef terrain = newPosition.GetTerrain(Find.CurrentMap);
-                    TerrainAudioHelper.PlayTerrainAudio(terrain, 0.5f);
-
-                    // Get tile information and announce it
-                    string tileInfo = TileInfoHelper.GetTileSummary(newPosition, Find.CurrentMap);
-
-                    // If in zone creation mode, prepend selection state
-                    if (ZoneCreationState.IsInCreationMode)
-                    {
-                        if (ZoneCreationState.IsInPreviewMode && ZoneCreationState.PreviewCells.Contains(newPosition))
-                        {
-                            tileInfo = "Preview, " + tileInfo;
-                        }
-                        else if (ZoneCreationState.IsCellSelected(newPosition))
-                        {
-                            tileInfo = "Selected, " + tileInfo;
-                        }
-                    }
-                    // If in area painting mode, prepend selection/preview state
-                    else if (AreaPaintingState.IsActive)
-                    {
-                        if (AreaPaintingState.IsInPreviewMode && AreaPaintingState.PreviewCells.Contains(newPosition))
-                        {
-                            tileInfo = "Preview, " + tileInfo;
-                        }
-                        else if (AreaPaintingState.StagedCells.Contains(newPosition))
-                        {
-                            tileInfo = "Selected, " + tileInfo;
-                        }
-                    }
-                    // If in architect mode zone placement, prepend selection/preview state
-                    else if (ArchitectState.IsInPlacementMode && ArchitectState.IsZoneDesignator())
-                    {
-                        if (ArchitectState.IsInPreviewMode && ArchitectState.PreviewCells.Contains(newPosition))
-                        {
-                            tileInfo = "Preview, " + tileInfo;
-                        }
-                        else if (ArchitectState.SelectedCells.Contains(newPosition))
-                        {
-                            tileInfo = "Selected, " + tileInfo;
-                        }
-                    }
-
-                    // Only announce if different from last announcement (avoids spam when hitting map edge)
-                    if (tileInfo != MapNavigationState.LastAnnouncedInfo)
-                    {
-                        TolkHelper.Speak(tileInfo);
-                        MapNavigationState.LastAnnouncedInfo = tileInfo;
-                        hasAnnouncedThisFrame = true;
-                    }
-                }
-                else
-                {
-                    // Cursor at map boundary - optionally announce boundary
-                    if (!hasAnnouncedThisFrame)
-                    {
-                        TolkHelper.Speak("Map boundary");
-                        hasAnnouncedThisFrame = true;
-                    }
-                }
-
-                // Consume the arrow key event to prevent default camera panning
-                // This is done by preventing the KeyBindingDefOf checks from succeeding
-                // Note: We're using Input.GetKeyDown instead of KeyBindingDefOf to intercept earlier
-            }
+            // Arrow key navigation is now handled by MapArrowKeyHandler in OnGUI context
+            // (via UnifiedKeyboardPatch at Priority 10.5) for OS key repeat support.
+            // This CameraDriver.Update() Prefix still handles:
+            // - Frame flag reset and suppression updates
+            // - Map null check and reset
+            // - WindowsPreventCameraMotion check
+            // - Frame deduplication
+            // - Map changes check and initialization
+            // - Map switching with Shift+comma/period
 
             // Let original CameraDriver.Update() run for non-arrow-key functionality
-            // (zoom, following, etc.) - we've already handled our arrow key navigation above
+            // (zoom, following, etc.)
             return true;
         }
 
@@ -421,17 +240,23 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Postfix patch to prevent default camera dolly movement when we've handled arrow keys.
+        /// Postfix patch to prevent camera drift and default camera dolly movement.
+        /// In Cursor mode: always reset velocity to prevent drift from edge scrolling.
+        /// In Pawn mode: only reset velocity when arrow keys were pressed this frame.
         /// </summary>
         [HarmonyPostfix]
         public static void Postfix(CameraDriver __instance)
         {
-            // If we announced something this frame, it means we handled arrow key input
-            // The camera jump already happened in Prefix, but we need to ensure
-            // no residual dolly movement occurs
-            if (hasAnnouncedThisFrame)
+            // In Cursor mode, always reset velocity to prevent drift
+            // This blocks edge scrolling and any other accumulated velocity
+            if (MapNavigationState.CurrentCameraMode == CameraFollowMode.Cursor)
             {
-                // Reset velocity to prevent any accumulated movement
+                Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
+                Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
+            }
+            else if (hasAnnouncedThisFrame)
+            {
+                // In Pawn mode with arrow key usage, also reset for that frame
                 Traverse.Create(__instance).Field("velocity").SetValue(Vector3.zero);
                 Traverse.Create(__instance).Field("desiredDollyRaw").SetValue(Vector2.zero);
             }
@@ -474,14 +299,22 @@ namespace RimWorldAccess
                 return false;
             }
 
-            // Select the pawn (but don't jump camera - user can use Alt+C)
+            // Select the pawn and jump camera to follow
             if (Find.Selector != null)
             {
                 Find.Selector.ClearSelection();
                 Find.Selector.Select(selectedPawn);
             }
 
-            // Set flag for gizmo navigation
+            // Jump camera to pawn and enable Pawn Following mode
+            // NOTE: Cursor stays where it was - user can press Alt+C to move cursor to pawn
+            if (Find.CameraDriver != null)
+            {
+                Find.CameraDriver.JumpToCurrentMapLoc(selectedPawn.Position);
+            }
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
+
+            // Set flag so G key shows this pawn's gizmos (until arrow keys move cursor)
             GizmoNavigationState.PawnJustSelected = true;
 
             // Announce selection
@@ -519,14 +352,22 @@ namespace RimWorldAccess
                 return false;
             }
 
-            // Select the pawn (but don't jump camera - user can use Alt+C)
+            // Select the pawn and jump camera to follow
             if (Find.Selector != null)
             {
                 Find.Selector.ClearSelection();
                 Find.Selector.Select(selectedPawn);
             }
 
-            // Set flag for gizmo navigation
+            // Jump camera to pawn and enable Pawn Following mode
+            // NOTE: Cursor stays where it was - user can press Alt+C to move cursor to pawn
+            if (Find.CameraDriver != null)
+            {
+                Find.CameraDriver.JumpToCurrentMapLoc(selectedPawn.Position);
+            }
+            MapNavigationState.CurrentCameraMode = CameraFollowMode.Pawn;
+
+            // Set flag so G key shows this pawn's gizmos (until arrow keys move cursor)
             GizmoNavigationState.PawnJustSelected = true;
 
             // Announce selection
@@ -537,6 +378,27 @@ namespace RimWorldAccess
             TolkHelper.Speak($"{selectedPawn.LabelShort} selected - {currentTask}");
 
             return false; // Block original method
+        }
+    }
+
+    /// <summary>
+    /// Blocks RimWorld's automatic pawn following when in Cursor mode.
+    /// </summary>
+    [HarmonyPatch(typeof(CameraMapConfig))]
+    [HarmonyPatch("ConfigFixedUpdate_60")]
+    public static class CameraMapConfigPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            if (Find.CurrentMap == null)
+                return true;
+
+            // Block pawn following in Cursor mode
+            if (MapNavigationState.CurrentCameraMode == CameraFollowMode.Cursor)
+                return false;
+
+            return true;
         }
     }
 }

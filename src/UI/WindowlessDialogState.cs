@@ -16,9 +16,30 @@ namespace RimWorldAccess
         private static List<DialogElement> elements = new List<DialogElement>();
         private static int selectedIndex = 0;
         private static DialogElement editingElement = null;
+        private static bool replaceOnFirstKeystroke = false;
+        private static bool isFirstKeystrokeAfterEdit = false;
+
+        /// <summary>
+        /// Tracks the frame number when the dialog was opened.
+        /// Used to skip input handling on the same frame to prevent the triggering key
+        /// (e.g., Escape) from immediately activating a button in the dialog.
+        /// </summary>
+        private static int openedOnFrame = -1;
+
+        /// <summary>
+        /// Tracks the frame number when the dialog was closed.
+        /// Used to prevent the same Escape key from re-triggering actions (like DoBack).
+        /// </summary>
+        private static int closedOnFrame = -1;
 
         public static bool IsActive => currentDialog != null;
         public static bool IsEditingTextField => editingElement != null;
+
+        /// <summary>
+        /// Returns true if the dialog was closed on the current frame.
+        /// Used to prevent Escape from immediately triggering other actions.
+        /// </summary>
+        public static bool WasClosedThisFrame => closedOnFrame == UnityEngine.Time.frameCount;
 
         /// <summary>
         /// Tracks whether the current intercepted dialog has forcePause set.
@@ -47,6 +68,10 @@ namespace RimWorldAccess
 
             currentDialog = dialog;
 
+            // Track the frame when opened to skip input on this frame
+            // This prevents the triggering key (e.g., Escape) from immediately activating Cancel
+            openedOnFrame = Time.frameCount;
+
             // Track if this dialog should force pause - used by WindowsForcePausePatch
             // to prevent game systems from thinking no modal dialog is open
             ShouldForcePause = dialog.forcePause;
@@ -63,8 +88,12 @@ namespace RimWorldAccess
                 elements.Insert(0, new DialogDescriptionElement { Title = title, Message = message });
             }
 
-            // Start on the first action (element 1), not the description (element 0)
-            selectedIndex = elements.Count > 1 ? 1 : 0;
+            // Start on the first action, skipping the description if one was added
+            // Description is only added if descriptionText is not empty (line 62-65)
+            // For Dialog_RenameArea and similar dialogs with no title/message,
+            // the first element IS the action (text field), not the description
+            bool hasDescription = !string.IsNullOrEmpty(descriptionText);
+            selectedIndex = (hasDescription && elements.Count > 1) ? 1 : 0;
             editingElement = null;
 
             // Announce dialog opened with full description
@@ -116,7 +145,10 @@ namespace RimWorldAccess
             elements.Clear();
             selectedIndex = 0;
             editingElement = null;
+            isFirstKeystrokeAfterEdit = false;
             ShouldForcePause = false;
+            openedOnFrame = -1;
+            closedOnFrame = UnityEngine.Time.frameCount;
         }
 
         /// <summary>
@@ -131,12 +163,37 @@ namespace RimWorldAccess
             if (evt.type != EventType.KeyDown)
                 return false;
 
+            // Skip input handling on the same frame the dialog was opened
+            // This prevents the triggering key (e.g., Escape) from immediately activating Cancel
+            if (Time.frameCount == openedOnFrame)
+                return false;
+
             KeyCode key = evt.keyCode;
 
             // If we're editing a text field, handle differently
             if (editingElement != null && editingElement is TextFieldElement textField)
             {
                 return HandleTextFieldInput(textField, evt);
+            }
+
+            // Alt+R: Randomize current field (for Dialog_NamePawn)
+            if (key == KeyCode.R && evt.alt)
+            {
+                if (currentDialog?.GetType().Name == "Dialog_NamePawn" &&
+                    selectedIndex >= 0 && selectedIndex < elements.Count &&
+                    elements[selectedIndex] is TextFieldElement nameField)
+                {
+                    // Calculate field index (accounting for description element at index 0)
+                    int fieldIndex = selectedIndex;
+                    if (elements.Count > 0 && elements[0] is DialogDescriptionElement)
+                    {
+                        fieldIndex = selectedIndex - 1;
+                    }
+
+                    NamePawnDialogHelper.RandomizeField(currentDialog, nameField, fieldIndex);
+                    evt.Use();
+                    return true;
+                }
             }
 
             // Navigation
@@ -189,6 +246,7 @@ namespace RimWorldAccess
             {
                 // Close editing mode
                 editingElement = null;
+                isFirstKeystrokeAfterEdit = false;
                 TolkHelper.Speak($"Editing complete. Current value: {textField.Value}");
                 evt.Use();
                 return true;
@@ -197,12 +255,16 @@ namespace RimWorldAccess
             {
                 // Cancel editing
                 editingElement = null;
+                isFirstKeystrokeAfterEdit = false;
                 TolkHelper.Speak("Editing cancelled");
                 evt.Use();
                 return true;
             }
             else if (key == KeyCode.Backspace)
             {
+                // Cancel replace mode on backspace
+                replaceOnFirstKeystroke = false;
+                isFirstKeystrokeAfterEdit = false;
                 if (textField.Value.Length > 0)
                 {
                     textField.Value = textField.Value.Substring(0, textField.Value.Length - 1);
@@ -213,6 +275,8 @@ namespace RimWorldAccess
             }
             else if (key == KeyCode.Delete)
             {
+                // Delete clears the field, so disable "first keystroke clears"
+                isFirstKeystrokeAfterEdit = false;
                 textField.Value = "";
                 TolkHelper.Speak("Cleared");
                 evt.Use();
@@ -220,6 +284,15 @@ namespace RimWorldAccess
             }
             else if (evt.character != '\0' && evt.character != '\n' && evt.character != '\r')
             {
+                // First keystroke replaces all existing text
+                // This allows "type to replace" behavior that users expect in rename dialogs
+                if (replaceOnFirstKeystroke || isFirstKeystrokeAfterEdit)
+                {
+                    textField.Value = "";
+                    replaceOnFirstKeystroke = false;
+                    isFirstKeystrokeAfterEdit = false;
+                }
+
                 // Add character to text field
                 if (textField.Value.Length < textField.MaxLength)
                 {
@@ -277,7 +350,10 @@ namespace RimWorldAccess
             {
                 // Enter editing mode
                 editingElement = textField;
-                TolkHelper.Speak($"Editing {textField.Label}. Current value: {textField.Value}. Type to change, Enter to confirm, Escape to cancel.");
+                replaceOnFirstKeystroke = !string.IsNullOrEmpty(textField.Value);
+                isFirstKeystrokeAfterEdit = !string.IsNullOrEmpty(textField.Value);
+                string replaceHint = replaceOnFirstKeystroke ? " Type to replace." : "";
+                TolkHelper.Speak($"Editing {textField.Label}. Current value: {textField.Value}.{replaceHint} Enter to confirm, Escape to cancel.");
             }
         }
 
@@ -302,9 +378,10 @@ namespace RimWorldAccess
             int actionCount = hasDescription ? elements.Count - 1 : elements.Count;
 
             string position = MenuHelper.FormatPosition(actionIndex, actionCount);
+            string baseAnnouncement = element.GetAnnouncement().TrimEnd('.', ' ');
             string announcement = string.IsNullOrEmpty(position)
                 ? element.GetAnnouncement()
-                : $"{element.GetAnnouncement()}. {position}";
+                : $"{baseAnnouncement}. {position}";
             TolkHelper.Speak(announcement);
         }
 
@@ -335,7 +412,13 @@ namespace RimWorldAccess
 
             if (!string.IsNullOrEmpty(message))
             {
-                announcement += message + ". ";
+                announcement += message;
+                // Only add period if message doesn't already end with punctuation
+                if (!message.EndsWith(".") && !message.EndsWith("!") && !message.EndsWith("?"))
+                {
+                    announcement += ".";
+                }
+                announcement += " ";
             }
 
             // Subtract 1 from count since element 0 is the description, not an action
@@ -441,7 +524,12 @@ namespace RimWorldAccess
 
         public override string GetAnnouncement()
         {
-            return $"Label: {Text}";
+            // Use the Label property (inherited from DialogElement) if available
+            if (!string.IsNullOrEmpty(Label))
+            {
+                return $"{Label} {Text}. Cannot be edited.";
+            }
+            return Text;
         }
     }
 

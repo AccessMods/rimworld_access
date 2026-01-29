@@ -30,14 +30,64 @@ namespace RimWorldAccess
 
             KeyCode key = Event.current.keyCode;
 
+            // ===== PRIORITY -1.5: Handle character input for scenario builder states =====
+            // Unity IMGUI sends two KeyDown events for printable chars:
+            // 1. keyCode = KeyCode.A (the key itself)
+            // 2. keyCode = KeyCode.None, character = 'a' (the character)
+            // We need to capture the second event BEFORE filtering out KeyCode.None
+            if (key == KeyCode.None && Event.current.character != '\0')
+            {
+                char c = Event.current.character;
+                if (!char.IsControl(c))
+                {
+                    // ScenarioBuilderState text editing (title, summary, description)
+                    if (ScenarioBuilderState.IsActive && ScenarioBuilderState.IsEditingText)
+                    {
+                        TextInputHelper.HandleCharacter(c);
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // ScenarioBuilderPartEditState dropdown typeahead
+                    if (ScenarioBuilderPartEditState.IsActive)
+                    {
+                        if (ScenarioBuilderPartEditState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    // ScenarioBuilderAddPartState typeahead
+                    if (ScenarioBuilderAddPartState.IsActive)
+                    {
+                        if (ScenarioBuilderAddPartState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    // WindowlessScenarioSaveState filename input
+                    if (WindowlessScenarioSaveState.IsActive)
+                    {
+                        if (WindowlessScenarioSaveState.HandleCharacterInput(c))
+                        {
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+                }
+            }
+
             // Skip if no actual key (Unity IMGUI quirk)
             if (key == KeyCode.None)
                 return;
 
-            // ===== PRIORITY -1: Block ALL keys if zone rename is active =====
-            // Zone rename needs to capture text input, so block everything here
-            // StorageSettingsMenuPatch will handle the input
-            if (ZoneRenameState.IsActive)
+            // ===== PRIORITY -1: Block ALL keys if text input mode is active =====
+            // Zone/storage rename needs to capture text input, so block everything here
+            // TextInputCapturePatch will handle the input
+            if (ZoneRenameState.IsActive || StorageRenameState.IsActive)
             {
                 // Don't process any keys in this patch when renaming
                 return;
@@ -107,6 +157,138 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY -0.2: Scanner search text input =====
+            // Must run before all other handlers to capture letter keys that would otherwise
+            // be intercepted by route planner (R), notifications (L), settlement browser (S), etc.
+            if (ScannerSearchState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Enter: confirm search
+                if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                {
+                    ScannerSearchState.ConfirmSearch();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Escape: cancel search
+                if (key == KeyCode.Escape)
+                {
+                    ScannerSearchState.CancelSearch();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Backspace: delete last character
+                if (key == KeyCode.Backspace)
+                {
+                    ScannerSearchState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Letter keys (A-Z): add to search buffer
+                if (key >= KeyCode.A && key <= KeyCode.Z && !ctrl && !alt)
+                {
+                    char c = shift ? (char)('A' + (key - KeyCode.A)) : (char)('a' + (key - KeyCode.A));
+                    ScannerSearchState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9): add to search buffer
+                if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Alpha0));
+                    ScannerSearchState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Space/PageUp/PageDown/Home/End/Arrow keys: let pass through to game
+                // Space is needed for placing designators while search is active
+            }
+
+            // ===== PRIORITY -0.2: GoTo coordinate text input =====
+            // Must run before all other handlers to capture number keys
+            if (GoToState.IsActive)
+            {
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Enter: confirm and move cursor (only if no overlay menu is on top of us)
+                if (!GoToState.ShouldYieldToOverlayMenu() &&
+                    (key == KeyCode.Return || key == KeyCode.KeypadEnter))
+                {
+                    GoToState.ConfirmGoTo();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Escape: cancel (only if no overlay menu is on top of us)
+                if (!GoToState.ShouldYieldToOverlayMenu() && key == KeyCode.Escape)
+                {
+                    GoToState.Cancel();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Backspace: delete last character
+                if (key == KeyCode.Backspace)
+                {
+                    GoToState.HandleBackspace();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9) from main keyboard
+                if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Alpha0));
+                    GoToState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Number keys (0-9) from numpad
+                if (key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9 && !ctrl && !alt)
+                {
+                    char c = (char)('0' + (key - KeyCode.Keypad0));
+                    GoToState.HandleCharacter(c);
+                    Event.current.Use();
+                    return;
+                }
+
+                // Plus key for relative positive offset (Equals, Shift+Equals, or KeypadPlus)
+                if ((key == KeyCode.KeypadPlus || key == KeyCode.Equals) && !ctrl && !alt)
+                {
+                    GoToState.HandleCharacter('+');
+                    Event.current.Use();
+                    return;
+                }
+
+                // Minus key for relative negative offset
+                if ((key == KeyCode.Minus || key == KeyCode.KeypadMinus) && !ctrl && !alt)
+                {
+                    GoToState.HandleCharacter('-');
+                    Event.current.Use();
+                    return;
+                }
+
+                // Comma or Space: switch to Z field
+                if ((key == KeyCode.Comma || key == KeyCode.Space) && !ctrl && !alt)
+                {
+                    GoToState.HandleFieldSeparator();
+                    Event.current.Use();
+                    return;
+                }
+
+                // Arrow keys, Tab, etc.: intentionally NOT consumed - pass through
+            }
+
             // ===== PRIORITY -0.25: Handle Info Card dialog if active =====
             // Info Card is a modal dialog that should take precedence over most other handlers
             if (InfoCardState.IsActive)
@@ -123,6 +305,17 @@ namespace RimWorldAccess
             if (AutoSlaughterState.IsActive)
             {
                 if (AutoSlaughterState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY -0.23: Handle Baby Gene Inspection if active =====
+            // Gene inspection is a modal view for pregnancy genes (Biotech DLC)
+            if (GeneInspectionState.IsActive)
+            {
+                if (GeneInspectionState.HandleInput(Event.current))
                 {
                     Event.current.Use();
                     return;
@@ -237,6 +430,49 @@ namespace RimWorldAccess
                 // Let arrow keys pass through for world navigation
             }
 
+            // ===== DEFENSIVE STATE CLEANUP =====
+            // If placement state has stale internal values but no designator is selected,
+            // clean up the state. This is belt-and-suspenders with the defensive IsActive properties.
+            if (ShapePlacementState.CurrentPhase != PlacementPhase.Inactive ||
+                ArchitectState.CurrentMode == ArchitectMode.PlacementMode)
+            {
+                if (Find.DesignatorManager?.SelectedDesignator == null)
+                {
+                    Log.Message("[UnifiedKeyboardPatch] Detected stale placement state, cleaning up");
+                    ShapePlacementState.Reset();
+                    ArchitectState.Reset();
+                    // State was stale, cleaned up - continue with normal flow
+                }
+            }
+
+            // ===== PRIORITY 0.17: Shape Selection Menu =====
+            if (ShapeSelectionMenuState.IsActive)
+            {
+                if (ShapeSelectionMenuState.HandleInput(Event.current))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.18: Viewing Mode (post-placement review) =====
+            if (ViewingModeState.IsActive)
+            {
+                if (ViewingModeState.HandleInput(key, Event.current.shift))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.19: Shape Placement (two-point selection) =====
+            // Input handled in ArchitectPlacementPatch, but state needs priority registration
+            if (ShapePlacementState.IsActive)
+            {
+                // Let ArchitectPlacementPatch handle the input
+                // This ensures proper priority ordering
+            }
+
             // ===== PRIORITY 0.22: Handle inspection menu EARLY if opened from caravan/split/inspect/transport pod dialogs =====
             // This ensures Escape in inspection doesn't get caught by other handlers
             // Note: Window.OnCancelKeyPressed is patched in CaravanFormationPatch and TransportPodPatch to block RimWorld's Cancel handling
@@ -275,6 +511,22 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 0.27: Handle shelf linking selection mode if active =====
+            // This is the custom storage linking mode activated from our gizmos
+            // Note: Confirmation dialog now uses Dialog_MessageBox, handled by MessageBoxAccessibilityPatch
+            if (ShelfLinkingState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (ShelfLinkingState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 0.28: Handle transport pod selection mode if active =====
             // This is the custom pod grouping mode activated from our "Select pods to group" gizmo
             if (TransportPodSelectionState.IsActive && !WindowlessDialogState.IsActive)
@@ -284,6 +536,17 @@ namespace RimWorldAccess
                 bool alt = Event.current.alt;
 
                 if (TransportPodSelectionState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.29: Handle area selection menu if active =====
+            // This prompts for area selection when an area designator is chosen from Architect
+            if (AreaSelectionMenuState.IsActive)
+            {
+                if (AreaSelectionMenuState.HandleInput(key))
                 {
                     Event.current.Use();
                     return;
@@ -314,6 +577,22 @@ namespace RimWorldAccess
                 bool alt = Event.current.alt;
 
                 if (TransportPodLoadingState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 0.33: Handle ritual dialog if active =====
+            // Handles all ritual types (weddings, funerals, childbirth, conversions, etc.)
+            // Skip if overlay states are active - they take priority
+            if (RitualState.IsActive && !WindowlessDialogState.IsActive && !StatBreakdownState.IsActive && !WindowlessInspectionState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                if (RitualState.HandleInput(key, shift, ctrl, alt))
                 {
                     Event.current.Use();
                     return;
@@ -556,19 +835,14 @@ namespace RimWorldAccess
                     (key == KeyCode.H && Event.current.alt) ||
                     (key == KeyCode.N && Event.current.alt) ||
                     (key == KeyCode.B && Event.current.alt) ||
-                    (key == KeyCode.F && Event.current.alt))
+                    (key == KeyCode.F && Event.current.alt) ||
+                    (key == KeyCode.R && Event.current.alt))
                 {
                     // These keys should not work in world view - they're map-specific
                     // Must consume the event to prevent game from opening its inaccessible menus
                     Event.current.Use();
                     return;
                 }
-            }
-
-            // Log if area painting is active
-            if (AreaPaintingState.IsActive)
-            {
-                Log.Message($"RimWorld Access: UnifiedKeyboardPatch - Area painting is ACTIVE, key={key}");
             }
 
             // ===== PRIORITY 1: Handle delete confirmation if active =====
@@ -605,11 +879,250 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 2.1: Handle Scenario Builder overlays (highest priority within builder) =====
+            // These overlays must be handled before the main builder state
+            if (WindowlessScenarioDeleteConfirmState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                if (WindowlessScenarioDeleteConfirmState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (WindowlessScenarioLoadState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (WindowlessScenarioLoadState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (WindowlessScenarioLoadState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (WindowlessScenarioSaveState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for filename typing
+                if (Event.current.character != '\0' && !ctrl && !alt)
+                {
+                    if (WindowlessScenarioSaveState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (WindowlessScenarioSaveState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (ScenarioBuilderAddPartState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (ScenarioBuilderAddPartState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderAddPartState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            if (ScenarioBuilderPartEditState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for dropdown typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt && char.IsLetterOrDigit(Event.current.character))
+                {
+                    if (ScenarioBuilderPartEditState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderPartEditState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 2.2: Handle Scenario Builder main state =====
+            if (ScenarioBuilderState.IsActive)
+            {
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+                // Handle character input for text editing or typeahead
+                if (Event.current.character != '\0' && !ctrl && !alt)
+                {
+                    if (ScenarioBuilderState.HandleCharacterInput(Event.current.character))
+                    {
+                        Event.current.Use();
+                        return;
+                    }
+                }
+
+                if (ScenarioBuilderState.HandleInput(key, shift, ctrl, alt))
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 2.4: Handle windowless area manager if active =====
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (WindowlessAreaState.IsActive && !WindowlessDialogState.IsActive)
+            {
+                bool areaHandled = false;
+                var mode = WindowlessAreaState.CurrentMode;
+
+                if (mode == WindowlessAreaState.NavigationMode.AreaList)
+                {
+                    // Area list mode
+                    if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessAreaState.SelectPreviousArea();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessAreaState.SelectNextArea();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+                    {
+                        // Consume Left/Right to prevent them from reaching Schedule
+                        // Area list doesn't use horizontal navigation
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.RightBracket)
+                    {
+                        WindowlessAreaState.EnterActionsMode();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Escape)
+                    {
+                        WindowlessAreaState.Close();
+                        areaHandled = true;
+                    }
+                }
+                else if (mode == WindowlessAreaState.NavigationMode.AreaActions)
+                {
+                    // Actions menu mode
+                    // Escape - clear search first, then return to area list
+                    if (key == KeyCode.Escape)
+                    {
+                        if (WindowlessAreaState.HasActiveActionsSearch)
+                        {
+                            WindowlessAreaState.ClearActionsSearch();
+                            areaHandled = true;
+                        }
+                        else
+                        {
+                            WindowlessAreaState.ReturnToAreaList();
+                            areaHandled = true;
+                        }
+                    }
+                    // Backspace for search
+                    else if (key == KeyCode.Backspace && WindowlessAreaState.HasActiveActionsSearch)
+                    {
+                        WindowlessAreaState.HandleActionsBackspace();
+                        areaHandled = true;
+                    }
+                    // Up arrow - navigate with search awareness
+                    else if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessAreaState.SelectPreviousActionMatch();
+                        areaHandled = true;
+                    }
+                    // Down arrow - navigate with search awareness
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessAreaState.SelectNextActionMatch();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessAreaState.SelectFirstAction();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessAreaState.SelectLastAction();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+                    {
+                        // Consume Left/Right to prevent them from reaching Schedule
+                        // Actions menu doesn't use horizontal navigation
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        WindowlessAreaState.ExecuteAction();
+                        areaHandled = true;
+                    }
+                    // Typeahead characters (letters and numbers)
+                    else
+                    {
+                        bool isLetter = key >= KeyCode.A && key <= KeyCode.Z;
+                        bool isNumber = key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9;
+
+                        if (isLetter || isNumber)
+                        {
+                            char c = isLetter ? (char)('a' + (key - KeyCode.A)) : (char)('0' + (key - KeyCode.Alpha0));
+                            WindowlessAreaState.HandleActionsTypeahead(c);
+                            areaHandled = true;
+                        }
+                    }
+                }
+
+                if (areaHandled)
+                {
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 2.5: Handle area painting mode if active =====
             // BUT: Skip if windowless dialog is active - dialogs take absolute priority
             if (AreaPaintingState.IsActive && !WindowlessDialogState.IsActive)
             {
-                Log.Message($"RimWorld Access: Area painting active, handling key {key}");
                 bool handled = false;
 
                 // Tab key - toggle between box selection and single tile selection modes
@@ -626,7 +1139,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Space)
                 {
-                    Log.Message("RimWorld Access: Space pressed in area painting mode");
                     IntVec3 currentPosition = MapNavigationState.CurrentCursorPosition;
 
                     if (AreaPaintingState.SelectionMode == AreaSelectionMode.SingleTile)
@@ -659,7 +1171,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
                 {
-                    Log.Message("RimWorld Access: Enter pressed in area painting mode");
                     // If in preview mode, confirm the rectangle first
                     if (AreaPaintingState.IsInPreviewMode)
                     {
@@ -671,7 +1182,6 @@ namespace RimWorldAccess
                 }
                 else if (key == KeyCode.Escape)
                 {
-                    Log.Message("RimWorld Access: Escape pressed in area painting mode");
                     if (AreaPaintingState.HasRectangleStart)
                     {
                         // Cancel current rectangle selection
@@ -1441,87 +1951,163 @@ namespace RimWorldAccess
             // to handle WindowlessFloatMenuState which can be active at the same time as BillsMenuState.
 
             // ===== PRIORITY 4.55: Handle schedule menu if active =====
-            if (WindowlessScheduleState.IsActive)
+            // Skip if float menu is open (e.g., right bracket context menu in Areas column)
+            // Skip if placement mode is active (e.g., after Manage Areas → Expand Area)
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (WindowlessScheduleState.IsActive && !WindowlessFloatMenuState.IsActive &&
+                !ShapePlacementState.IsActive && !ViewingModeState.IsActive &&
+                !WindowlessDialogState.IsActive)
             {
                 bool handled = false;
                 bool shift = Event.current.shift;
                 bool ctrl = Event.current.control;
 
-                if (key == KeyCode.UpArrow)
+                // Ctrl+Tab: Switch columns
+                if (key == KeyCode.Tab && ctrl && !shift)
                 {
-                    WindowlessScheduleState.MoveUp();
+                    WindowlessScheduleState.SwitchToNextColumn();
                     handled = true;
                 }
-                else if (key == KeyCode.DownArrow)
+                else if (key == KeyCode.Tab && ctrl && shift)
                 {
-                    WindowlessScheduleState.MoveDown();
+                    WindowlessScheduleState.SwitchToPreviousColumn();
                     handled = true;
                 }
-                else if (key == KeyCode.LeftArrow)
+                // Column-dependent navigation
+                else if (WindowlessScheduleState.IsInAreasColumn)
                 {
-                    WindowlessScheduleState.MoveLeft();
-                    handled = true;
-                }
-                else if (key == KeyCode.RightArrow)
-                {
-                    if (shift)
+                    // AREAS COLUMN
+                    if (key == KeyCode.UpArrow && !shift)
                     {
-                        WindowlessScheduleState.FillRow();
+                        WindowlessScheduleState.MoveUp();
+                        handled = true;
                     }
-                    else
+                    else if (key == KeyCode.DownArrow && !shift)
+                    {
+                        WindowlessScheduleState.MoveDown();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow)
+                    {
+                        WindowlessScheduleState.SelectPreviousArea();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightArrow)
+                    {
+                        WindowlessScheduleState.SelectNextArea();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.UpArrow && shift)
+                    {
+                        WindowlessScheduleState.ApplyAreaToPawnAbove();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.DownArrow && shift)
+                    {
+                        WindowlessScheduleState.ApplyAreaToPawnBelow();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightBracket)
+                    {
+                        WindowlessScheduleState.OpenAreaContextMenu();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessScheduleState.JumpToFirstPawn();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessScheduleState.JumpToLastPawn();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        // Enter in Areas column: confirm selection or open Manage Areas
+                        WindowlessScheduleState.ConfirmAreaSelection();
+                        handled = true;
+                    }
+                    // Escape falls through to common handler which closes the menu
+                }
+                else
+                {
+                    // SCHEDULE COLUMN (existing behavior)
+                    if (key == KeyCode.UpArrow)
+                    {
+                        WindowlessScheduleState.MoveUp();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.DownArrow)
+                    {
+                        WindowlessScheduleState.MoveDown();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow)
+                    {
+                        WindowlessScheduleState.MoveLeft();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.RightArrow && !shift)
                     {
                         WindowlessScheduleState.MoveRight();
+                        handled = true;
                     }
-                    handled = true;
-                }
-                else if (key == KeyCode.Tab)
-                {
-                    if (shift)
+                    else if (key == KeyCode.RightArrow && shift)
                     {
-                        WindowlessScheduleState.CycleAssignmentBackward();
+                        WindowlessScheduleState.FillRow();
+                        handled = true;
                     }
-                    else
+                    else if (key == KeyCode.Tab && !ctrl && !shift)
                     {
                         WindowlessScheduleState.CycleAssignment();
+                        handled = true;
                     }
-                    handled = true;
+                    else if (key == KeyCode.Tab && !ctrl && shift)
+                    {
+                        WindowlessScheduleState.CycleAssignmentBackward();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Space)
+                    {
+                        WindowlessScheduleState.ApplyAssignment();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Home)
+                    {
+                        WindowlessScheduleState.JumpToFirstHour();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.End)
+                    {
+                        WindowlessScheduleState.JumpToLastHour();
+                        handled = true;
+                    }
                 }
-                else if (key == KeyCode.Space)
+
+                // Common keys for both columns
+                if (!handled)
                 {
-                    WindowlessScheduleState.ApplyAssignment();
-                    handled = true;
-                }
-                else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
-                {
-                    // Confirm and close
-                    WindowlessScheduleState.Confirm();
-                    handled = true;
-                }
-                else if (key == KeyCode.Escape)
-                {
-                    // Cancel and close
-                    WindowlessScheduleState.Cancel();
-                    handled = true;
-                }
-                else if (ctrl && key == KeyCode.C)
-                {
-                    WindowlessScheduleState.CopySchedule();
-                    handled = true;
-                }
-                else if (ctrl && key == KeyCode.V)
-                {
-                    WindowlessScheduleState.PasteSchedule();
-                    handled = true;
-                }
-                else if (key == KeyCode.Home)
-                {
-                    WindowlessScheduleState.JumpToFirstHour();
-                    handled = true;
-                }
-                else if (key == KeyCode.End)
-                {
-                    WindowlessScheduleState.JumpToLastHour();
-                    handled = true;
+                    if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        WindowlessScheduleState.Confirm();
+                        handled = true;
+                    }
+                    else if (key == KeyCode.Escape)
+                    {
+                        WindowlessScheduleState.Cancel();
+                        handled = true;
+                    }
+                    else if (ctrl && key == KeyCode.C)
+                    {
+                        WindowlessScheduleState.CopySchedule();
+                        handled = true;
+                    }
+                    else if (ctrl && key == KeyCode.V)
+                    {
+                        WindowlessScheduleState.PasteSchedule();
+                        handled = true;
+                    }
                 }
 
                 if (handled)
@@ -2020,7 +2606,10 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 4.74: Handle animals menu if active =====
-            if (AnimalsMenuState.IsActive)
+            // Skip if placement mode is active (e.g., after Manage Areas → Expand Area)
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (AnimalsMenuState.IsActive && !ShapePlacementState.IsActive && !ViewingModeState.IsActive &&
+                !WindowlessDialogState.IsActive)
             {
                 bool handled = false;
                 var typeahead = AnimalsMenuState.Typeahead;
@@ -2149,6 +2738,18 @@ namespace RimWorldAccess
                     AnimalsMenuState.HandleBackspace();
                     handled = true;
                 }
+                // Handle Shift+Down - apply last area to next animal (only on Allowed Area column)
+                else if (key == KeyCode.DownArrow && Event.current.shift)
+                {
+                    AnimalsMenuState.ApplyLastAreaToNextAnimal();
+                    handled = true;
+                }
+                // Handle Shift+Up - apply last area to previous animal (only on Allowed Area column)
+                else if (key == KeyCode.UpArrow && Event.current.shift)
+                {
+                    AnimalsMenuState.ApplyLastAreaToPreviousAnimal();
+                    handled = true;
+                }
                 // Handle Down arrow - navigate animals (use typeahead if active with matches)
                 else if (key == KeyCode.DownArrow)
                 {
@@ -2245,6 +2846,79 @@ namespace RimWorldAccess
                 // Consume other keys to prevent passthrough
                 Event.current.Use();
                 return;
+            }
+
+            // ===== PRIORITY 4.745: Handle scanner search (Z key activates, letters go to buffer) =====
+            // Z key activates search; when search is active, letter keys filter items
+            // Works during placement mode (architect build or designator from gizmos)
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                bool onWorldMap = WorldNavigationState.IsActive;
+                bool onMap = MapNavigationState.IsInitialized && !onWorldMap;
+                bool shift = Event.current.shift;
+                bool ctrl = Event.current.control;
+                bool alt = Event.current.alt;
+
+                // Check placement mode (search should work during placement)
+                bool inPlacementMode = ArchitectState.IsInPlacementMode ||
+                    ViewingModeState.IsActive ||
+                    ShapePlacementState.IsActive ||
+                    (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null);
+
+                // Determine if search should be allowed
+                // Allow search when: on map/world AND (no blocking menus OR in placement mode)
+                bool menuBlocksSearch = KeyboardHelper.IsAnyAccessibilityMenuActive() && !inPlacementMode;
+
+                if ((onMap || onWorldMap) && !menuBlocksSearch &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
+                {
+                    // Z key activates search (no modifiers) when search is not active
+                    // Text input when search IS active is handled by the early handler at priority -0.2
+                    // Also check GoToState.IsActive for mutual exclusion
+                    if (key == KeyCode.Z && !shift && !ctrl && !alt && !ScannerSearchState.IsActive && !GoToState.IsActive)
+                    {
+                        ScannerSearchState.Activate(onWorldMap);
+                        // Block RimWorld's keybinding system from seeing this key
+                        Event.current.keyCode = KeyCode.None;
+                        Event.current.Use();
+                        return;
+                    }
+                }
+            }
+
+            // ===== PRIORITY 4.746: Ctrl+G to activate Go To coordinate input =====
+            // Only works on local map (not world map)
+            if (Current.ProgramState == ProgramState.Playing)
+            {
+                bool onWorldMap = WorldNavigationState.IsActive;
+                bool onMap = MapNavigationState.IsInitialized && !onWorldMap;
+                bool ctrl = Event.current.control;
+                bool shift = Event.current.shift;
+                bool alt = Event.current.alt;
+
+                // Check placement mode (Go To should work during placement like scanner search)
+                bool inPlacementMode = ArchitectState.IsInPlacementMode ||
+                    ViewingModeState.IsActive ||
+                    ShapePlacementState.IsActive ||
+                    (Find.DesignatorManager != null && Find.DesignatorManager.SelectedDesignator != null);
+
+                // Determine if Go To should be allowed
+                bool menuBlocksGoTo = KeyboardHelper.IsAnyAccessibilityMenuActive() && !inPlacementMode;
+
+                if (onMap && !onWorldMap && key == KeyCode.G && ctrl && !shift && !alt)
+                {
+                    // Don't activate if scanner search is active (mutual exclusion)
+                    // Don't activate if Go To is already active
+                    if (!ScannerSearchState.IsActive && !GoToState.IsActive && !menuBlocksGoTo &&
+                        (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
+                    {
+                        GoToState.Activate();
+                        // Block RimWorld's keybinding system from seeing this key
+                        Event.current.keyCode = KeyCode.None;
+                        Event.current.Use();
+                        return;
+                    }
+                }
             }
 
             // ===== PRIORITY 4.75: Handle scanner keys (always available during map navigation) =====
@@ -2788,6 +3462,9 @@ namespace RimWorldAccess
             {
                 // Don't intercept if any menu is active (keys 1-5 are used for tile info)
                 bool anyMenuActive = WorkMenuState.IsActive ||
+                                    ShapeSelectionMenuState.IsActive ||
+                                    ViewingModeState.IsActive ||
+                                    ShapePlacementState.IsActive ||
                                     ArchitectState.IsActive ||
                                     ZoneCreationState.IsInCreationMode ||
                                     NotificationMenuState.IsActive ||
@@ -2863,7 +3540,7 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 6: Toggle draft mode with R key (if pawn is selected) =====
-            if (key == KeyCode.R)
+            if (key == KeyCode.R && !Event.current.alt)
             {
                 // Only toggle draft if:
                 // 1. We're in gameplay (not at main menu)
@@ -2983,6 +3660,82 @@ namespace RimWorldAccess
                 }
             }
 
+            // ===== PRIORITY 6.527: Display gear info with Alt+G (if pawn is selected) =====
+            if (key == KeyCode.G && Event.current.alt)
+            {
+                // Only display gear if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. No windows are preventing camera motion (means a dialog is open)
+                // 3. Not in zone creation mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode)
+                {
+                    // Display gear information
+                    GearState.DisplayGearInfo();
+
+                    // Prevent the default G key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 6.528: Rename pawn with Alt+R =====
+            if (key == KeyCode.R && Event.current.alt)
+            {
+                // Only rename if:
+                // 1. We're in gameplay
+                // 2. Map is loaded
+                // 3. No dialog blocking
+                // 4. Not in zone creation mode
+                // 5. Not in placement mode
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !ArchitectState.IsInPlacementMode &&
+                    !ViewingModeState.IsActive &&
+                    !ShapePlacementState.IsActive)
+                {
+                    // Get pawn at cursor
+                    Pawn pawn = null;
+                    if (MapNavigationState.IsInitialized)
+                    {
+                        IntVec3 cursorPosition = MapNavigationState.CurrentCursorPosition;
+                        if (cursorPosition.IsValid && cursorPosition.InBounds(Find.CurrentMap))
+                        {
+                            pawn = Find.CurrentMap.thingGrid.ThingsListAt(cursorPosition)
+                                .OfType<Pawn>().FirstOrDefault();
+                        }
+                    }
+
+                    // Fall back to selected pawn
+                    if (pawn == null)
+                        pawn = Find.Selector?.SingleSelectedObject as Pawn;
+
+                    if (pawn == null)
+                    {
+                        TolkHelper.Speak("No pawn at cursor");
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Check if pawn can be renamed
+                    if (!CanPawnBeRenamed(pawn))
+                    {
+                        TolkHelper.Speak("This pawn cannot be renamed");
+                        Event.current.Use();
+                        return;
+                    }
+
+                    // Open rename dialog
+                    Find.WindowStack.Add(pawn.NamePawnDialog());
+                    Event.current.Use();
+                    return;
+                }
+            }
+
             // ===== PRIORITY 6.53: Unforbid all items on the map with Alt+F =====
             if (key == KeyCode.F && Event.current.alt)
             {
@@ -3052,6 +3805,30 @@ namespace RimWorldAccess
                     TimeAnnouncementState.AnnounceTime();
 
                     // Prevent the default T key behavior
+                    Event.current.Use();
+                    return;
+                }
+            }
+
+            // ===== PRIORITY 6.56: Toggle forbid status on items at cursor with F key =====
+            if (key == KeyCode.F && !Event.current.shift && !Event.current.control && !Event.current.alt)
+            {
+                // Only toggle forbid if:
+                // 1. We're in gameplay (not at main menu)
+                // 2. A valid map with initialized navigation
+                // 3. No windows are preventing camera motion (means a dialog is open)
+                // 4. Not in zone creation mode
+                // 5. No accessibility menu is active (they use letter keys for typeahead)
+                // 6. Scanner search is not active (uses letter keys for filtering)
+                if (Current.ProgramState == ProgramState.Playing &&
+                    Find.CurrentMap != null &&
+                    MapNavigationState.IsInitialized &&
+                    (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion) &&
+                    !ZoneCreationState.IsInCreationMode &&
+                    !KeyboardHelper.IsAnyAccessibilityMenuActive() &&
+                    !ScannerSearchState.IsActive)
+                {
+                    ToggleForbidAtCursor();
                     Event.current.Use();
                     return;
                 }
@@ -3199,6 +3976,16 @@ namespace RimWorldAccess
             // ===== PRIORITY 7.05: Open gizmo navigation with G key (if pawn or building is selected) =====
             if (key == KeyCode.G)
             {
+                // Block gizmos during placement or viewing modes
+                // BUT allow G key if Confirm() was just called (JustConfirmed) - fixes timing issue
+                // where G key event processes before the Enter key's state changes take effect
+                if (ShapePlacementState.IsActive || (ViewingModeState.IsActive && !ViewingModeState.JustConfirmed))
+                {
+                    TolkHelper.Speak("Gizmos unavailable during placement or review");
+                    Event.current.Use();
+                    return;
+                }
+
                 // Only open gizmo navigation if we're in gameplay and no dialogs are open
                 if (Current.ProgramState == ProgramState.Playing &&
                     (Find.WindowStack == null || !Find.WindowStack.WindowsPreventCameraMotion))
@@ -3531,6 +4318,35 @@ namespace RimWorldAccess
                 Event.current.Use();
             }
 
+            // ===== PRIORITY 10.5: Handle local map arrow key navigation =====
+            // Uses Event.current for OS key repeat support (unlike CameraDriver.Update() which uses Input.GetKeyDown)
+            if (key == KeyCode.UpArrow || key == KeyCode.DownArrow ||
+                key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+            {
+                // Skip if in world view
+                if (WorldRendererUtility.WorldRendered)
+                    return;
+
+                // Only during gameplay with valid map
+                if (Current.ProgramState != ProgramState.Playing || Find.CurrentMap == null)
+                    return;
+
+                // Skip if windows prevent camera motion
+                if (Find.WindowStack?.WindowsPreventCameraMotion == true)
+                    return;
+
+                // Skip if not initialized or suppressed
+                if (!MapNavigationState.IsInitialized || MapNavigationState.SuppressMapNavigation)
+                    return;
+
+                // Handle the arrow key via MapArrowKeyHandler
+                if (MapArrowKeyHandler.HandleArrowKey(key, Event.current.control, Event.current.shift))
+                {
+                    Event.current.Use();
+                }
+                return;
+            }
+
             // CATCH-ALL: If any accessibility menu is active, consume ALL remaining key events
             // This prevents ANY keys from leaking to the game when a menu has focus
             if (KeyboardHelper.IsAnyAccessibilityMenuActive() && Event.current.isKey)
@@ -3621,6 +4437,21 @@ namespace RimWorldAccess
         }
 
         /// <summary>
+        /// Checks if a pawn can be renamed by the player.
+        /// </summary>
+        private static bool CanPawnBeRenamed(Pawn pawn)
+        {
+            if (pawn == null) return false;
+            // Colonists and colony subhumans (slaves, etc.) can be renamed
+            if (pawn.IsColonist || pawn.IsColonySubhuman) return true;
+            // Player-owned animals and mechanoids can be renamed
+            if (pawn.Faction == Faction.OfPlayer &&
+                (pawn.RaceProps.Animal || pawn.RaceProps.IsMechanoid))
+                return true;
+            return false;
+        }
+
+        /// <summary>
         /// Gets the label of the currently selected assignment type.
         /// </summary>
         private static string GetSelectedAssignmentLabel()
@@ -3680,6 +4511,72 @@ namespace RimWorldAccess
 
             Log.Message($"Unforbid all: {unforbiddenCount} items unforbidden");
         }
+
+        #region Forbid Toggle at Cursor
+
+        private static float lastForbidToggleTime = 0f;
+        private const float ForbidToggleCooldown = 0.3f;
+
+        /// <summary>
+        /// Toggles forbid/unforbid on items at the current cursor position.
+        /// </summary>
+        private static void ToggleForbidAtCursor()
+        {
+            // Cooldown to prevent accidental double-presses
+            if (Time.time - lastForbidToggleTime < ForbidToggleCooldown)
+                return;
+            lastForbidToggleTime = Time.time;
+
+            IntVec3 position = MapNavigationState.CurrentCursorPosition;
+            Map map = Find.CurrentMap;
+
+            List<Thing> allThings = position.GetThingList(map);
+            List<Thing> forbiddableItems = new List<Thing>();
+
+            foreach (Thing thing in allThings)
+            {
+                CompForbiddable forbiddable = thing.TryGetComp<CompForbiddable>();
+                if (forbiddable != null)
+                {
+                    forbiddableItems.Add(thing);
+                }
+            }
+
+            if (forbiddableItems.Count == 0)
+            {
+                TolkHelper.Speak("Nothing to forbid or unforbid at this location");
+                return;
+            }
+
+            // Determine if we should forbid or unforbid
+            // If any item is unforbidden, forbid all. If all are forbidden, unforbid all.
+            bool shouldForbid = forbiddableItems.Any(t => !t.TryGetComp<CompForbiddable>().Forbidden);
+
+            int toggledCount = 0;
+            string firstItemName = null;
+
+            foreach (Thing item in forbiddableItems)
+            {
+                if (firstItemName == null)
+                    firstItemName = item.LabelShort;
+                item.SetForbidden(shouldForbid, warnOnFail: false);
+                toggledCount++;
+            }
+
+            string announcement;
+            if (toggledCount == 1)
+            {
+                announcement = shouldForbid ? $"{firstItemName} forbidden" : $"{firstItemName} no longer forbidden";
+            }
+            else
+            {
+                announcement = shouldForbid ? $"{toggledCount} items forbidden" : $"{toggledCount} items no longer forbidden";
+            }
+
+            TolkHelper.Speak(announcement);
+        }
+
+        #endregion
 
 }
 }

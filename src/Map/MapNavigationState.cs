@@ -16,7 +16,18 @@ namespace RimWorldAccess
         Geysers,           // Jump to steam geysers
         HarvestableTrees,  // Jump to harvestable trees
         MinableTiles,      // Jump to mineable resources (ore, stone chunks)
-        PresetDistance     // Jump a fixed number of tiles
+        PresetDistance,    // Jump a fixed number of tiles
+        AdjacentToWall     // Jump to tile adjacent to (before) a wall
+    }
+
+    /// <summary>
+    /// Defines whether the camera follows the cursor or a selected pawn.
+    /// These modes are mutually exclusive.
+    /// </summary>
+    public enum CameraFollowMode
+    {
+        Cursor,  // Camera stays at cursor position, blocks RimWorld's pawn following
+        Pawn     // Camera follows selected pawn (enabled by comma/period cycling)
     }
 
     /// <summary>
@@ -33,8 +44,9 @@ namespace RimWorldAccess
         private static bool isInitialized = false;
         private static int initializedForMapId = -1; // Track which map we're initialized for
         private static bool suppressMapNavigation = false;
-        private static JumpMode currentJumpMode = JumpMode.Terrain;
+        private static JumpMode currentJumpMode = JumpMode.PresetDistance;
         private static int presetJumpDistance = 5;
+        private static CameraFollowMode cameraFollowMode = CameraFollowMode.Cursor;
 
         // Pending restore position - used when returning from dialogs like trade
         // If set, Initialize() will use this position instead of the camera position
@@ -173,6 +185,17 @@ namespace RimWorldAccess
         public static int PresetJumpDistance => presetJumpDistance;
 
         /// <summary>
+        /// Gets or sets the current camera follow mode.
+        /// Cursor mode: camera stays at cursor, blocks pawn following.
+        /// Pawn mode: camera follows selected pawn (after comma/period cycling).
+        /// </summary>
+        public static CameraFollowMode CurrentCameraMode
+        {
+            get => cameraFollowMode;
+            set => cameraFollowMode = value;
+        }
+
+        /// <summary>
         /// Cycles to the next jump mode and announces it.
         /// </summary>
         public static void CycleJumpModeForward()
@@ -246,6 +269,10 @@ namespace RimWorldAccess
             else if (currentJumpMode == JumpMode.PresetDistance)
             {
                 modeText = $"Jump mode: Preset distance, {presetJumpDistance} tiles";
+            }
+            else if (currentJumpMode == JumpMode.AdjacentToWall)
+            {
+                modeText = "Jump mode: Adjacent to Wall";
             }
             else
             {
@@ -343,6 +370,10 @@ namespace RimWorldAccess
             initializedForMapId = -1;
             knownMapIds.Clear();
             hasAnnouncedMultiMapHint = false;
+            cameraFollowMode = CameraFollowMode.Cursor;
+
+            // Invalidate scanner since map data is no longer valid
+            ScannerState.Invalidate();
         }
 
         /// <summary>
@@ -787,6 +818,106 @@ namespace RimWorldAccess
                     return true;
                 }
             }
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a tile has a blocking structure (wall, blueprint, frame, or mountain).
+        /// Used for the AdjacentToWall jump mode.
+        /// </summary>
+        private static bool IsBlockingStructure(IntVec3 position, Map map)
+        {
+            var things = position.GetThingList(map);
+            foreach (var thing in things)
+            {
+                // Check mineable rock (mountains)
+                if (thing.def.mineable)
+                    return true;
+
+                // Check completed buildings
+                if (thing is Building)
+                {
+                    if (thing.def.passability == Traversability.Impassable)
+                        return true;
+                    if (thing.def.Fillage == FillCategory.Full)
+                        return true;
+                    if (thing.def.building?.isWall == true)
+                        return true;
+                }
+
+                // Check blueprints and frames
+                if (thing.def.IsBlueprint || thing.def.IsFrame)
+                {
+                    if (thing.def.entityDefToBuild is ThingDef builtDef)
+                    {
+                        if (builtDef.passability == Traversability.Impassable)
+                            return true;
+                        if (builtDef.Fillage == FillCategory.Full)
+                            return true;
+                        if (builtDef.building?.isWall == true)
+                            return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Jumps to the tile immediately before a wall or blocking structure in the specified direction.
+        /// Returns true if the position changed.
+        /// </summary>
+        public static bool JumpToAdjacentToWall(IntVec3 direction, Map map)
+        {
+            if (map == null || !isInitialized)
+                return false;
+
+            // Check if already adjacent to a wall in that direction
+            IntVec3 nextTile = CurrentCursorPosition + direction;
+            if (nextTile.InBounds(map) && IsBlockingStructure(nextTile, map))
+            {
+                TolkHelper.Speak("Already adjacent to wall");
+                return false;  // Stay in place
+            }
+
+            IntVec3 searchPosition = CurrentCursorPosition;
+            IntVec3 lastValidPosition = CurrentCursorPosition;
+
+            int maxSteps = UnityEngine.Mathf.Max(map.Size.x, map.Size.z);
+
+            for (int step = 0; step < maxSteps; step++)
+            {
+                searchPosition += direction;
+
+                if (!searchPosition.InBounds(map))
+                {
+                    // Hit map boundary - move to edge
+                    if (lastValidPosition != CurrentCursorPosition)
+                    {
+                        CurrentCursorPosition = lastValidPosition;
+                        return true;
+                    }
+                    TolkHelper.Speak("Map boundary");
+                    return false;
+                }
+
+                if (IsBlockingStructure(searchPosition, map))
+                {
+                    // Found a wall - stop at the tile before it
+                    if (lastValidPosition != CurrentCursorPosition)
+                    {
+                        CurrentCursorPosition = lastValidPosition;
+                        return true;
+                    }
+                    // We were already at the last valid position
+                    TolkHelper.Speak("Already adjacent to wall");
+                    return false;
+                }
+
+                lastValidPosition = searchPosition;
+            }
+
+            // No wall found in this direction, stay in place
+            TolkHelper.Speak("No wall found");
             return false;
         }
     }

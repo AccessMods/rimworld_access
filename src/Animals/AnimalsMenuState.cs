@@ -15,11 +15,14 @@ namespace RimWorldAccess
         private static TabularMenuHelper<Pawn> tableHelper;
 
         // Submenu state
-        private enum SubmenuType { None, Master, AllowedArea, MedicalCare, FoodRestriction }
+        private enum SubmenuType { None, Master, AllowedArea, MedicalCare }
         private static SubmenuType activeSubmenu = SubmenuType.None;
         private static int submenuSelectedIndex = 0;
         private static List<object> submenuOptions = new List<object>();
         private static TypeaheadSearchHelper submenuTypeahead = new TypeaheadSearchHelper();
+
+        // Last applied area for bulk operations (null = Unrestricted)
+        private static Area lastAppliedArea = null;
 
         public static TypeaheadSearchHelper Typeahead => tableHelper?.Typeahead;
         public static TypeaheadSearchHelper SubmenuTypeahead => submenuTypeahead;
@@ -78,6 +81,10 @@ namespace RimWorldAccess
             activeSubmenu = SubmenuType.None;
             animalsList.Clear();
             tableHelper?.ClearSearch();
+
+            // Ensure any stale designator from area management is cleared
+            Find.DesignatorManager?.Deselect();
+
             SoundDefOf.TabClose.PlayOneShotOnCamera();
             TolkHelper.Speak("Animals menu closed");
         }
@@ -136,52 +143,105 @@ namespace RimWorldAccess
                 return;
             }
 
+            int fixedColumnsBeforeTraining = 5; // Name, Gender, Age, LifeStage, Pregnant
+            int trainingCount = AnimalsMenuHelper.GetAllTrainables().Count;
+
             // Handle interaction based on column type
-            if (currentColumnIndex < 8) // Fixed columns before training
+            if (currentColumnIndex < fixedColumnsBeforeTraining)
             {
-                switch ((AnimalsMenuHelper.ColumnType)currentColumnIndex)
+                // Fixed columns before training
+                AnimalsMenuHelper.ColumnType type = (AnimalsMenuHelper.ColumnType)currentColumnIndex;
+                if (type == AnimalsMenuHelper.ColumnType.Name)
                 {
-                    case AnimalsMenuHelper.ColumnType.Master:
-                        OpenMasterSubmenu(currentAnimal);
-                        break;
-                    case AnimalsMenuHelper.ColumnType.Slaughter:
-                        ToggleSlaughter(currentAnimal);
-                        break;
+                    // Jump to animal on map
+                    JumpToAnimalOnMap(currentAnimal);
+                }
+                else
+                {
+                    // Other fixed columns are not interactive
+                    SoundDefOf.Click.PlayOneShotOnCamera();
+                    AnnounceCurrentCell(includeAnimalName: false);
                 }
             }
-            else if (currentColumnIndex < 8 + AnimalsMenuHelper.GetAllTrainables().Count)
+            else if (currentColumnIndex < fixedColumnsBeforeTraining + trainingCount)
             {
                 // Training column
                 ToggleTraining(currentAnimal, currentColumnIndex);
             }
             else
             {
-                // Fixed columns after training
-                int fixedIndex = currentColumnIndex - 8 - AnimalsMenuHelper.GetAllTrainables().Count;
-                AnimalsMenuHelper.ColumnType type = (AnimalsMenuHelper.ColumnType)(8 + fixedIndex);
-
-                switch (type)
+                // Fixed columns after training - use dynamic column type lookup
+                var columnType = AnimalsMenuHelper.GetColumnTypeAfterTraining(currentColumnIndex);
+                if (columnType == null)
                 {
+                    SoundDefOf.Click.PlayOneShotOnCamera();
+                    AnnounceCurrentCell(includeAnimalName: false);
+                    return;
+                }
+
+                switch (columnType.Value)
+                {
+                    case AnimalsMenuHelper.ColumnType.SpecialTrainable:
+                        ToggleSpecialTrainable(currentAnimal);
+                        break;
                     case AnimalsMenuHelper.ColumnType.FollowDrafted:
                         ToggleFollowDrafted(currentAnimal);
                         break;
                     case AnimalsMenuHelper.ColumnType.FollowFieldwork:
                         ToggleFollowFieldwork(currentAnimal);
                         break;
-                    case AnimalsMenuHelper.ColumnType.AllowedArea:
-                        OpenAllowedAreaSubmenu(currentAnimal);
+                    case AnimalsMenuHelper.ColumnType.AnimalDig:
+                        ToggleAnimalDig(currentAnimal);
+                        break;
+                    case AnimalsMenuHelper.ColumnType.AnimalForage:
+                        ToggleAnimalForage(currentAnimal);
+                        break;
+                    case AnimalsMenuHelper.ColumnType.Master:
+                        OpenMasterSubmenu(currentAnimal);
+                        break;
+                    case AnimalsMenuHelper.ColumnType.Sterile:
+                        ToggleSterilization(currentAnimal);
+                        break;
+                    case AnimalsMenuHelper.ColumnType.Slaughter:
+                        ToggleSlaughter(currentAnimal);
                         break;
                     case AnimalsMenuHelper.ColumnType.MedicalCare:
                         OpenMedicalCareSubmenu(currentAnimal);
                         break;
-                    case AnimalsMenuHelper.ColumnType.FoodRestriction:
-                        OpenFoodRestrictionSubmenu(currentAnimal);
-                        break;
                     case AnimalsMenuHelper.ColumnType.ReleaseToWild:
                         ToggleReleaseToWild(currentAnimal);
                         break;
+                    case AnimalsMenuHelper.ColumnType.AllowedArea:
+                        OpenAllowedAreaSubmenu(currentAnimal);
+                        break;
+                    // MentalState, Bond are display-only (handled by IsColumnInteractive returning false)
                 }
             }
+        }
+
+        private static void JumpToAnimalOnMap(Pawn pawn)
+        {
+            if (pawn == null || pawn.Map == null)
+            {
+                TolkHelper.Speak("Animal not on map", SpeechPriority.High);
+                return;
+            }
+
+            // Get animal's position
+            IntVec3 position = pawn.Position;
+
+            // Close the animals menu
+            Close();
+
+            // Move map cursor to animal's position
+            MapNavigationState.CurrentCursorPosition = position;
+
+            // Jump camera to position
+            Find.CameraDriver?.JumpToCurrentMapLoc(position);
+
+            // Announce the jump
+            string animalName = pawn.Name != null ? pawn.Name.ToStringShort : pawn.def.LabelCap.ToString();
+            TolkHelper.Speak($"Jumped to {animalName}");
         }
 
         // === Cell Interaction Methods ===
@@ -247,6 +307,13 @@ namespace RimWorldAccess
         {
             if (pawn.playerSettings == null) return;
 
+            // Check if animal has learned Obedience (Guard)
+            if (pawn.training?.HasLearned(TrainableDefOf.Obedience) != true)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} requires {TrainableDefOf.Obedience.LabelCap} training", SpeechPriority.High);
+                return;
+            }
+
             pawn.playerSettings.followDrafted = !pawn.playerSettings.followDrafted;
 
             if (pawn.playerSettings.followDrafted)
@@ -265,9 +332,107 @@ namespace RimWorldAccess
         {
             if (pawn.playerSettings == null) return;
 
+            // Check if animal has learned Obedience (Guard)
+            if (pawn.training?.HasLearned(TrainableDefOf.Obedience) != true)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} requires {TrainableDefOf.Obedience.LabelCap} training", SpeechPriority.High);
+                return;
+            }
+
             pawn.playerSettings.followFieldwork = !pawn.playerSettings.followFieldwork;
 
             if (pawn.playerSettings.followFieldwork)
+            {
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+            else
+            {
+                SoundDefOf.Checkbox_TurnedOff.PlayOneShotOnCamera();
+            }
+
+            AnnounceCurrentCell(includeAnimalName: false);
+        }
+
+        private static void ToggleAnimalDig(Pawn pawn)
+        {
+            if (pawn.playerSettings == null) return;
+
+            // Check if animal has learned Dig
+            if (pawn.training?.HasLearned(TrainableDefOf.Dig) != true)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} has not learned {TrainableDefOf.Dig.LabelCap}", SpeechPriority.High);
+                return;
+            }
+
+            pawn.playerSettings.animalDig = !pawn.playerSettings.animalDig;
+
+            if (pawn.playerSettings.animalDig)
+            {
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+            else
+            {
+                SoundDefOf.Checkbox_TurnedOff.PlayOneShotOnCamera();
+            }
+
+            AnnounceCurrentCell(includeAnimalName: false);
+        }
+
+        private static void ToggleAnimalForage(Pawn pawn)
+        {
+            if (pawn.playerSettings == null) return;
+
+            // Check if animal has learned Forage
+            if (pawn.training?.HasLearned(TrainableDefOf.Forage) != true)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} has not learned {TrainableDefOf.Forage.LabelCap}", SpeechPriority.High);
+                return;
+            }
+
+            pawn.playerSettings.animalForage = !pawn.playerSettings.animalForage;
+
+            if (pawn.playerSettings.animalForage)
+            {
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+            else
+            {
+                SoundDefOf.Checkbox_TurnedOff.PlayOneShotOnCamera();
+            }
+
+            AnnounceCurrentCell(includeAnimalName: false);
+        }
+
+        private static void ToggleSpecialTrainable(Pawn pawn)
+        {
+            var specialTrainables = AnimalsMenuHelper.GetSpecialTrainables(pawn);
+            if (specialTrainables.Count == 0)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} has no special abilities", SpeechPriority.High);
+                return;
+            }
+
+            if (pawn.training == null) return;
+
+            // Determine current state - if ANY are wanted, we'll turn all off; otherwise turn all on
+            bool anyWanted = false;
+            foreach (var trainable in specialTrainables)
+            {
+                if (pawn.training.GetWanted(trainable))
+                {
+                    anyWanted = true;
+                    break;
+                }
+            }
+
+            // Toggle all special trainables
+            bool newState = !anyWanted;
+            foreach (var trainable in specialTrainables)
+            {
+                pawn.training.SetWantedRecursive(trainable, newState);
+            }
+
+            if (newState)
             {
                 SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
             }
@@ -299,10 +464,56 @@ namespace RimWorldAccess
             AnnounceCurrentCell(includeAnimalName: false);
         }
 
+        private static void ToggleSterilization(Pawn pawn)
+        {
+            // Can't toggle if already sterilized
+            if (AnimalsMenuHelper.IsAnimalSterilized(pawn))
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} is already sterilized", SpeechPriority.High);
+                return;
+            }
+
+            // Check if sterilization is currently scheduled
+            bool hasScheduled = AnimalsMenuHelper.HasSterilizationScheduled(pawn);
+
+            if (hasScheduled)
+            {
+                // Cancel all sterilization operations
+                var billsToRemove = pawn.BillStack.Bills.Where(b => b.recipe == RecipeDefOf.Sterilize).ToList();
+                foreach (var bill in billsToRemove)
+                {
+                    pawn.BillStack.Delete(bill);
+                }
+                SoundDefOf.Checkbox_TurnedOff.PlayOneShotOnCamera();
+            }
+            else
+            {
+                // Check if animal belongs to another faction
+                if (pawn.HomeFaction != Faction.OfPlayer && pawn.HomeFaction != null)
+                {
+                    // Vanilla shows a confirmation dialog for faction animals - we'll just warn and proceed
+                    TolkHelper.Speak($"Warning: {pawn.LabelShort} belongs to {pawn.HomeFaction.Name}. Scheduling sterilization anyway.");
+                }
+
+                // Schedule sterilization
+                HealthCardUtility.CreateSurgeryBill(pawn, RecipeDefOf.Sterilize, null);
+                SoundDefOf.Checkbox_TurnedOn.PlayOneShotOnCamera();
+            }
+
+            AnnounceCurrentCell(includeAnimalName: false);
+        }
+
         // === Submenu System ===
 
         private static void OpenMasterSubmenu(Pawn pawn)
         {
+            // Check if animal has learned Obedience (Guard)
+            if (pawn.training?.HasLearned(TrainableDefOf.Obedience) != true)
+            {
+                TolkHelper.Speak($"{pawn.LabelShort} requires {TrainableDefOf.Obedience.LabelCap} training to have a master", SpeechPriority.High);
+                return;
+            }
+
             List<Pawn> colonists = AnimalsMenuHelper.GetAvailableColonists();
 
             // Add "None" option at the beginning
@@ -331,15 +542,19 @@ namespace RimWorldAccess
             AnnounceSubmenuOption();
         }
 
+        // Marker string for "Manage Areas" option in AllowedArea submenu
+        private const string ManageAreasMarker = "ManageAreas";
+
         private static void OpenAllowedAreaSubmenu(Pawn pawn)
         {
             List<Area> areas = AnimalsMenuHelper.GetAvailableAreas();
 
             submenuOptions.Clear();
-            submenuOptions.Add(null); // null = unrestricted
+            submenuOptions.Add(ManageAreasMarker);  // "Manage Areas" first
+            submenuOptions.Add(null); // null = unrestricted (second)
             submenuOptions.AddRange(areas.Cast<object>());
 
-            submenuSelectedIndex = 0;
+            submenuSelectedIndex = 1;  // Default to "Unrestricted", NOT "Manage Areas"
 
             // Find current area in list
             if (pawn.playerSettings?.AreaRestrictionInPawnCurrentMap != null)
@@ -348,7 +563,7 @@ namespace RimWorldAccess
                 {
                     if (areas[i] == pawn.playerSettings.AreaRestrictionInPawnCurrentMap)
                     {
-                        submenuSelectedIndex = i + 1;
+                        submenuSelectedIndex = i + 2;  // +2 for ManageAreas and null
                         break;
                     }
                 }
@@ -387,32 +602,6 @@ namespace RimWorldAccess
             AnnounceSubmenuOption();
         }
 
-        private static void OpenFoodRestrictionSubmenu(Pawn pawn)
-        {
-            List<FoodPolicy> policies = AnimalsMenuHelper.GetFoodPolicies();
-
-            submenuOptions.Clear();
-            submenuOptions.AddRange(policies.Cast<object>());
-
-            // Find current food restriction
-            submenuSelectedIndex = 0;
-            if (pawn.foodRestriction?.CurrentFoodPolicy != null)
-            {
-                for (int i = 0; i < policies.Count; i++)
-                {
-                    if (policies[i] == pawn.foodRestriction.CurrentFoodPolicy)
-                    {
-                        submenuSelectedIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            activeSubmenu = SubmenuType.FoodRestriction;
-            submenuTypeahead.ClearSearch();
-            SoundDefOf.Click.PlayOneShotOnCamera();
-            AnnounceSubmenuOption();
-        }
 
         public static void SubmenuSelectNext()
         {
@@ -460,13 +649,17 @@ namespace RimWorldAccess
         /// </summary>
         private static string GetSubmenuOptionText(object option)
         {
-            if (option == null)
+            if (option is string s && s == ManageAreasMarker)
+            {
+                return "Manage Areas";
+            }
+            else if (option == null)
             {
                 return activeSubmenu == SubmenuType.Master ? "None" : "Unrestricted";
             }
             else if (option is Pawn colonist)
             {
-                return colonist.Name.ToStringShort;
+                return colonist.LabelShort;
             }
             else if (option is Area area)
             {
@@ -475,10 +668,6 @@ namespace RimWorldAccess
             else if (option is MedicalCareCategory medCare)
             {
                 return medCare.GetLabel();
-            }
-            else if (option is FoodPolicy foodPolicy)
-            {
-                return foodPolicy.label;
             }
             return "Unknown";
         }
@@ -557,30 +746,8 @@ namespace RimWorldAccess
         {
             if (submenuOptions.Count == 0) return;
 
-            string optionText = "Unknown";
-
             object selectedOption = submenuOptions[submenuSelectedIndex];
-
-            if (selectedOption == null)
-            {
-                optionText = activeSubmenu == SubmenuType.Master ? "None" : "Unrestricted";
-            }
-            else if (selectedOption is Pawn colonist)
-            {
-                optionText = colonist.Name.ToStringShort;
-            }
-            else if (selectedOption is Area area)
-            {
-                optionText = area.Label;
-            }
-            else if (selectedOption is MedicalCareCategory medCare)
-            {
-                optionText = medCare.GetLabel();
-            }
-            else if (selectedOption is FoodPolicy foodPolicy)
-            {
-                optionText = foodPolicy.label;
-            }
+            string optionText = GetSubmenuOptionText(selectedOption);
 
             string announcement = $"{optionText} ({MenuHelper.FormatPosition(submenuSelectedIndex, submenuOptions.Count)})";
             TolkHelper.Speak(announcement);
@@ -603,9 +770,53 @@ namespace RimWorldAccess
                     break;
 
                 case SubmenuType.AllowedArea:
+                    // Check if "Manage Areas" was selected
+                    if (selectedOption is string marker && marker == ManageAreasMarker)
+                    {
+                        int savedAnimalIndex = tableHelper.CurrentRowIndex;
+                        int savedColumn = tableHelper.CurrentColumnIndex;
+                        Map currentMap = Find.CurrentMap;
+                        CloseSubmenu();
+
+                        // Callback that returns to Animals submenu when Manage Areas closes
+                        Action returnToSubmenuCallback = () => {
+                            if (savedAnimalIndex < animalsList.Count)
+                            {
+                                tableHelper.CurrentRowIndex = savedAnimalIndex;
+                                tableHelper.CurrentColumnIndex = savedColumn;
+                                OpenAllowedAreaSubmenu(animalsList[savedAnimalIndex]);
+                                submenuSelectedIndex = 0;  // Manage Areas
+                                AnnounceSubmenuOption();
+                            }
+                        };
+
+                        // Callback for when returning from placement (Expand/Shrink)
+                        // This reopens Manage Areas instead of going back to submenu
+                        Action reopenManageAreasCallback = () => {
+                            // Deselect the designator since we're done with placement
+                            Find.DesignatorManager?.Deselect();
+
+                            if (currentMap != null && Find.CurrentMap == currentMap)
+                            {
+                                // Reopen Manage Areas with the return-to-submenu callback
+                                WindowlessAreaState.Open(currentMap, returnToSubmenuCallback);
+                            }
+                            else
+                            {
+                                // Map changed, just return to submenu
+                                returnToSubmenuCallback();
+                            }
+                        };
+
+                        WindowlessAreaState.Open(currentMap, reopenManageAreasCallback);
+                        return;  // Don't close submenu normally - it was already closed
+                    }
+
                     if (currentAnimal.playerSettings != null)
                     {
-                        currentAnimal.playerSettings.AreaRestrictionInPawnCurrentMap = selectedOption as Area;
+                        Area area = selectedOption as Area;
+                        currentAnimal.playerSettings.AreaRestrictionInPawnCurrentMap = area;
+                        lastAppliedArea = area;  // Store for bulk operations
                     }
                     break;
 
@@ -613,13 +824,6 @@ namespace RimWorldAccess
                     if (currentAnimal.playerSettings != null && selectedOption is MedicalCareCategory medCare)
                     {
                         currentAnimal.playerSettings.medCare = medCare;
-                    }
-                    break;
-
-                case SubmenuType.FoodRestriction:
-                    if (currentAnimal.foodRestriction != null && selectedOption is FoodPolicy foodPolicy)
-                    {
-                        currentAnimal.foodRestriction.CurrentFoodPolicy = foodPolicy;
                     }
                     break;
             }
@@ -738,6 +942,74 @@ namespace RimWorldAccess
             tableHelper.JumpToLast(animalsList.Count);
             SoundDefOf.Tick_Tiny.PlayOneShotOnCamera();
             AnnounceCurrentCell(includeAnimalName: true);
+        }
+
+        #endregion
+
+        #region Bulk Area Apply
+
+        /// <summary>
+        /// Checks if the current column is the AllowedArea column.
+        /// </summary>
+        private static bool IsOnAllowedAreaColumn()
+        {
+            int currentColumnIndex = tableHelper.CurrentColumnIndex;
+            var columnType = AnimalsMenuHelper.GetColumnTypeAfterTraining(currentColumnIndex);
+            return columnType == AnimalsMenuHelper.ColumnType.AllowedArea;
+        }
+
+        /// <summary>
+        /// Applies the last-used area to the next animal and moves down.
+        /// Only works when on Allowed Area column and not in a submenu.
+        /// </summary>
+        public static void ApplyLastAreaToNextAnimal()
+        {
+            if (activeSubmenu != SubmenuType.None) return;
+            if (!IsOnAllowedAreaColumn()) return;
+            if (animalsList.Count <= 1) return;
+
+            // Move to next animal
+            tableHelper.SelectNextRow(animalsList.Count);
+            Pawn animal = animalsList[tableHelper.CurrentRowIndex];
+
+            // Apply last area
+            if (animal.playerSettings != null)
+            {
+                animal.playerSettings.AreaRestrictionInPawnCurrentMap = lastAppliedArea;
+            }
+
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            string areaName = lastAppliedArea?.Label ?? "Unrestricted";
+            string position = MenuHelper.FormatPosition(tableHelper.CurrentRowIndex, animalsList.Count);
+            TolkHelper.Speak($"{animal.LabelShort}: {areaName} applied. {position}");
+        }
+
+        /// <summary>
+        /// Applies the last-used area to the previous animal and moves up.
+        /// Only works when on Allowed Area column and not in a submenu.
+        /// </summary>
+        public static void ApplyLastAreaToPreviousAnimal()
+        {
+            if (activeSubmenu != SubmenuType.None) return;
+            if (!IsOnAllowedAreaColumn()) return;
+            if (animalsList.Count <= 1) return;
+
+            // Move to previous animal
+            tableHelper.SelectPreviousRow(animalsList.Count);
+            Pawn animal = animalsList[tableHelper.CurrentRowIndex];
+
+            // Apply last area
+            if (animal.playerSettings != null)
+            {
+                animal.playerSettings.AreaRestrictionInPawnCurrentMap = lastAppliedArea;
+            }
+
+            SoundDefOf.Click.PlayOneShotOnCamera();
+
+            string areaName = lastAppliedArea?.Label ?? "Unrestricted";
+            string position = MenuHelper.FormatPosition(tableHelper.CurrentRowIndex, animalsList.Count);
+            TolkHelper.Speak($"{animal.LabelShort}: {areaName} applied. {position}");
         }
 
         #endregion

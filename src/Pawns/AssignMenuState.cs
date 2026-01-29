@@ -8,13 +8,13 @@ namespace RimWorldAccess
 {
     /// <summary>
     /// Column types for the assign menu.
+    /// Note: AllowedAreas has been moved to WindowlessScheduleState (F2 menu).
     /// </summary>
     public enum ColumnType
     {
         Outfit,
         FoodRestrictions,
         DrugPolicies,
-        AllowedAreas,
         ReadingPolicies,
         MedicineCarry,
         HostilityResponse
@@ -43,7 +43,6 @@ namespace RimWorldAccess
         private static List<ApparelPolicy> outfitPolicies = new List<ApparelPolicy>();
         private static List<FoodPolicy> foodPolicies = new List<FoodPolicy>();
         private static List<DrugPolicy> drugPolicies = new List<DrugPolicy>();
-        private static List<AreaOption> areaOptions = new List<AreaOption>();
         private static List<ReadingPolicy> readingPolicies = new List<ReadingPolicy>();
         private static List<MedicineCarryOption> medicineCarryOptions = new List<MedicineCarryOption>();
         private static List<HostilityResponseMode> hostilityOptions = new List<HostilityResponseMode>();
@@ -54,7 +53,6 @@ namespace RimWorldAccess
             { ColumnType.Outfit, "Outfit" },
             { ColumnType.FoodRestrictions, "Food Restrictions" },
             { ColumnType.DrugPolicies, "Drug Policies" },
-            { ColumnType.AllowedAreas, "Allowed Areas" },
             { ColumnType.ReadingPolicies, "Reading Policies" },
             { ColumnType.MedicineCarry, "Medicine Carry" },
             { ColumnType.HostilityResponse, "Hostility Response" }
@@ -100,6 +98,7 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Rebuilds the list of active columns based on available features for current pawn.
+        /// Note: AllowedAreas has been moved to WindowlessScheduleState (F2 menu).
         /// </summary>
         private static void RebuildActiveColumns()
         {
@@ -109,7 +108,6 @@ namespace RimWorldAccess
             activeColumns.Add(ColumnType.Outfit);
             activeColumns.Add(ColumnType.FoodRestrictions);
             activeColumns.Add(ColumnType.DrugPolicies);
-            activeColumns.Add(ColumnType.AllowedAreas);
 
             // Reading policies only with Ideology DLC
             if (ModsConfig.IdeologyActive)
@@ -131,7 +129,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Loads all policy databases and area lists.
+        /// Loads all policy databases.
+        /// Note: Area loading has been moved to WindowlessScheduleState (F2 menu).
         /// </summary>
         private static void LoadAllPolicies()
         {
@@ -154,24 +153,6 @@ namespace RimWorldAccess
             if (Current.Game?.drugPolicyDatabase != null)
             {
                 drugPolicies = Current.Game.drugPolicyDatabase.AllPolicies.ToList();
-            }
-
-            // Load allowed areas
-            areaOptions.Clear();
-            if (Find.CurrentMap?.areaManager != null)
-            {
-                // Add "Unrestricted" as first option
-                areaOptions.Add(new AreaOption { Label = "Unrestricted", Area = null });
-
-                // Add all assignable areas
-                var areas = Find.CurrentMap.areaManager.AllAreas
-                    .Where(a => a.AssignableAsAllowed())
-                    .OrderBy(a => a.Label);
-
-                foreach (var area in areas)
-                {
-                    areaOptions.Add(new AreaOption { Label = area.Label, Area = area });
-                }
             }
 
             // Load reading policies (if DLC is active)
@@ -232,7 +213,6 @@ namespace RimWorldAccess
             outfitPolicies.Clear();
             foodPolicies.Clear();
             drugPolicies.Clear();
-            areaOptions.Clear();
             readingPolicies.Clear();
             medicineCarryOptions.Clear();
             hostilityOptions.Clear();
@@ -343,15 +323,6 @@ namespace RimWorldAccess
                     }
                     break;
 
-                case ColumnType.AllowedAreas:
-                    if (currentPawn.playerSettings != null && selectedOptionIndex >= 0 && selectedOptionIndex < areaOptions.Count)
-                    {
-                        var areaOption = areaOptions[selectedOptionIndex];
-                        currentPawn.playerSettings.AreaRestrictionInPawnCurrentMap = areaOption.Area;
-                        result = $"{currentPawn.LabelShort}: Allowed area set to {areaOption.Label}";
-                    }
-                    break;
-
                 case ColumnType.ReadingPolicies:
                     if (ModsConfig.IdeologyActive && currentPawn.reading != null &&
                         selectedOptionIndex >= 0 && selectedOptionIndex < readingPolicies.Count)
@@ -445,17 +416,6 @@ namespace RimWorldAccess
                     }
                     break;
 
-                case ColumnType.AllowedAreas: // Allowed Areas - Open windowless areas manager
-                    if (Find.CurrentMap?.areaManager != null)
-                    {
-                        // Close the assign menu before opening the area manager
-                        Close();
-
-                        WindowlessAreaState.Open(Find.CurrentMap);
-                        TolkHelper.Speak("Opened areas manager");
-                    }
-                    break;
-
                 case ColumnType.ReadingPolicies: // Reading Policies - Open reading policies dialog (Ideology DLC)
                     if (ModsConfig.IdeologyActive && Current.Game?.readingPolicyDatabase != null)
                     {
@@ -526,7 +486,6 @@ namespace RimWorldAccess
                 case ColumnType.Outfit: return outfitPolicies.Count;
                 case ColumnType.FoodRestrictions: return foodPolicies.Count;
                 case ColumnType.DrugPolicies: return drugPolicies.Count;
-                case ColumnType.AllowedAreas: return areaOptions.Count;
                 case ColumnType.ReadingPolicies: return readingPolicies.Count;
                 case ColumnType.MedicineCarry: return medicineCarryOptions.Count;
                 case ColumnType.HostilityResponse: return hostilityOptions.Count;
@@ -562,15 +521,6 @@ namespace RimWorldAccess
                     if (currentPawn.drugs != null && currentPawn.drugs.CurrentPolicy != null)
                     {
                         return drugPolicies.IndexOf(currentPawn.drugs.CurrentPolicy);
-                    }
-                    break;
-
-                case ColumnType.AllowedAreas:
-                    if (currentPawn.playerSettings != null)
-                    {
-                        var currentArea = currentPawn.playerSettings.AreaRestrictionInPawnCurrentMap;
-                        int index = areaOptions.FindIndex(a => a.Area == currentArea);
-                        return index >= 0 ? index : 0;
                     }
                     break;
 
@@ -655,11 +605,6 @@ namespace RimWorldAccess
                 case ColumnType.DrugPolicies:
                     if (selectedOptionIndex < drugPolicies.Count)
                         return drugPolicies[selectedOptionIndex].label;
-                    break;
-
-                case ColumnType.AllowedAreas:
-                    if (selectedOptionIndex < areaOptions.Count)
-                        return areaOptions[selectedOptionIndex].Label;
                     break;
 
                 case ColumnType.ReadingPolicies:
@@ -815,11 +760,6 @@ namespace RimWorldAccess
                         labels.Add(policy.label ?? "");
                     break;
 
-                case ColumnType.AllowedAreas:
-                    foreach (var area in areaOptions)
-                        labels.Add(area.Label ?? "");
-                    break;
-
                 case ColumnType.ReadingPolicies:
                     foreach (var policy in readingPolicies)
                         labels.Add(policy.label ?? "");
@@ -869,15 +809,6 @@ namespace RimWorldAccess
             }
 
             TolkHelper.Speak(message);
-        }
-
-        /// <summary>
-        /// Represents an area option (including "Unrestricted" as null area).
-        /// </summary>
-        public class AreaOption
-        {
-            public string Label { get; set; }
-            public Area Area { get; set; }
         }
 
         /// <summary>

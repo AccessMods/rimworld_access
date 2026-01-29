@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
@@ -6,9 +7,19 @@ using RimWorld;
 namespace RimWorldAccess
 {
     /// <summary>
+    /// Column types for the schedule menu.
+    /// </summary>
+    public enum ScheduleColumnMode
+    {
+        Schedule,
+        Areas
+    }
+
+    /// <summary>
     /// Manages the state and navigation for the windowless schedule/timetable interface.
     /// Provides 2D grid navigation (pawns x hours) with keyboard controls.
     /// Similar to WorkMenuState but for managing colonist schedules without opening the native tab.
+    /// Now includes dual-column interface with Schedule and Allowed Areas columns.
     /// </summary>
     public static class WindowlessScheduleState
     {
@@ -25,11 +36,25 @@ namespace RimWorldAccess
         // Track original schedules for revert: Dictionary<Pawn, List<TimeAssignmentDef>>
         private static Dictionary<Pawn, List<TimeAssignmentDef>> originalSchedules = new Dictionary<Pawn, List<TimeAssignmentDef>>();
 
+        // Column mode state (Schedule vs Areas)
+        private static ScheduleColumnMode currentColumn = ScheduleColumnMode.Schedule;
+        private static List<object> availableAreas = new List<object>();  // ManageAreasSentinel, null (Unrestricted), then Area objects
+        private static int selectedAreaIndex = 0;
+
+        // Sentinel value for "Manage Areas" option (first in list)
+        private static readonly object ManageAreasSentinel = new object();
+
+        // Index constants for clarity
+        private const int ManageAreasIndex = 0;
+        private const int UnrestrictedIndex = 1;
+
         public static bool IsActive => isActive;
         public static int SelectedPawnIndex => selectedPawnIndex;
         public static int SelectedHourIndex => selectedHourIndex;
         public static List<Pawn> Pawns => pawns;
         public static TimeAssignmentDef SelectedAssignment => selectedAssignment;
+        public static ScheduleColumnMode CurrentColumn => currentColumn;
+        public static bool IsInAreasColumn => currentColumn == ScheduleColumnMode.Areas;
 
         /// <summary>
         /// Opens the schedule menu. Initializes pawn list and sets focus to current game hour.
@@ -42,6 +67,9 @@ namespace RimWorldAccess
             copiedSchedule = null;
             pendingChanges.Clear();
             originalSchedules.Clear();
+            currentColumn = ScheduleColumnMode.Schedule;
+            availableAreas.Clear();
+            selectedAreaIndex = 0;
 
             // Get list of pawns (colonists + controllable subhumans, excluding babies)
             pawns.Clear();
@@ -88,7 +116,7 @@ namespace RimWorldAccess
                 }
             }
 
-            TolkHelper.Speak("Schedule");
+            TolkHelper.Speak("Schedule. Control Tab for Allowed Areas.");
             UpdateClipboard();
         }
 
@@ -115,9 +143,10 @@ namespace RimWorldAccess
                 }
             }
 
+            // Note: Area changes are applied immediately, so we only report schedule changes here
             string message = changesApplied > 0
                 ? $"Applied {changesApplied} schedule changes"
-                : "No changes made";
+                : "Schedule closed";
 
             TolkHelper.Speak(message);
 
@@ -130,6 +159,9 @@ namespace RimWorldAccess
             copiedSchedule = null;
             pendingChanges.Clear();
             originalSchedules.Clear();
+            currentColumn = ScheduleColumnMode.Schedule;
+            availableAreas.Clear();
+            selectedAreaIndex = 0;
         }
 
         /// <summary>
@@ -137,6 +169,9 @@ namespace RimWorldAccess
         /// </summary>
         public static void Cancel()
         {
+            // Check if there are pending changes to revert
+            bool hadPendingChanges = pendingChanges.Count > 0;
+
             // Revert all changes back to original
             foreach (var pawnOriginal in originalSchedules)
             {
@@ -151,7 +186,14 @@ namespace RimWorldAccess
                 }
             }
 
-            TolkHelper.Speak("Schedule changes cancelled");
+            if (hadPendingChanges)
+            {
+                TolkHelper.Speak("Schedule changes cancelled");
+            }
+            else
+            {
+                TolkHelper.Speak("Schedule changes saved");
+            }
 
             // Close and cleanup
             isActive = false;
@@ -162,7 +204,515 @@ namespace RimWorldAccess
             copiedSchedule = null;
             pendingChanges.Clear();
             originalSchedules.Clear();
+            currentColumn = ScheduleColumnMode.Schedule;
+            availableAreas.Clear();
+            selectedAreaIndex = 0;
         }
+
+        // ===== Column switching methods =====
+
+        /// <summary>
+        /// Switches to the next column (Schedule -> Areas -> Schedule).
+        /// </summary>
+        public static void SwitchToNextColumn()
+        {
+            currentColumn = currentColumn == ScheduleColumnMode.Schedule
+                ? ScheduleColumnMode.Areas
+                : ScheduleColumnMode.Schedule;
+
+            if (currentColumn == ScheduleColumnMode.Areas)
+            {
+                LoadAvailableAreas();
+                SyncAreaIndexToCurrentPawn();
+            }
+
+            AnnounceColumnSwitch();
+        }
+
+        /// <summary>
+        /// Switches to the previous column (Areas -> Schedule -> Areas).
+        /// </summary>
+        public static void SwitchToPreviousColumn()
+        {
+            SwitchToNextColumn();  // Only 2 columns, so same as next
+        }
+
+        /// <summary>
+        /// Loads available areas from the current map's area manager.
+        /// Order: ManageAreasSentinel, null (Unrestricted), then Area objects
+        /// </summary>
+        private static void LoadAvailableAreas()
+        {
+            availableAreas.Clear();
+            availableAreas.Add(ManageAreasSentinel);  // "Manage Areas" is first
+            availableAreas.Add(null);  // "Unrestricted" is null (second)
+
+            if (Find.CurrentMap?.areaManager != null)
+            {
+                var areas = Find.CurrentMap.areaManager.AllAreas
+                    .Where(a => a.AssignableAsAllowed());
+                availableAreas.AddRange(areas);
+            }
+        }
+
+        /// <summary>
+        /// Syncs selectedAreaIndex to match current pawn's assigned area.
+        /// Finds the area in availableAreas (skipping ManageAreasSentinel at index 0).
+        /// </summary>
+        private static void SyncAreaIndexToCurrentPawn()
+        {
+            if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+                return;
+
+            Pawn pawn = pawns[selectedPawnIndex];
+            Area currentArea = pawn.playerSettings?.AreaRestrictionInPawnCurrentMap;
+
+            // Find the area in our list (null = Unrestricted at index 1, areas start at index 2)
+            if (currentArea == null)
+            {
+                selectedAreaIndex = UnrestrictedIndex;  // Unrestricted
+            }
+            else
+            {
+                int index = availableAreas.IndexOf(currentArea);
+                selectedAreaIndex = index >= 0 ? index : UnrestrictedIndex;
+            }
+        }
+
+        /// <summary>
+        /// Announces column switch.
+        /// </summary>
+        private static void AnnounceColumnSwitch()
+        {
+            if (currentColumn == ScheduleColumnMode.Schedule)
+            {
+                TolkHelper.Speak("Schedule column");
+                UpdateClipboard();
+            }
+            else
+            {
+                SyncAreaIndexToCurrentPawn();
+                if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+                {
+                    TolkHelper.Speak("Allowed Areas column. No pawns available");
+                    return;
+                }
+
+                Pawn pawn = pawns[selectedPawnIndex];
+
+                // Get the actual assigned area name (synced to pawn's playerSettings)
+                string areaName;
+                if (selectedAreaIndex >= 0 && selectedAreaIndex < availableAreas.Count)
+                {
+                    object focused = availableAreas[selectedAreaIndex];
+                    if (focused == ManageAreasSentinel)
+                    {
+                        areaName = "Manage Areas";
+                    }
+                    else if (focused == null)
+                    {
+                        areaName = "Unrestricted";
+                    }
+                    else if (focused is Area area)
+                    {
+                        areaName = area.Label;
+                    }
+                    else
+                    {
+                        areaName = "Unrestricted";
+                    }
+                }
+                else
+                {
+                    areaName = "Unrestricted";
+                }
+
+                string pawnPos = MenuHelper.FormatPosition(selectedPawnIndex, pawns.Count);
+                string areaPos = MenuHelper.FormatPosition(selectedAreaIndex, availableAreas.Count);
+                TolkHelper.Speak($"Allowed Areas column. {pawn.LabelShort}: {areaName}. Pawn {pawnPos}, Area {areaPos}");
+            }
+        }
+
+        // ===== Area column navigation methods =====
+
+        /// <summary>
+        /// Returns true if currently focused on "Manage Areas" option.
+        /// </summary>
+        public static bool IsOnManageAreas()
+        {
+            return currentColumn == ScheduleColumnMode.Areas && selectedAreaIndex == ManageAreasIndex;
+        }
+
+        /// <summary>
+        /// Selects the next area focus (Right arrow in Areas column).
+        /// Does NOT apply the change - just moves focus. Use Enter to confirm.
+        /// </summary>
+        public static void SelectNextArea()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas || availableAreas.Count == 0)
+                return;
+
+            selectedAreaIndex = MenuHelper.SelectNext(selectedAreaIndex, availableAreas.Count);
+            AnnounceAreaFocus();
+        }
+
+        /// <summary>
+        /// Selects the previous area focus (Left arrow in Areas column).
+        /// Does NOT apply the change - just moves focus. Use Enter to confirm.
+        /// </summary>
+        public static void SelectPreviousArea()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas || availableAreas.Count == 0)
+                return;
+
+            selectedAreaIndex = MenuHelper.SelectPrevious(selectedAreaIndex, availableAreas.Count);
+            AnnounceAreaFocus();
+        }
+
+        /// <summary>
+        /// Announces the currently focused area (without applying).
+        /// </summary>
+        private static void AnnounceAreaFocus()
+        {
+            if (availableAreas.Count == 0 || selectedAreaIndex < 0 || selectedAreaIndex >= availableAreas.Count)
+                return;
+
+            object focused = availableAreas[selectedAreaIndex];
+            string areaName;
+
+            if (focused == ManageAreasSentinel)
+            {
+                areaName = "Manage Areas";
+            }
+            else if (focused == null)
+            {
+                areaName = "Unrestricted";
+            }
+            else if (focused is Area area)
+            {
+                areaName = area.Label;
+            }
+            else
+            {
+                areaName = "Unknown";
+            }
+
+            string position = MenuHelper.FormatPosition(selectedAreaIndex, availableAreas.Count);
+            TolkHelper.Speak($"{areaName}. {position}");
+        }
+
+        /// <summary>
+        /// Confirms the currently focused area selection (Enter key).
+        /// If on ManageAreas, opens WindowlessAreaState.
+        /// Otherwise applies the focused area to the current pawn.
+        /// </summary>
+        public static void ConfirmAreaSelection()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas)
+                return;
+
+            if (selectedAreaIndex == ManageAreasIndex)
+            {
+                OpenManageAreas();
+                return;
+            }
+
+            ApplyAreaToCurrentPawn();
+        }
+
+        /// <summary>
+        /// Opens the Manage Areas screen.
+        /// </summary>
+        public static void OpenManageAreas()
+        {
+            Map map = Find.CurrentMap;
+            if (map == null) return;
+
+            int savedPawnIndex = selectedPawnIndex;
+
+            // Callback that returns to Schedule when Manage Areas closes
+            Action returnToScheduleCallback = () => {
+                LoadAvailableAreas();
+                selectedAreaIndex = ManageAreasIndex;  // Back to "Manage Areas"
+                selectedPawnIndex = savedPawnIndex;
+                AnnounceAreaFocus();
+            };
+
+            // Callback for when returning from placement (Expand/Shrink)
+            // This reopens Manage Areas instead of going back to Schedule
+            Action reopenManageAreasCallback = () => {
+                // Deselect the designator since we're done with placement
+                Find.DesignatorManager?.Deselect();
+
+                if (map != null && Find.CurrentMap == map)
+                {
+                    // Reopen Manage Areas with the return-to-schedule callback
+                    WindowlessAreaState.Open(map, returnToScheduleCallback);
+                }
+                else
+                {
+                    // Map changed, just return to schedule
+                    returnToScheduleCallback();
+                }
+            };
+
+            WindowlessAreaState.Open(map, reopenManageAreasCallback);
+        }
+
+        /// <summary>
+        /// Cancels area focus change, resets to pawn's actual assigned area (Escape key).
+        /// </summary>
+        public static void CancelAreaSelection()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas)
+                return;
+
+            SyncAreaIndexToCurrentPawn();
+            TolkHelper.Speak("Area selection cancelled");
+            AnnounceAreaSelection();
+        }
+
+        /// <summary>
+        /// Applies the currently focused area to the current pawn.
+        /// Called on Enter key (not during navigation).
+        /// </summary>
+        private static void ApplyAreaToCurrentPawn()
+        {
+            if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+                return;
+
+            // Safety check: never apply ManageAreasSentinel
+            if (selectedAreaIndex == ManageAreasIndex)
+                return;
+
+            Pawn pawn = pawns[selectedPawnIndex];
+            if (pawn.playerSettings == null)
+                return;
+
+            object focused = availableAreas[selectedAreaIndex];
+            Area area = focused as Area;  // null if Unrestricted
+
+            pawn.playerSettings.AreaRestrictionInPawnCurrentMap = area;
+
+            string areaName = area?.Label ?? "Unrestricted";
+            string position = MenuHelper.FormatPosition(selectedAreaIndex, availableAreas.Count);
+            TolkHelper.Speak($"{pawn.LabelShort}: {areaName} applied. {position}");
+        }
+
+        /// <summary>
+        /// Applies the SOURCE pawn's ACTUAL assigned area to the pawn below and moves down.
+        /// Uses playerSettings (not focused selection) for safety when "Manage Areas" has focus.
+        /// </summary>
+        public static void ApplyAreaToPawnBelow()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas || pawns.Count <= 1)
+                return;
+
+            // Get the SOURCE pawn's ACTUAL assigned area (not the focused selection)
+            Pawn sourcePawn = pawns[selectedPawnIndex];
+            Area sourceArea = sourcePawn.playerSettings?.AreaRestrictionInPawnCurrentMap;
+
+            // Move to next pawn
+            selectedPawnIndex = MenuHelper.SelectNext(selectedPawnIndex, pawns.Count);
+
+            // Apply source pawn's area to target pawn
+            Pawn targetPawn = pawns[selectedPawnIndex];
+            if (targetPawn.playerSettings != null)
+            {
+                targetPawn.playerSettings.AreaRestrictionInPawnCurrentMap = sourceArea;
+            }
+
+            // Sync focus to match the applied area
+            SyncAreaIndexToCurrentPawn();
+
+            string areaName = sourceArea?.Label ?? "Unrestricted";
+            string pawnPosition = MenuHelper.FormatPosition(selectedPawnIndex, pawns.Count);
+            TolkHelper.Speak($"{targetPawn.LabelShort}: {areaName} applied. Pawn {pawnPosition}");
+        }
+
+        /// <summary>
+        /// Applies the SOURCE pawn's ACTUAL assigned area to the pawn above and moves up.
+        /// Uses playerSettings (not focused selection) for safety when "Manage Areas" has focus.
+        /// </summary>
+        public static void ApplyAreaToPawnAbove()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas || pawns.Count <= 1)
+                return;
+
+            // Get the SOURCE pawn's ACTUAL assigned area (not the focused selection)
+            Pawn sourcePawn = pawns[selectedPawnIndex];
+            Area sourceArea = sourcePawn.playerSettings?.AreaRestrictionInPawnCurrentMap;
+
+            // Move to previous pawn
+            selectedPawnIndex = MenuHelper.SelectPrevious(selectedPawnIndex, pawns.Count);
+
+            // Apply source pawn's area to target pawn
+            Pawn targetPawn = pawns[selectedPawnIndex];
+            if (targetPawn.playerSettings != null)
+            {
+                targetPawn.playerSettings.AreaRestrictionInPawnCurrentMap = sourceArea;
+            }
+
+            // Sync focus to match the applied area
+            SyncAreaIndexToCurrentPawn();
+
+            string areaName = sourceArea?.Label ?? "Unrestricted";
+            string pawnPosition = MenuHelper.FormatPosition(selectedPawnIndex, pawns.Count);
+            TolkHelper.Speak($"{targetPawn.LabelShort}: {areaName} applied. Pawn {pawnPosition}");
+        }
+
+        /// <summary>
+        /// Opens context menu with bulk area operations.
+        /// </summary>
+        public static void OpenAreaContextMenu()
+        {
+            if (currentColumn != ScheduleColumnMode.Areas)
+            {
+                TolkHelper.Speak("Context menu only available in Areas column");
+                return;
+            }
+
+            var options = new List<FloatMenuOption>
+            {
+                new FloatMenuOption("Set All to Home Area", () => SetAllToHomeArea()),
+                new FloatMenuOption("Clear All Allowed Areas", () => ClearAllAreas())
+            };
+
+            WindowlessFloatMenuState.Open(options, colonistOrders: false);
+        }
+
+        /// <summary>
+        /// Sets all pawns' allowed areas to Home.
+        /// </summary>
+        private static void SetAllToHomeArea()
+        {
+            Area homeArea = Find.CurrentMap?.areaManager?.Home;
+            if (homeArea == null)
+            {
+                TolkHelper.Speak("No home area defined");
+                return;
+            }
+
+            int count = 0;
+            foreach (var pawn in pawns)
+            {
+                if (pawn.playerSettings != null && pawn.playerSettings.SupportsAllowedAreas)
+                {
+                    pawn.playerSettings.AreaRestrictionInPawnCurrentMap = homeArea;
+                    count++;
+                }
+            }
+
+            // Update selection to match
+            selectedAreaIndex = availableAreas.IndexOf(homeArea);
+            if (selectedAreaIndex < 0) selectedAreaIndex = 0;
+
+            TolkHelper.Speak($"Set {count} pawns to Home area");
+        }
+
+        /// <summary>
+        /// Clears all pawns' allowed areas (sets to Unrestricted).
+        /// </summary>
+        private static void ClearAllAreas()
+        {
+            int count = 0;
+            foreach (var pawn in pawns)
+            {
+                if (pawn.playerSettings != null && pawn.playerSettings.SupportsAllowedAreas)
+                {
+                    pawn.playerSettings.AreaRestrictionInPawnCurrentMap = null;
+                    count++;
+                }
+            }
+
+            selectedAreaIndex = UnrestrictedIndex;  // Unrestricted is index 1
+
+            TolkHelper.Speak($"Cleared allowed areas for {count} pawns");
+        }
+
+        /// <summary>
+        /// Jumps to first pawn (for Areas column).
+        /// </summary>
+        public static void JumpToFirstPawn()
+        {
+            if (pawns.Count == 0) return;
+            selectedPawnIndex = 0;
+            if (currentColumn == ScheduleColumnMode.Areas)
+            {
+                SyncAreaIndexToCurrentPawn();
+                AnnounceAreaSelection();
+            }
+            else
+            {
+                UpdateClipboard();
+            }
+        }
+
+        /// <summary>
+        /// Jumps to last pawn (for Areas column).
+        /// </summary>
+        public static void JumpToLastPawn()
+        {
+            if (pawns.Count == 0) return;
+            selectedPawnIndex = pawns.Count - 1;
+            if (currentColumn == ScheduleColumnMode.Areas)
+            {
+                SyncAreaIndexToCurrentPawn();
+                AnnounceAreaSelection();
+            }
+            else
+            {
+                UpdateClipboard();
+            }
+        }
+
+        /// <summary>
+        /// Announces current area selection (pawn's actual assigned area and focus position).
+        /// </summary>
+        private static void AnnounceAreaSelection()
+        {
+            if (pawns.Count == 0 || selectedPawnIndex < 0 || selectedPawnIndex >= pawns.Count)
+            {
+                TolkHelper.Speak("No pawns available");
+                return;
+            }
+
+            Pawn pawn = pawns[selectedPawnIndex];
+
+            // Get focused area name
+            string focusedAreaName;
+            if (selectedAreaIndex >= 0 && selectedAreaIndex < availableAreas.Count)
+            {
+                object focused = availableAreas[selectedAreaIndex];
+                if (focused == ManageAreasSentinel)
+                {
+                    focusedAreaName = "Manage Areas";
+                }
+                else if (focused == null)
+                {
+                    focusedAreaName = "Unrestricted";
+                }
+                else if (focused is Area area)
+                {
+                    focusedAreaName = area.Label;
+                }
+                else
+                {
+                    focusedAreaName = "Unknown";
+                }
+            }
+            else
+            {
+                focusedAreaName = "Unrestricted";
+            }
+
+            string pawnPos = MenuHelper.FormatPosition(selectedPawnIndex, pawns.Count);
+            string areaPos = MenuHelper.FormatPosition(selectedAreaIndex, availableAreas.Count);
+
+            TolkHelper.Speak($"{pawn.LabelShort}: {focusedAreaName}. Pawn {pawnPos}, Area {areaPos}");
+        }
+
+        // ===== Original schedule navigation methods =====
 
         /// <summary>
         /// Moves selection up to previous pawn (wraps around).
@@ -173,7 +723,17 @@ namespace RimWorldAccess
                 return;
 
             selectedPawnIndex = MenuHelper.SelectPrevious(selectedPawnIndex, pawns.Count);
-            UpdateClipboard();
+
+            // After moving pawn, sync area index if in Areas column
+            if (currentColumn == ScheduleColumnMode.Areas)
+            {
+                SyncAreaIndexToCurrentPawn();
+                AnnounceAreaSelection();
+            }
+            else
+            {
+                UpdateClipboard();
+            }
         }
 
         /// <summary>
@@ -185,7 +745,17 @@ namespace RimWorldAccess
                 return;
 
             selectedPawnIndex = MenuHelper.SelectNext(selectedPawnIndex, pawns.Count);
-            UpdateClipboard();
+
+            // After moving pawn, sync area index if in Areas column
+            if (currentColumn == ScheduleColumnMode.Areas)
+            {
+                SyncAreaIndexToCurrentPawn();
+                AnnounceAreaSelection();
+            }
+            else
+            {
+                UpdateClipboard();
+            }
         }
 
         /// <summary>

@@ -158,48 +158,40 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Checks if a designator supports multi-cell designation (e.g., mining, plant cutting).
+        /// Gets the designator label with the "..." suffix stripped.
+        /// RimWorld adds "..." to labels when no material is selected (e.g., "wall...").
+        /// This suffix needs to be removed before pluralization to avoid "wall...s".
         /// </summary>
-        public static bool SupportsMultiCellDesignation(Designator designator)
+        /// <param name="designator">The designator to get the label from</param>
+        /// <param name="fallback">Fallback value if designator is null or label is empty</param>
+        /// <returns>The sanitized label without trailing "..."</returns>
+        public static string GetSanitizedLabel(Designator designator, string fallback = "Unknown")
         {
-            // Most cell-based designators support multiple cells
-            if (designator is Designator_Cells)
-                return true;
-
-            // Build designators can be placed on multiple cells if not a single-tile building
-            if (designator is Designator_Build buildDesignator)
+            string label = designator?.Label ?? fallback;
+            if (label.EndsWith("..."))
             {
-                // Buildings are typically placed one at a time
-                // But we can allow multiple placements in sequence
-                return false;
+                label = label.Substring(0, label.Length - 3);
             }
-
-            return false;
+            return label;
         }
 
         /// <summary>
-        /// Gets a user-friendly description of what a designator does.
+        /// Pluralizes a label while preserving parenthetical suffixes.
+        /// "sandstone grand stele (61%)" -> "sandstone grand steles (61%)"
         /// </summary>
-        public static string GetDesignatorDescription(Designator designator)
+        public static string PluralizePreservingParentheses(string label, int count)
         {
-            if (!string.IsNullOrEmpty(designator.Desc))
-                return designator.Desc;
+            if (string.IsNullOrEmpty(label) || count <= 1)
+                return label;
 
-            // Provide default descriptions for common designator types
-            if (designator is Designator_Mine)
-                return "Mine rock and minerals";
-            else if (designator is Designator_Build)
-                return "Construct buildings and structures";
-            else if (designator is Designator_PlantsHarvestWood)
-                return "Chop down trees for wood";
-            else if (designator is Designator_PlantsCut)
-                return "Cut plants";
-            else if (designator is Designator_Hunt)
-                return "Hunt animals for meat";
-            else if (designator is Designator_Tame)
-                return "Tame wild animals";
+            int parenIndex = label.IndexOf('(');
+            if (parenIndex <= 0)
+                return Find.ActiveLanguageWorker.Pluralize(label, count);
 
-            return designator.Label;
+            string baseNoun = label.Substring(0, parenIndex).TrimEnd();
+            string suffix = label.Substring(parenIndex);
+            string pluralNoun = Find.ActiveLanguageWorker.Pluralize(baseNoun, count);
+            return $"{pluralNoun} {suffix}";
         }
 
         /// <summary>
@@ -306,8 +298,8 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets extra information (cost and description) for a buildable.
-        /// Format: ": {cost} ({description})" matching tree view style.
+        /// Gets extra information (cost, skill requirement, and description) for a buildable.
+        /// Format: ": {cost}, requires Construction {level} ({description})" matching tree view style.
         /// </summary>
         private static string GetBuildableExtraInfo(BuildableDef buildable)
         {
@@ -315,22 +307,44 @@ namespace RimWorldAccess
                 return "";
 
             string costInfo = GetBriefCostInfo(buildable);
+            string skillInfo = GetSkillRequirement(buildable);
             string description = GetDescription(buildable);
 
-            // Build the formatted string: ": cost (description)"
-            if (!string.IsNullOrEmpty(costInfo) && !string.IsNullOrEmpty(description))
+            // Build list of info parts (cost, skill)
+            var infoParts = new List<string>();
+            if (!string.IsNullOrEmpty(costInfo))
+                infoParts.Add(costInfo);
+            if (!string.IsNullOrEmpty(skillInfo))
+                infoParts.Add(skillInfo);
+
+            string combinedInfo = string.Join(", ", infoParts);
+
+            // Build the formatted string: ": cost, skill (description)"
+            if (!string.IsNullOrEmpty(combinedInfo) && !string.IsNullOrEmpty(description))
             {
-                return $": {costInfo} ({description})";
+                return $": {combinedInfo} ({description})";
             }
-            else if (!string.IsNullOrEmpty(costInfo))
+            else if (!string.IsNullOrEmpty(combinedInfo))
             {
-                return $": {costInfo}";
+                return $": {combinedInfo}";
             }
             else if (!string.IsNullOrEmpty(description))
             {
                 return $" ({description})";
             }
 
+            return "";
+        }
+
+        /// <summary>
+        /// Gets the skill requirement for a buildable, if any.
+        /// </summary>
+        public static string GetSkillRequirement(BuildableDef buildable)
+        {
+            if (buildable is ThingDef thingDef && thingDef.constructionSkillPrerequisite > 0)
+            {
+                return $"requires Construction {thingDef.constructionSkillPrerequisite}";
+            }
             return "";
         }
 
@@ -368,33 +382,16 @@ namespace RimWorldAccess
         }
 
         /// <summary>
-        /// Gets skill requirements for a buildable as a formatted string.
+        /// Cleans up description text by removing newlines and collapsing whitespace.
         /// </summary>
-        private static string GetSkillRequirements(BuildableDef buildable)
+        private static string CleanupDescription(string description)
         {
-            if (buildable == null)
+            if (string.IsNullOrEmpty(description))
                 return "";
 
-            List<string> skillParts = new List<string>();
-
-            // Check construction skill requirement
-            if (buildable.constructionSkillPrerequisite > 0)
-            {
-                skillParts.Add($"Construction {buildable.constructionSkillPrerequisite}");
-            }
-
-            // Check artistic skill requirement
-            if (buildable.artisticSkillPrerequisite > 0)
-            {
-                skillParts.Add($"Artistic {buildable.artisticSkillPrerequisite}");
-            }
-
-            if (skillParts.Count > 0)
-            {
-                return "Skills: " + string.Join(", ", skillParts);
-            }
-
-            return "";
+            description = description.Replace("\n", " ").Replace("\r", " ");
+            description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
+            return description;
         }
 
         /// <summary>
@@ -404,18 +401,7 @@ namespace RimWorldAccess
         {
             if (buildable == null)
                 return "";
-
-            string description = buildable.description;
-            if (!string.IsNullOrEmpty(description))
-            {
-                // Clean up the description - remove newlines and excess whitespace
-                description = description.Replace("\n", " ").Replace("\r", " ");
-                description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
-
-                return description;
-            }
-
-            return "";
+            return CleanupDescription(buildable.description);
         }
 
         /// <summary>
@@ -425,18 +411,7 @@ namespace RimWorldAccess
         {
             if (designator == null)
                 return "";
-
-            string description = designator.Desc;
-            if (!string.IsNullOrEmpty(description))
-            {
-                // Clean up the description - remove newlines and excess whitespace
-                description = description.Replace("\n", " ").Replace("\r", " ");
-                description = System.Text.RegularExpressions.Regex.Replace(description, @"\s+", " ").Trim();
-
-                return description;
-            }
-
-            return "";
+            return CleanupDescription(designator.Desc);
         }
 
         /// <summary>

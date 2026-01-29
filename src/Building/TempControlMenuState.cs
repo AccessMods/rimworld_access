@@ -38,6 +38,7 @@ namespace RimWorldAccess
             building = targetBuilding;
             tempControl = comp;
             isActive = true;
+            MapNavigationState.SuppressMapNavigation = true;
 
             AnnounceCurrentSettings();
         }
@@ -50,6 +51,7 @@ namespace RimWorldAccess
             tempControl = null;
             building = null;
             isActive = false;
+            MapNavigationState.SuppressMapNavigation = false;
         }
 
         /// <summary>

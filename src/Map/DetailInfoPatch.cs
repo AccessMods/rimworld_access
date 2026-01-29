@@ -81,12 +81,16 @@ namespace RimWorldAccess
 
         /// <summary>
         /// Checks if any menu state is currently active to avoid key conflicts.
+        /// Note: ArchitectState and ZoneCreationState are NOT included here because
+        /// tile info keys (1-7) should work during placement modes.
         /// </summary>
         private static bool IsAnyMenuActive()
         {
-            return WorkMenuState.IsActive ||
-                   ArchitectState.IsActive ||
-                   ZoneCreationState.IsInCreationMode ||
+            return ScannerSearchState.IsActive ||
+                   GoToState.IsActive ||
+                   WorkMenuState.IsActive ||
+                   BillConfigState.IsActive ||
+                   BillsMenuState.IsActive ||
                    WindowlessFloatMenuState.IsActive ||
                    WindowlessPauseMenuState.IsActive ||
                    WindowlessSaveMenuState.IsActive ||

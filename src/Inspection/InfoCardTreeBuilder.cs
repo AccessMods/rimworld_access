@@ -42,6 +42,24 @@ namespace RimWorldAccess
                 AddChild(root, tabNode);
             }
 
+            // Add Actions tab if pawn has available actions (but not in modal contexts)
+            var thing = InfoCardDataExtractor.GetThing(dialog);
+            if (thing is Pawn pawn && CanPawnBeRenamed(pawn) && !IsInModalContext())
+            {
+                var actionsTab = new InspectionTreeItem
+                {
+                    Type = InspectionTreeItem.ItemType.Category,
+                    Label = "Actions",
+                    Data = pawn,
+                    IsExpandable = true,
+                    IsExpanded = false,
+                    IndentLevel = 0
+                };
+
+                actionsTab.OnActivate = () => BuildActionsTabChildren(actionsTab, pawn);
+                AddChild(root, actionsTab);
+            }
+
             return root;
         }
 
@@ -628,6 +646,73 @@ namespace RimWorldAccess
         {
             child.Parent = parent;
             parent.Children.Add(child);
+        }
+
+        /// <summary>
+        /// Determines if a pawn can be renamed by the player.
+        /// </summary>
+        private static bool CanPawnBeRenamed(Pawn pawn)
+        {
+            if (pawn == null) return false;
+
+            // Colonists and colony subhumans can be renamed
+            if (pawn.IsColonist || pawn.IsColonySubhuman) return true;
+
+            // Animals and mechs belonging to player can be renamed
+            if (pawn.Faction == Faction.OfPlayer &&
+                (pawn.RaceProps.Animal || pawn.RaceProps.IsMechanoid))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns true if we're in a context where opening additional dialogs would cause conflicts.
+        /// </summary>
+        private static bool IsInModalContext()
+        {
+            // Check for states that manage modal dialogs
+            if (CaravanFormationState.IsActive) return true;
+            if (SplitCaravanState.IsActive) return true;
+            if (TradeNavigationState.IsActive) return true;
+            if (TransportPodLoadingState.IsActive) return true;
+            if (RitualState.IsActive) return true;
+
+            return false;
+        }
+
+        #endregion
+
+        #region Actions Tab
+
+        /// <summary>
+        /// Builds children for the Actions tab.
+        /// </summary>
+        private static void BuildActionsTabChildren(InspectionTreeItem tabNode, Pawn pawn)
+        {
+            if (tabNode.Children.Count > 0) return; // Already built
+
+            // Add Rename action
+            var renameItem = new InspectionTreeItem
+            {
+                Type = InspectionTreeItem.ItemType.Action,
+                Label = "Rename",
+                Data = pawn,
+                IsExpandable = false,
+                IsExpanded = false,
+                IndentLevel = tabNode.IndentLevel + 1
+            };
+
+            renameItem.OnActivate = () =>
+            {
+                // Close Info Card before opening rename dialog
+                InfoCardState.CloseInfoCard();
+
+                // Open Dialog_NamePawn - DialogInterceptionPatch will make it accessible
+                Find.WindowStack.Add(pawn.NamePawnDialog());
+            };
+
+            AddChild(tabNode, renameItem);
         }
 
         #endregion
