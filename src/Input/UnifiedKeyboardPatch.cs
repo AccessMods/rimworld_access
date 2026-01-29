@@ -84,6 +84,12 @@ namespace RimWorldAccess
             if (key == KeyCode.None)
                 return;
 
+            // ===== PHASE 1: Test router in shadow mode =====
+            // This triggers lazy initialization and logs to verify the router is working
+            // In shadow mode, it logs but doesn't consume events (existing code continues to work)
+            var routerContext = new KeyboardInputContext(Event.current);
+            KeyboardInputRouter.ProcessInput(routerContext);
+
             // ===== PRIORITY -1: Block ALL keys if text input mode is active =====
             // Zone/storage rename needs to capture text input, so block everything here
             // TextInputCapturePatch will handle the input
