@@ -315,25 +315,8 @@ namespace RimWorldAccess
         public static string GetAnimalNameWithActivity(Pawn pawn)
         {
             string baseName = GetAnimalName(pawn);
-
-            // Add current activity if available
-            if (pawn.CurJob != null)
-            {
-                try
-                {
-                    string activity = pawn.CurJob.GetReport(pawn);
-                    if (!string.IsNullOrEmpty(activity))
-                    {
-                        return $"{baseName} - {activity}";
-                    }
-                }
-                catch
-                {
-                    // Job report can sometimes fail, just skip it
-                }
-            }
-
-            return baseName;
+            string activity = PawnHelper.GetPawnActivity(pawn);
+            return activity != null ? $"{baseName} - {activity}" : baseName;
         }
 
         public static string GetGender(Pawn pawn)

@@ -622,6 +622,9 @@ namespace RimWorldAccess
             accessSettings.Settings.Add(new CheckboxSetting("Announce Position",
                 () => RimWorldAccessMod_Settings.Settings?.AnnouncePosition ?? true,
                 v => { if (RimWorldAccessMod_Settings.Settings != null) RimWorldAccessMod_Settings.Settings.AnnouncePosition = v; }));
+            accessSettings.Settings.Add(new CheckboxSetting("Show Pawn Activity on Map",
+                () => RimWorldAccessMod_Settings.Settings?.ShowPawnActivityOnMap ?? true,
+                v => { if (RimWorldAccessMod_Settings.Settings != null) RimWorldAccessMod_Settings.Settings.ShowPawnActivityOnMap = v; }));
             categories.Add(accessSettings);
 
             // Mod Settings Category - list all mods that have settings

@@ -72,27 +72,16 @@ namespace RimWorldAccess
 
             bool addedSomething = false;
 
-            // Add individual pawns (most important)
-            foreach (var pawn in pawns.Take(3))
+            // Add pawns with optional activity grouping
+            if (pawns.Count > 0)
             {
-                if (addedSomething) sb.Append(", ");
-
-                sb.Append(pawn.LabelShort);
-
-                // Add suffix for hostile or trader pawns
-                string suffix = GetPawnSuffix(pawn);
-                if (!string.IsNullOrEmpty(suffix))
+                string pawnsText = FormatPawnsForTileSummary(pawns);
+                if (!string.IsNullOrEmpty(pawnsText))
                 {
-                    sb.Append(suffix);
+                    if (addedSomething) sb.Append(", ");
+                    sb.Append(pawnsText);
+                    addedSomething = true;
                 }
-
-                addedSomething = true;
-            }
-            if (pawns.Count > 3)
-            {
-                if (addedSomething) sb.Append(", ");
-                sb.Append($"and {pawns.Count - 3} more pawns");
-                addedSomething = true;
             }
 
             // Add buildings with cell-specific info, temperature info and transport pod info
@@ -921,6 +910,130 @@ namespace RimWorldAccess
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Formats a list of pawns for tile summary, optionally grouping by activity.
+        /// </summary>
+        private static string FormatPawnsForTileSummary(List<Pawn> pawns)
+        {
+            if (pawns == null || pawns.Count == 0)
+                return null;
+
+            bool showActivity = RimWorldAccessMod_Settings.Settings?.ShowPawnActivityOnMap ?? true;
+
+            if (!showActivity)
+            {
+                // Simple format without activity
+                return FormatPawnsSimple(pawns);
+            }
+
+            // Group pawns by activity for smarter display
+            return FormatPawnsWithActivityGrouping(pawns);
+        }
+
+        /// <summary>
+        /// Simple pawn formatting without activity (original behavior).
+        /// </summary>
+        private static string FormatPawnsSimple(List<Pawn> pawns)
+        {
+            var sb = new StringBuilder();
+            int limit = 3;
+
+            for (int i = 0; i < pawns.Count && i < limit; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(pawns[i].LabelShort);
+
+                string suffix = GetPawnSuffix(pawns[i]);
+                if (!string.IsNullOrEmpty(suffix))
+                    sb.Append(suffix);
+            }
+
+            if (pawns.Count > limit)
+            {
+                sb.Append($", and {pawns.Count - limit} more pawns");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formats pawns with activity grouping.
+        /// Pawns doing the same activity are grouped: "A and B (sleeping)"
+        /// </summary>
+        private static string FormatPawnsWithActivityGrouping(List<Pawn> pawns)
+        {
+            int limit = 5; // Allow more when showing activity since we're grouping
+            var pawnsToShow = pawns.Take(limit).ToList();
+
+            // Group pawns by activity (and special suffix like hostile/trader)
+            var groups = new List<(List<Pawn> pawns, string activity, string suffix)>();
+
+            foreach (var pawn in pawnsToShow)
+            {
+                string activity = PawnHelper.GetPawnActivity(pawn);
+                string suffix = GetPawnSuffix(pawn);
+
+                // Find existing group with same activity and suffix
+                var existingGroup = groups.FirstOrDefault(g => g.activity == activity && g.suffix == suffix);
+                if (existingGroup.pawns != null)
+                {
+                    existingGroup.pawns.Add(pawn);
+                }
+                else
+                {
+                    groups.Add((new List<Pawn> { pawn }, activity, suffix));
+                }
+            }
+
+            // Format each group
+            var parts = new List<string>();
+            foreach (var group in groups)
+            {
+                string names = FormatPawnNames(group.pawns);
+
+                // Build the display string
+                var groupText = new StringBuilder(names);
+
+                // Add suffix (hostile/trader) if present
+                if (!string.IsNullOrEmpty(group.suffix))
+                    groupText.Append(group.suffix);
+
+                // Add activity if present
+                if (!string.IsNullOrEmpty(group.activity))
+                    groupText.Append($" ({group.activity})");
+
+                parts.Add(groupText.ToString());
+            }
+
+            string result = string.Join(", ", parts);
+
+            if (pawns.Count > limit)
+            {
+                result += $", and {pawns.Count - limit} more pawns";
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Formats a list of pawn names with proper grammar.
+        /// 1 pawn: "Name"
+        /// 2 pawns: "Name1 and Name2"
+        /// 3+ pawns: "Name1, Name2, and Name3"
+        /// </summary>
+        private static string FormatPawnNames(List<Pawn> pawns)
+        {
+            if (pawns.Count == 1)
+                return pawns[0].LabelShort;
+
+            if (pawns.Count == 2)
+                return $"{pawns[0].LabelShort} and {pawns[1].LabelShort}";
+
+            // 3+: "A, B, and C"
+            var names = pawns.Select(p => p.LabelShort).ToList();
+            return string.Join(", ", names.Take(names.Count - 1)) + ", and " + names.Last();
         }
 
         /// <summary>
