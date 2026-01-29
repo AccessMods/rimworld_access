@@ -24,6 +24,14 @@ namespace RimWorldAccess
         /// </summary>
         private static void UpdateSuppressionFlag()
         {
+            // Don't suppress if placement mode is active - it needs arrow key navigation
+            // even if Schedule/Animals menu is technically still "active" in the background
+            if (ShapePlacementState.IsActive || ViewingModeState.IsActive)
+            {
+                MapNavigationState.SuppressMapNavigation = false;
+                return;
+            }
+
             // Suppress map navigation if ANY menu that uses arrow keys is active
             // Note: Scanner is NOT included here because it doesn't suppress map navigation
             MapNavigationState.SuppressMapNavigation =

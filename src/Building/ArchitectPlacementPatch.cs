@@ -634,19 +634,39 @@ namespace RimWorldAccess
                 {
                     TolkHelper.Speak("Placement cancelled");
                     ShapePlacementState.Reset();
-                    if (inArchitectMode)
+
+                    // Check if we need to return to a parent menu (Schedule/Animals → Manage Areas)
+                    if (WindowlessAreaState.HasPendingReturn)
+                    {
+                        WindowlessAreaState.CompletePendingReturn();
+                    }
+                    else if (inArchitectMode)
+                    {
                         ArchitectState.Reset();
+                    }
                     else
+                    {
                         Find.DesignatorManager.Deselect();
+                    }
                 }
             }
             else
             {
                 TolkHelper.Speak("Placement cancelled");
-                if (inArchitectMode)
+
+                // Check if we need to return to a parent menu (Schedule/Animals → Manage Areas)
+                if (WindowlessAreaState.HasPendingReturn)
+                {
+                    WindowlessAreaState.CompletePendingReturn();
+                }
+                else if (inArchitectMode)
+                {
                     ArchitectState.Cancel();
+                }
                 else
+                {
                     Find.DesignatorManager.Deselect();
+                }
             }
             return true;
         }

@@ -1005,7 +1005,8 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 2.4: Handle windowless area manager if active =====
-            if (WindowlessAreaState.IsActive)
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (WindowlessAreaState.IsActive && !WindowlessDialogState.IsActive)
             {
                 bool areaHandled = false;
                 var mode = WindowlessAreaState.CurrentMode;
@@ -1021,6 +1022,12 @@ namespace RimWorldAccess
                     else if (key == KeyCode.DownArrow)
                     {
                         WindowlessAreaState.SelectNextArea();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+                    {
+                        // Consume Left/Right to prevent them from reaching Schedule
+                        // Area list doesn't use horizontal navigation
                         areaHandled = true;
                     }
                     else if (key == KeyCode.RightBracket)
@@ -1077,6 +1084,12 @@ namespace RimWorldAccess
                     else if (key == KeyCode.End)
                     {
                         WindowlessAreaState.SelectLastAction();
+                        areaHandled = true;
+                    }
+                    else if (key == KeyCode.LeftArrow || key == KeyCode.RightArrow)
+                    {
+                        // Consume Left/Right to prevent them from reaching Schedule
+                        // Actions menu doesn't use horizontal navigation
                         areaHandled = true;
                     }
                     else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
@@ -1939,7 +1952,11 @@ namespace RimWorldAccess
 
             // ===== PRIORITY 4.55: Handle schedule menu if active =====
             // Skip if float menu is open (e.g., right bracket context menu in Areas column)
-            if (WindowlessScheduleState.IsActive && !WindowlessFloatMenuState.IsActive)
+            // Skip if placement mode is active (e.g., after Manage Areas → Expand Area)
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (WindowlessScheduleState.IsActive && !WindowlessFloatMenuState.IsActive &&
+                !ShapePlacementState.IsActive && !ViewingModeState.IsActive &&
+                !WindowlessDialogState.IsActive)
             {
                 bool handled = false;
                 bool shift = Event.current.shift;
@@ -2005,6 +2022,13 @@ namespace RimWorldAccess
                         WindowlessScheduleState.JumpToLastPawn();
                         handled = true;
                     }
+                    else if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
+                    {
+                        // Enter in Areas column: confirm selection or open Manage Areas
+                        WindowlessScheduleState.ConfirmAreaSelection();
+                        handled = true;
+                    }
+                    // Escape falls through to common handler which closes the menu
                 }
                 else
                 {
@@ -2582,7 +2606,10 @@ namespace RimWorldAccess
             }
 
             // ===== PRIORITY 4.74: Handle animals menu if active =====
-            if (AnimalsMenuState.IsActive)
+            // Skip if placement mode is active (e.g., after Manage Areas → Expand Area)
+            // Skip if dialog is active (e.g., Rename Area dialog)
+            if (AnimalsMenuState.IsActive && !ShapePlacementState.IsActive && !ViewingModeState.IsActive &&
+                !WindowlessDialogState.IsActive)
             {
                 bool handled = false;
                 var typeahead = AnimalsMenuState.Typeahead;

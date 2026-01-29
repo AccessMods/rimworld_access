@@ -19,6 +19,11 @@ namespace RimWorldAccess
         private static Map currentMap = null;
         private static Action onCloseCallback = null;
 
+        // Pending return callback - deferred when Expand/Shrink spawns placement mode
+        private static Action pendingReturnCallback = null;
+
+        public static bool HasPendingReturn => pendingReturnCallback != null;
+
         // Navigation state
         public enum NavigationMode
         {
@@ -113,6 +118,20 @@ namespace RimWorldAccess
             callback?.Invoke();
 
             TolkHelper.Speak("Area manager closed");
+        }
+
+        /// <summary>
+        /// Invokes and clears any pending return callback.
+        /// Called by ViewingModeState when placement completes or is cancelled.
+        /// </summary>
+        public static void CompletePendingReturn()
+        {
+            if (pendingReturnCallback != null)
+            {
+                var callback = pendingReturnCallback;
+                pendingReturnCallback = null;
+                callback.Invoke();
+            }
         }
 
         /// <summary>
@@ -303,7 +322,12 @@ namespace RimWorldAccess
             // Save reference before Close() clears it
             Area areaToExpand = selectedArea;
 
-            // Close the area manager UI
+            // DEFER the callback - don't fire it when Close() is called
+            // It will be invoked by ViewingModeState when placement completes
+            pendingReturnCallback = onCloseCallback;
+            onCloseCallback = null;  // Clear so Close() doesn't fire it
+
+            // Close the area manager UI (won't fire callback now)
             Close();
 
             // Set the area BEFORE selecting the designator
@@ -326,7 +350,12 @@ namespace RimWorldAccess
             // Save reference before Close() clears it
             Area areaToShrink = selectedArea;
 
-            // Close the area manager UI
+            // DEFER the callback - don't fire it when Close() is called
+            // It will be invoked by ViewingModeState when placement completes
+            pendingReturnCallback = onCloseCallback;
+            onCloseCallback = null;  // Clear so Close() doesn't fire it
+
+            // Close the area manager UI (won't fire callback now)
             Close();
 
             // Set the area BEFORE selecting the designator

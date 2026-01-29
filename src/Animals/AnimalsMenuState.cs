@@ -81,6 +81,10 @@ namespace RimWorldAccess
             activeSubmenu = SubmenuType.None;
             animalsList.Clear();
             tableHelper?.ClearSearch();
+
+            // Ensure any stale designator from area management is cleared
+            Find.DesignatorManager?.Deselect();
+
             SoundDefOf.TabClose.PlayOneShotOnCamera();
             TolkHelper.Speak("Animals menu closed");
         }
@@ -538,15 +542,19 @@ namespace RimWorldAccess
             AnnounceSubmenuOption();
         }
 
+        // Marker string for "Manage Areas" option in AllowedArea submenu
+        private const string ManageAreasMarker = "ManageAreas";
+
         private static void OpenAllowedAreaSubmenu(Pawn pawn)
         {
             List<Area> areas = AnimalsMenuHelper.GetAvailableAreas();
 
             submenuOptions.Clear();
-            submenuOptions.Add(null); // null = unrestricted
+            submenuOptions.Add(ManageAreasMarker);  // "Manage Areas" first
+            submenuOptions.Add(null); // null = unrestricted (second)
             submenuOptions.AddRange(areas.Cast<object>());
 
-            submenuSelectedIndex = 0;
+            submenuSelectedIndex = 1;  // Default to "Unrestricted", NOT "Manage Areas"
 
             // Find current area in list
             if (pawn.playerSettings?.AreaRestrictionInPawnCurrentMap != null)
@@ -555,7 +563,7 @@ namespace RimWorldAccess
                 {
                     if (areas[i] == pawn.playerSettings.AreaRestrictionInPawnCurrentMap)
                     {
-                        submenuSelectedIndex = i + 1;
+                        submenuSelectedIndex = i + 2;  // +2 for ManageAreas and null
                         break;
                     }
                 }
@@ -641,7 +649,11 @@ namespace RimWorldAccess
         /// </summary>
         private static string GetSubmenuOptionText(object option)
         {
-            if (option == null)
+            if (option is string s && s == ManageAreasMarker)
+            {
+                return "Manage Areas";
+            }
+            else if (option == null)
             {
                 return activeSubmenu == SubmenuType.Master ? "None" : "Unrestricted";
             }
@@ -734,26 +746,8 @@ namespace RimWorldAccess
         {
             if (submenuOptions.Count == 0) return;
 
-            string optionText = "Unknown";
-
             object selectedOption = submenuOptions[submenuSelectedIndex];
-
-            if (selectedOption == null)
-            {
-                optionText = activeSubmenu == SubmenuType.Master ? "None" : "Unrestricted";
-            }
-            else if (selectedOption is Pawn colonist)
-            {
-                optionText = colonist.LabelShort;
-            }
-            else if (selectedOption is Area area)
-            {
-                optionText = area.Label;
-            }
-            else if (selectedOption is MedicalCareCategory medCare)
-            {
-                optionText = medCare.GetLabel();
-            }
+            string optionText = GetSubmenuOptionText(selectedOption);
 
             string announcement = $"{optionText} ({MenuHelper.FormatPosition(submenuSelectedIndex, submenuOptions.Count)})";
             TolkHelper.Speak(announcement);
@@ -776,6 +770,48 @@ namespace RimWorldAccess
                     break;
 
                 case SubmenuType.AllowedArea:
+                    // Check if "Manage Areas" was selected
+                    if (selectedOption is string marker && marker == ManageAreasMarker)
+                    {
+                        int savedAnimalIndex = tableHelper.CurrentRowIndex;
+                        int savedColumn = tableHelper.CurrentColumnIndex;
+                        Map currentMap = Find.CurrentMap;
+                        CloseSubmenu();
+
+                        // Callback that returns to Animals submenu when Manage Areas closes
+                        Action returnToSubmenuCallback = () => {
+                            if (savedAnimalIndex < animalsList.Count)
+                            {
+                                tableHelper.CurrentRowIndex = savedAnimalIndex;
+                                tableHelper.CurrentColumnIndex = savedColumn;
+                                OpenAllowedAreaSubmenu(animalsList[savedAnimalIndex]);
+                                submenuSelectedIndex = 0;  // Manage Areas
+                                AnnounceSubmenuOption();
+                            }
+                        };
+
+                        // Callback for when returning from placement (Expand/Shrink)
+                        // This reopens Manage Areas instead of going back to submenu
+                        Action reopenManageAreasCallback = () => {
+                            // Deselect the designator since we're done with placement
+                            Find.DesignatorManager?.Deselect();
+
+                            if (currentMap != null && Find.CurrentMap == currentMap)
+                            {
+                                // Reopen Manage Areas with the return-to-submenu callback
+                                WindowlessAreaState.Open(currentMap, returnToSubmenuCallback);
+                            }
+                            else
+                            {
+                                // Map changed, just return to submenu
+                                returnToSubmenuCallback();
+                            }
+                        };
+
+                        WindowlessAreaState.Open(currentMap, reopenManageAreasCallback);
+                        return;  // Don't close submenu normally - it was already closed
+                    }
+
                     if (currentAnimal.playerSettings != null)
                     {
                         Area area = selectedOption as Area;

@@ -609,6 +609,12 @@ namespace RimWorldAccess
 
             Reset();
 
+            // Check if we need to return to a parent menu (Schedule/Animals)
+            if (WindowlessAreaState.HasPendingReturn)
+            {
+                WindowlessAreaState.CompletePendingReturn();
+            }
+
             // Also exit architect/placement mode entirely
             ShapePlacementState.Reset();
             ArchitectState.Reset();
@@ -896,6 +902,12 @@ namespace RimWorldAccess
                 ShapePlacementState.Reset();
                 GizmoZoneEditState.Reset();
 
+                // Check if we need to return to a parent menu (Schedule/Animals)
+                if (WindowlessAreaState.HasPendingReturn)
+                {
+                    WindowlessAreaState.CompletePendingReturn();
+                }
+
                 // ArchitectState.Reset() returns early if not in architect mode,
                 // so explicitly deselect the designator for gizmo mode
                 if (ArchitectState.CurrentMode == ArchitectMode.Inactive)
@@ -946,6 +958,12 @@ namespace RimWorldAccess
 
                     // Exit completely (don't restore cursor - keep it where user left it)
                     Reset();
+
+                    // Check if we need to return to a parent menu (Schedule/Animals)
+                    if (WindowlessAreaState.HasPendingReturn)
+                    {
+                        WindowlessAreaState.CompletePendingReturn();
+                    }
 
                     // Also exit architect/placement mode entirely
                     ShapePlacementState.Reset();
