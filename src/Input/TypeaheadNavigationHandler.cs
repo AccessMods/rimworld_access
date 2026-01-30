@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Verse;
 
 namespace RimWorldAccess
 {
@@ -73,6 +74,12 @@ namespace RimWorldAccess
         protected override bool OnSelectNext()
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - falling back to normal navigation");
+                NavigateNextNormal();
+                return true;
+            }
 
             // If search is active and has matches, navigate within matches
             if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
@@ -97,6 +104,12 @@ namespace RimWorldAccess
         protected override bool OnSelectPrevious()
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - falling back to normal navigation");
+                NavigatePreviousNormal();
+                return true;
+            }
 
             // If search is active and has matches, navigate within matches
             if (typeahead.HasActiveSearch && !typeahead.HasNoMatches)
@@ -121,6 +134,13 @@ namespace RimWorldAccess
         protected override bool OnGoBack()
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - closing menu directly");
+                CloseMenu();
+                NotifyRouterClosed();
+                return true;
+            }
 
             if (typeahead.HasActiveSearch)
             {
@@ -142,6 +162,11 @@ namespace RimWorldAccess
         protected override bool OnJumpToFirst()
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - skipping search clear");
+                return HandleJumpToFirst();
+            }
 
             // Clear search if active
             if (typeahead.HasActiveSearch)
@@ -159,6 +184,11 @@ namespace RimWorldAccess
         protected override bool OnJumpToLast()
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - skipping search clear");
+                return HandleJumpToLast();
+            }
 
             // Clear search if active
             if (typeahead.HasActiveSearch)
@@ -176,6 +206,11 @@ namespace RimWorldAccess
         protected override bool HandleCustomInput(KeyboardInputContext context)
         {
             var typeahead = GetTypeaheadHelper();
+            if (typeahead == null)
+            {
+                Log.Error($"[{GetType().Name}] GetTypeaheadHelper() returned null - typeahead disabled");
+                return HandleCustomTypeaheadInput(context);
+            }
 
             // Handle backspace
             if (context.Key == KeyCode.Backspace && typeahead.HasActiveSearch)

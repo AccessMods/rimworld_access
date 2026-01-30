@@ -30,6 +30,13 @@ namespace RimWorldAccess
         public static bool ShadowModeLoggingEnabled { get; set; } = true;
 
         /// <summary>
+        /// Conflict detection control (default: enabled).
+        /// When enabled, router detects and logs priority conflicts even in active mode.
+        /// Recommended to keep enabled in production to catch handler conflicts.
+        /// </summary>
+        public static bool ConflictDetectionEnabled { get; set; } = true;
+
+        /// <summary>
         /// Lazy initialization - discovers all IKeyboardInputHandler implementations via reflection.
         /// Called once on first ProcessInput call.
         /// </summary>
@@ -109,6 +116,12 @@ namespace RimWorldAccess
             if (allHandlers == null || allHandlers.Count == 0)
                 return false;
 
+            // Detect priority conflicts (independent of shadow mode)
+            if (ConflictDetectionEnabled)
+            {
+                DetectPriorityConflicts(context);
+            }
+
             // Shadow mode: log what would happen but don't consume events
             if (ShadowModeEnabled)
             {
@@ -120,9 +133,9 @@ namespace RimWorldAccess
             }
 
             // Active mode: actually route input
-            try
+            foreach (var handler in allHandlers)
             {
-                foreach (var handler in allHandlers)
+                try
                 {
                     if (!handler.IsActive)
                         continue;
@@ -132,19 +145,21 @@ namespace RimWorldAccess
                         return true; // Event consumed
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"[KeyboardInputRouter] Error processing input: {ex}");
+                catch (Exception ex)
+                {
+                    Log.Error($"[KeyboardInputRouter] Handler {handler.GetType().Name} threw exception: {ex}");
+                    // Continue to next handler instead of breaking entire input system
+                }
             }
 
             return false; // Event not consumed
         }
 
         /// <summary>
-        /// Log shadow mode execution and detect priority conflicts.
+        /// Detect priority conflicts among active handlers.
+        /// Runs independently of shadow mode so conflicts are caught in production.
         /// </summary>
-        private static void LogShadowModeExecution(KeyboardInputContext context)
+        private static void DetectPriorityConflicts(KeyboardInputContext context)
         {
             var activeHandlers = allHandlers.Where(h => h.IsActive).ToList();
 
@@ -155,9 +170,20 @@ namespace RimWorldAccess
             var priorityGroups = activeHandlers.GroupBy(h => h.Priority);
             foreach (var group in priorityGroups.Where(g => g.Count() > 1))
             {
-                Log.Warning($"[KeyboardInputRouter] PRIORITY CONFLICT at {group.Key}: " +
+                Log.Warning($"[KeyboardInputRouter] PRIORITY CONFLICT at {group.Key} for {context}: " +
                     string.Join(", ", group.Select(h => h.GetType().Name)));
             }
+        }
+
+        /// <summary>
+        /// Log shadow mode execution (shows which handlers would process the input).
+        /// </summary>
+        private static void LogShadowModeExecution(KeyboardInputContext context)
+        {
+            var activeHandlers = allHandlers.Where(h => h.IsActive).ToList();
+
+            if (activeHandlers.Count == 0)
+                return;
 
             // Log execution order
             Log.Message($"[KeyboardInputRouter] Active handlers for {context}: " +
