@@ -85,6 +85,12 @@
     <Message Text="--- Mod deployed successfully ---" Importance="high" />
   </Target>
 
+  <!-- Build the MarkdownConverter tool before creating release package -->
+  <Target Name="BuildMarkdownConverter" BeforeTargets="Release" Condition="'$(Configuration)' == 'Release'">
+    <Message Text="--- Building MarkdownConverter tool ---" Importance="high" />
+    <Exec Command="dotnet build &quot;$(ProjectDir)tools\MarkdownConverter\MarkdownConverter.csproj&quot; -c Release" />
+  </Target>
+
   <!-- Release target -->
   <Target Name="Release" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Message Text="--- Creating Release Package ---" Importance="high" />
@@ -119,10 +125,10 @@
       DestinationFolder="$(ReleaseFolderPath)"
     />
 
-    <!-- Copy README.md to release folder -->
-    <Copy
-      SourceFiles="$(ProjectDir)README.md"
-      DestinationFolder="$(ReleaseFolderPath)"
+    <!-- Convert README.md to HTML using MarkdownConverter tool -->
+    <Message Text="Converting README.md to HTML..." Importance="high" Condition="Exists('$(ProjectDir)README.md')" />
+    <Exec
+      Command="&quot;$(ProjectDir)tools\MarkdownConverter\bin\Release\net472\MarkdownConverter.exe&quot; &quot;$(ProjectDir)README.md&quot; &quot;$(ReleaseFolderPath)README.html&quot;"
       Condition="Exists('$(ProjectDir)README.md')"
     />
 
